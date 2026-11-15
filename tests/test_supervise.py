@@ -186,3 +186,93 @@ def test_a_child_starts_while_the_parents_stdin_pipe_is_being_read(monkeypatch):
         os.write(w, b"x")
         os.dup2(saved, 0)
         os.close(saved); os.close(r); os.close(w)
+
+
+# A child that answers /health, then writes a fatal dump to the err log and
+# HANGS without exiting -- 2026-11-14 19:55, two chat turns on one gpt4all
+# model: "Windows fatal exception: access violation", then nine minutes in
+# teardown, one thread, no CPU, no answer, nothing restarted it.
+def _dies_without_exiting(port, err, *, busy=False):
+    body = (
+        "import http.server, threading, time, sys\n"
+        "class H(http.server.BaseHTTPRequestHandler):\n"
+        "    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b'ok')\n"
+        "    def log_message(self, *a): pass\n"
+        "srv = http.server.ThreadingHTTPServer(('127.0.0.1', %d), H)\n"
+        "threading.Thread(target=srv.serve_forever, daemon=True).start()\n"
+        "time.sleep(3)\n"
+        "open(%r, 'a').write('Windows fatal exception: access violation. Current thread 0x1 (most recent call first)')\n"
+        "%s\n"
+        "t = time.time()\n"
+        "while time.time() - t < 40:\n"
+        "    %s\n"
+    ) % (port, str(err), "pass" if busy else "srv.shutdown(); srv.server_close()",
+         "sum(range(20000))" if busy else "time.sleep(0.5)")
+    return [sys.executable, "-c", body]
+
+
+def _free_port():
+    import socket
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close()
+    return p
+
+
+def test_a_worker_that_died_without_exiting_is_killed_and_logged(tmp_path, monkeypatch):
+    import domvec.obsidian.supervise as sv
+    monkeypatch.setattr(sv, "FATAL_GRACE_S", 3.0)
+    monkeypatch.setattr(sv, "BURST", 1)
+    port = _free_port()
+    t0 = time.time()
+    code = sv.supervise(tmp_path, ["--port", str(port)],
+                        command=_dies_without_exiting(port, tmp_path / "sidecar.err.log"), pause=0.0)
+    assert code == sv.HUNG_CODE
+    assert time.time() - t0 < 25                     # killed, not waited out (40 s)
+    assert "died without exiting" in (tmp_path / "crashes.log").read_text(encoding="utf-8")
+    assert sv.WORKER["fatal_at"] is not None and sv.WORKER["unkillable_at"] is None
+
+
+def test_planted_no_fatal_watch_waits_the_hang_out(tmp_path, monkeypatch):
+    """Non-vacuity: without the watch the same child runs its full 40 s."""
+    import domvec.obsidian.supervise as sv
+    monkeypatch.setattr(sv, "FATAL_GRACE_S", 3.0)
+    monkeypatch.setenv("DOMVEC_PLANT_NO_FATAL_WATCH", "1")
+    monkeypatch.setattr(sv, "EARLY_S", 600.0)        # the early-stall rule is another watch
+    port = _free_port()
+    t0 = time.time()
+    code = sv.supervise(tmp_path, ["--port", str(port)],
+                        command=_dies_without_exiting(port, tmp_path / "sidecar.err.log"), pause=0.0)
+    assert code == 0 and time.time() - t0 >= 40
+
+
+def test_a_fatal_mark_from_a_worker_that_still_answers_is_left_alone(tmp_path, monkeypatch):
+    """A handled exception faulthandler reported anyway: the worker still
+    answers /health and spends CPU, so it is NOT killed (a busy worker read as
+    dead is the opposite defect, and the one this harness has made before)."""
+    import domvec.obsidian.supervise as sv
+    monkeypatch.setattr(sv, "FATAL_GRACE_S", 3.0)
+    port = _free_port()
+    t0 = time.time()
+    code = sv.supervise(tmp_path, ["--port", str(port)],
+                        command=_dies_without_exiting(port, tmp_path / "sidecar.err.log", busy=True), pause=0.0)
+    assert code == 0 and time.time() - t0 >= 40
+
+
+def test_the_front_reports_a_worker_that_died_as_dead_not_busy(monkeypatch):
+    """2026-11-14: the front answered `ok: true, backend: busy` for twenty
+    minutes over a worker that had crashed and could not exit. Once the
+    supervisor has seen the fatal dump and the worker has not answered since,
+    the front says `dead`; planted (`DOMVEC_PLANT_NO_FATAL_WATCH=1`) it says
+    busy, as before. A worker that answered AFTER the mark stays up."""
+    import domvec.obsidian.supervise as sv
+    from domvec.obsidian.front import _State, health_body
+    st = _State(1, {})
+    st.health, st.health_at, st.backend = {"ok": True, "pages": 3}, time.time() - 1200, "busy"
+    monkeypatch.setitem(sv.WORKER, "fatal_at", time.time() - 1100)
+    monkeypatch.setitem(sv.WORKER, "unkillable_at", time.time() - 1000)
+    dead = health_body(st)
+    assert dead["backend"] == "dead" and dead["ok"] is False and dead["worker"]["unkillable"] is True
+    monkeypatch.setenv("DOMVEC_PLANT_NO_FATAL_WATCH", "1")
+    assert health_body(st)["backend"] == "busy"
+    monkeypatch.delenv("DOMVEC_PLANT_NO_FATAL_WATCH")
+    st.health_at, st.backend = time.time(), "up"            # it answered since: a handled exception
+    assert health_body(st)["backend"] == "up"

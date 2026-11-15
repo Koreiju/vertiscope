@@ -409,7 +409,30 @@ Open (not started this session):
   code artifacts; the empty-cell hyperlink chain.
 - Cell hierarchies / black-box unfolding for code, markdown and notebook
   cells as ego states (persisted alongside the game state).
-- Chat cells: several-minute latency; prompt/response cells hard-linked
-  in sequence; context control.
+- Chat cells: prompt/response cells hard-linked in sequence; context
+  control. **Latency, measured 2026-11-14** (`/profile` -> `chat_stream`,
+  which now records `first_ms`, `tok_s`, `waited_ms`, `in_flight`,
+  `loaded_on` and the process's VRAM view):
+  - A FRESH worker: 45 tokens/s on CUDA, 0.25 s to the first token, 2.5 s
+    for the cold load. The model and its 8,192-token KV cache take 5.4 GB
+    and leave 1,052 MB of the 8 GB card.
+  - A LONG-RUNNING worker: 0.6-1.3 tokens/s and 39-43 s to the first token,
+    at 100% GPU. Not yet explained: VRAM spill was the first guess, but
+    torch held 2 MB when measured; the worker also held 23.3 GB private
+    with 1.1 GB of 31.6 free and the machine paging (~450 pages/s).
+  - CRASH: two turns on the one gpt4all model at once -> "Windows fatal
+    exception: access violation" in `prompt_model`. FIXED: `chat.GEN_LOCK`
+    serializes every generation on the shared model (a second turn waits,
+    never refused). Not yet live-confirmed: the worker could not be brought
+    back (below).
+  - The crashed worker NEVER EXITED: nine minutes in teardown, then even
+    TerminateProcess left it holding its port, 565 handles, 23 GB of RAM
+    and 7.9 GB of VRAM -- a kernel rundown stuck in a driver. Nothing
+    noticed: the supervisor stopped watching a child once it was healthy,
+    and the front answered `ok: true, backend: busy` from its cache. FIXED
+    in code (`supervise.py`: a fatal dump + no /health + no CPU for 20 s ->
+    killed, bounded wait, logged as unkillable; `front.health_body` says
+    `backend: dead`), tested with planted arms; the RUNNING supervisor is
+    the old code until it restarts.
 - Scanning and streaming to the 3D graph: still slow.
 - Lag between node form and panel form.

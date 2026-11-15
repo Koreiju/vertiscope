@@ -33,6 +33,7 @@ import os
 import sys
 import re
 import threading
+from contextlib import nullcontext
 from pathlib import Path
 from collections import deque
 import time
@@ -935,6 +936,34 @@ def _profile(kind: str, record: Dict) -> None:
         ring.append(record)
     except Exception:                               # noqa: BLE001
         pass
+
+def _vram(release: bool = False) -> Dict:
+    """This process's view of the GPU, for the chat profile (PLUGIN_GOAL 159:
+    "the latency is honestly several minutes"). The chat model, the embedder
+    and torch's parametric UMAP share one 8 GB card in this one process; the
+    model and its 8,192-token KV cache took 5.4 GB and left 1,052 MB free
+    (2026-11-14). A fresh worker answered at 45 tokens/s, 0.25 s to the first
+    token; a long-running one at 0.6-1.3 tokens/s and 39-43 s to the first,
+    at 100% GPU. The slow state is NOT yet explained: VRAM spill was the
+    first guess and torch held 2 MB when measured. `release` returns torch's
+    CACHED blocks to the driver before a turn; its arm
+    (`keep_torch_cache`) has not yet discriminated anything.
+    Never imports torch: absent, there is nothing of torch's to report."""
+    t = sys.modules.get("torch")
+    try:
+        if t is None or not t.cuda.is_available():
+            return {}
+        mb = lambda b: round(b / 1048576)
+        out = {"torch_reserved_mb": mb(t.cuda.memory_reserved()), "torch_alloc_mb": mb(t.cuda.memory_allocated())}
+        if release:
+            t.cuda.empty_cache()
+            out["released_mb"] = out["torch_reserved_mb"] - mb(t.cuda.memory_reserved())
+        free, total = t.cuda.mem_get_info()
+        out["free_mb"] = mb(free); out["total_mb"] = mb(total)
+        return out
+    except Exception as exc:                        # noqa: BLE001
+        return {"error": str(exc)[:120]}
+
 
 #: The background embedder, started by `serve()` when a workspace has an
 #: embedder to run. One thread, not a pool: the encoder is the bottleneck and
@@ -3056,12 +3085,11 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             context = [str(c) for c in (body.get("context") or []) if str(c).strip()]
             from .. import chat as _chat
-            with _chat._GLOBAL:
-                if _chat._BACKEND[0] is None:
-                    _chat._BACKEND[0] = _chat.HermesBackend()
-                be = _chat._BACKEND[0]
-                be.close()
-                _chat._ACTIVE[0] = ""
+            # `dry_ms`: the turn without the model -- a token a tick for that
+            # long -- so the live check can put two turns in flight with the
+            # lock planted away and not take the worker down with them.
+            dry_ms = float(body.get("dry_ms") or 0)
+            unlocked = bool(body.get("plant_unlocked")) and dry_ms > 0
             NL = chr(10)
             text = ("Context, the cells beside this one:" + NL + NL + (NL + NL + "---" + NL + NL).join(context) + NL + NL if context else "") + prompt
             self.send_response(200)
@@ -3070,18 +3098,55 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Connection", "close")
             self.end_headers()
-            t0 = time.time(); n = 0
-            try:
-                m = be._load()
-                with m.chat_session(_chat.SYSTEM, _chat.TEMPLATE):
-                    for tok in m.generate(text, max_tokens=int(body.get("max_tokens") or 400), temp=0.3, streaming=True):
-                        self.wfile.write(str(tok).encode("utf-8")); self.wfile.flush(); n += 1
-            except Exception as exc:                # noqa: BLE001
+            t_ask = time.time()
+            lock = nullcontext() if unlocked else _chat.GEN_LOCK
+            with lock:
+                waited_ms = round((time.time() - t_ask) * 1000)
+                be = None
+                with _chat._GLOBAL:
+                    if _chat._BACKEND[0] is None and not dry_ms:
+                        _chat._BACKEND[0] = _chat.HermesBackend()
+                    be = _chat._BACKEND[0]
+                    if be is not None and not dry_ms:
+                        be.close()
+                        _chat._ACTIVE[0] = ""
+                # Planted `keep_torch_cache`: torch's cache is left reserved, as
+                # before -- the arm that shows what releasing it bought.
+                keep = bool(body.get("keep_torch_cache"))
+                vram_before = _vram(release=not keep and not dry_ms)
+                _chat.IN_FLIGHT["now"] += 1
+                in_flight = _chat.IN_FLIGHT["now"]
+                _chat.IN_FLIGHT["peak"] = max(_chat.IN_FLIGHT["peak"], in_flight)
+                t0 = time.time(); n = 0; t_first = 0.0
                 try:
-                    self.wfile.write((chr(10) + "[error: %s]" % exc).encode("utf-8"))
-                except Exception:                   # noqa: BLE001
-                    pass
-            _profile("chat_stream", {"tokens": n, "context": len(context), "ms": round((time.time() - t0) * 1000)})
+                    if dry_ms:
+                        while (time.time() - t0) * 1000 < dry_ms:
+                            if not n:
+                                t_first = time.time()
+                            self.wfile.write(b"."); self.wfile.flush(); n += 1
+                            time.sleep(0.05)
+                    else:
+                        m = be._load()
+                        with m.chat_session(_chat.SYSTEM, _chat.TEMPLATE):
+                            for tok in m.generate(text, max_tokens=int(body.get("max_tokens") or 400), temp=0.3, streaming=True):
+                                if not n:
+                                    t_first = time.time()
+                                self.wfile.write(str(tok).encode("utf-8")); self.wfile.flush(); n += 1
+                except Exception as exc:                # noqa: BLE001
+                    try:
+                        self.wfile.write((chr(10) + "[error: %s]" % exc).encode("utf-8"))
+                    except Exception:                   # noqa: BLE001
+                        pass
+                finally:
+                    _chat.IN_FLIGHT["now"] -= 1
+            # Where the model ran, the time to its first token, and how long
+            # this turn queued behind another (PLUGIN_GOAL 159, "several minutes").
+            _profile("chat_stream", {"tokens": n, "context": len(context), "ms": round((time.time() - t0) * 1000),
+                                     "first_ms": round((t_first - t0) * 1000) if t_first else None,
+                                     "waited_ms": waited_ms, "in_flight": in_flight, "dry": bool(dry_ms), "unlocked": unlocked,
+                                     "loaded_on": getattr(be, "loaded_on", "") if be is not None else "", "prompt_chars": len(text),
+                                     "tok_s": round(n / max(1e-3, time.time() - t_first), 2) if t_first and n > 1 else None,
+                                     "kept_torch_cache": keep, "vram_before": vram_before, "vram_after": _vram()})
             self.close_connection = True
             return
 

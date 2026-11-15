@@ -65,6 +65,28 @@ def _poll(state: _State, stop: threading.Event, every: float = 3.0) -> None:
         stop.wait(every)
 
 
+def health_body(state: _State) -> Dict:
+    """The /health the front answers: the worker's last, marked with what the
+    front knows now. `backend: dead` when the supervisor has seen the worker's
+    fatal dump (`supervise.WORKER`) and the worker has not answered since --
+    a cached `ok` from before the crash otherwise read "busy" for twenty
+    minutes (2026-11-14). Planted `DOMVEC_PLANT_NO_FATAL_WATCH=1`: as before."""
+    body = dict(state.health or {"ok": True})
+    backend = state.backend
+    from . import supervise as _sv
+    w = dict(_sv.WORKER)
+    fatal_at = w.get("fatal_at")
+    if fatal_at and backend != "up" and state.health_at <= fatal_at and os.environ.get("DOMVEC_PLANT_NO_FATAL_WATCH") != "1":
+        backend = "dead"
+        body["ok"] = False
+        body["worker"] = {"pid": w.get("pid"), "fatal_s_ago": round(time.time() - fatal_at, 1),
+                          "unkillable": bool(w.get("unkillable_at"))}
+    body.update({"backend": backend, "front": True,
+                 "front_age_s": round(time.time() - state.health_at, 1) if state.health_at else None,
+                 "launch": state.launch})
+    return body
+
+
 def _handler(state: _State):
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -84,11 +106,7 @@ def _handler(state: _State):
         def _proxy(self) -> None:
             if self.path.split("?", 1)[0].rstrip("/") in ("", "/health") and self.command == "GET":
                 state.stats["health_served"] += 1
-                body = dict(state.health or {"ok": True})
-                body.update({"backend": state.backend, "front": True,
-                             "front_age_s": round(time.time() - state.health_at, 1) if state.health_at else None,
-                             "launch": state.launch})
-                self._json(200, body)
+                self._json(200, health_body(state))
                 return
             n = int(self.headers.get("Content-Length") or 0)
             data = self.rfile.read(n) if n else None

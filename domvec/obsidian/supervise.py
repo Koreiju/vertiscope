@@ -70,6 +70,61 @@ EARLY_CPU_S = 0.5
 #: seeing that and no sidecar, starts a fresh supervisor.
 GIVE_UP_STALLS = 3
 
+#: A worker that DIED BUT DID NOT EXIT (2026-11-14 19:55): two chat turns
+#: generated on one gpt4all model at once, faulthandler wrote "Windows fatal
+#: exception: access violation" and the thread dumps to the err log -- and
+#: the process then sat in its teardown for nine minutes, one thread, no CPU,
+#: no answer on its port, 23 GB still mapped, while the front answered
+#: /health from its cache. Once a child had answered /health once this loop
+#: stopped looking at it, so nothing restarted it. Now: a fatal dump in the
+#: log the child writes, AND no /health, AND no CPU for `FATAL_GRACE_S` --
+#: all three, so a busy worker (which answers, or spends CPU) is never read
+#: as dead. Planted `DOMVEC_PLANT_NO_FATAL_WATCH=1`.
+HUNG_CODE = 71
+FATAL_GRACE_S = float(os.environ.get("DOMVEC_FATAL_GRACE_S") or 20.0)
+FATAL_MARKS = ("Fatal Python error:", "Windows fatal exception:", "Segmentation fault")
+#: The current worker as the front reports it: when a fatal dump was seen
+#: and whether a kill could not end the process. The 19:55 worker read as
+#: "busy" for twenty minutes; with this it reads "dead". A kill that does not
+#: finish in `KILL_WAIT_S` is a process the KERNEL is holding (its rundown
+#: stuck in a driver -- that one kept its sockets, 565 handles and 23 GB after
+#: TerminateProcess): it is logged as unkillable and this loop goes on rather
+#: than waiting on it forever.
+WORKER = {"pid": None, "fatal_at": None, "unkillable_at": None}
+KILL_WAIT_S = float(os.environ.get("DOMVEC_KILL_WAIT_S") or 30.0)
+
+
+class _FatalWatch:
+    """New text in the child's err log, scanned for a fatal dump. Reads only
+    what was appended since the child started, and only when the file grew."""
+
+    def __init__(self, path: Optional[Path]):
+        self.path = path
+        self.at = self._size()
+        self.seen: Optional[float] = None
+
+    def _size(self) -> int:
+        try:
+            return self.path.stat().st_size if self.path is not None else 0
+        except OSError:
+            return 0
+
+    def poll(self) -> Optional[float]:
+        if self.path is None or self.seen is not None:
+            return self.seen
+        size = self._size()
+        if size > self.at:
+            try:
+                with self.path.open("rb") as fh:
+                    fh.seek(max(0, self.at - 64))      # a mark split across two polls
+                    text = fh.read(size - self.at + 64).decode("utf-8", "replace")
+            except OSError:
+                return None
+            self.at = size
+            if any(m in text for m in FATAL_MARKS):
+                self.seen = time.time()
+        return self.seen
+
 
 def _port_of(args: List[str]) -> Optional[int]:
     for i, a in enumerate(args):
@@ -91,7 +146,8 @@ def _healthy(port: int) -> bool:
 
 
 def _run_child(command: List[str], env: dict, port: Optional[int], *,
-               capture: bool = False, timeout: Optional[float] = None):
+               capture: bool = False, timeout: Optional[float] = None,
+               fatal_log: Optional[Path] = None):
     """The child, run to its exit -- or killed as a STALLED start (early: no
     CPU to speak of after `EARLY_S`; late: no /health in `START_DEADLINE_S`
     and no CPU for `START_STALL_S`). With `capture`, (code, stdout)."""
@@ -123,6 +179,9 @@ def _run_child(command: List[str], env: dict, port: Optional[int], *,
     except Exception:                               # noqa: BLE001
         ps = None
     last_cpu, last_move = None, time.time()
+    fatal = _FatalWatch(None if os.environ.get("DOMVEC_PLANT_NO_FATAL_WATCH") == "1" else fatal_log)
+    WORKER.update(pid=proc.pid, fatal_at=None, unkillable_at=None)
+    dead_cpu = None
 
     def done(code):
         return (code, proc.stdout.read() if capture and proc.stdout else "") if capture else code
@@ -146,6 +205,24 @@ def _run_child(command: List[str], env: dict, port: Optional[int], *,
             except Exception:                       # noqa: BLE001
                 pass
         if healthy:
+            seen = fatal.poll()
+            if seen is None:
+                continue
+            try:
+                t = ps.cpu_times() if ps is not None else None
+                cpu = (t.user + t.system) if t is not None else None
+            except Exception:                       # noqa: BLE001
+                cpu = None
+            if dead_cpu is None or cpu is None or cpu - dead_cpu[0] > 0.5:
+                dead_cpu = (cpu if cpu is not None else 0.0, time.time())
+            WORKER["fatal_at"] = seen
+            if time.time() - seen > FATAL_GRACE_S and time.time() - dead_cpu[1] > FATAL_GRACE_S and not _healthy(port):
+                proc.kill()
+                try:
+                    proc.wait(timeout=KILL_WAIT_S)
+                except subprocess.TimeoutExpired:
+                    WORKER["unkillable_at"] = time.time()
+                return done(HUNG_CODE)
             continue
         if _healthy(port):
             healthy = True
@@ -269,7 +346,8 @@ def supervise(workspace: Path, serve_args: List[str], *,
     while True:
         started = time.time()
         # The child knows a supervisor will act on COMPACT_CODE.
-        code = _run_child(command, {**os.environ, "DOMVEC_SUPERVISED": "1"}, _port_of(serve_args))
+        code = _run_child(command, {**os.environ, "DOMVEC_SUPERVISED": "1"}, _port_of(serve_args),
+                          fatal_log=workspace / "sidecar.err.log")
         if code == 0:
             return 0                           # a clean stop is not a crash
         if code == RESTART_CODE:
@@ -290,6 +368,18 @@ def supervise(workspace: Path, serve_args: List[str], *,
                 pass
             print("supervisor gave up after %d stalled starts" % stalls_in_a_row, flush=True)
             return STUCK_CODE
+        if code == HUNG_CODE:
+            note = "%s died without exiting: a fatal dump in sidecar.err.log, then no /health and no CPU for %.0f s -- killed, starting again" % (
+                time.strftime("%Y-%m-%d %H:%M:%S"), FATAL_GRACE_S) + chr(10)
+            if WORKER.get("unkillable_at"):
+                note = note.strip() + ("; pid %s did NOT end within %.0f s of the kill -- the kernel is holding it (a driver), "
+                                       "and its port may stay bound until Windows is restarted" % (WORKER.get("pid"), KILL_WAIT_S)) + chr(10)
+            try:
+                with log.open("a", encoding="utf-8") as fh:
+                    fh.write(note)
+            except OSError:
+                pass
+            print(note.strip(), flush=True)
         if code == STUCK_CODE:
             note = "%s start stalled: no /health in %.0f s, no CPU for %.0f s -- killed, starting again" % (
                 time.strftime("%Y-%m-%d %H:%M:%S"), now - started, START_STALL_S) + chr(10)

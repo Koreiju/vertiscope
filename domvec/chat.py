@@ -167,15 +167,27 @@ class HermesBackend:
             self._cm = None
 
     def generate(self, text: str) -> str:
-        if self._cm is None:
-            self.open()
-        return self._load().generate(text, max_tokens=self.max_tokens, temp=0.3)
+        with GEN_LOCK:
+            if self._cm is None:
+                self.open()
+            return self._load().generate(text, max_tokens=self.max_tokens, temp=0.3)
 
 
 _CONVERSATIONS: Dict[str, Conversation] = {}
 _BACKEND: List[Optional[HermesBackend]] = [None]
 _ACTIVE: List[str] = [""]
 _GLOBAL = threading.Lock()
+
+#: ONE generation at a time on the shared model, whichever route asks: the
+#: plane's chat cell (`/chat_stream`) and the browser cell (`/chat`) hold the
+#: same `HermesBackend`, and gpt4all's model is not reentrant. Two turns at
+#: once (2026-11-14 19:55) ended in "Windows fatal exception: access
+#: violation" inside `prompt_model` and a worker that never exited. A second
+#: turn WAITS for the first; it is never refused.
+GEN_LOCK = threading.Lock()
+#: Generations running right now, and the most seen at once -- read by the
+#: live check, which plants the lock away and expects 2.
+IN_FLIGHT = {"now": 0, "peak": 0}
 
 
 def conversation(session: str, backend_factory: Callable[[], HermesBackend] = HermesBackend) -> Conversation:
