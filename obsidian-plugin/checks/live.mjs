@@ -10417,7 +10417,14 @@ export function makeChecks(env) {
             for (let i = 0; i < 40 && !${planted} && c.insetStats.plane_places < n0 + 2; i++) { await sleep(100); waits++; } await sleep(100); };
           try {
             c.flatView = true; c.planeShift = { x: 0, y: 0 }; c.plantPlaneOnWorld = ${planted}; c.key = "";
-            g.agent.setMode("map"); await sleep(1200); await settle();
+            g.agent.setMode("map"); await sleep(400);
+            // From the map's own framing: setMode("map") does nothing in the map
+            // view already, and a camera left ONE unit from its focus (an earlier
+            // check's cockpit) held the planted arm at z = -1 through every move
+            // -- the dolly clamped at the controls' minDistance 1 (runs 30-33).
+            const focus0 = cam.position.distanceTo(ctl.target);
+            g.reframe(); await sleep(1300); await settle();
+            const focus = { before: Math.round(focus0 * 10) / 10, framed: Math.round(cam.position.distanceTo(ctl.target)) };
             const a = inCam();
             // A pan: camera and focus moved together along the camera's right by a fifth of the distance.
             const d = cam.position.distanceTo(ctl.target);
@@ -10435,7 +10442,7 @@ export function makeChecks(env) {
             await settle();
             const z = inCam();
             const r3 = (v) => ({ x: Math.round(v.x * 100) / 100, y: Math.round(v.y * 100) / 100, z: Math.round(v.z * 100) / 100 });
-            return { planted: ${planted}, view: c.stats.view, before: r3(a), after_pan: r3(b), after_orbit: r3(o), after_dolly: r3(z), plane_places: c.insetStats.plane_places, waits };
+            return { planted: ${planted}, view: c.stats.view, focus, before: r3(a), after_pan: r3(b), after_orbit: r3(o), after_dolly: r3(z), plane_places: c.insetStats.plane_places, waits };
           } finally {
             c.plantPlaneOnWorld = false; c.flatView = save.flat; c.planeShift = save.ps; c.key = "";
             cam.position.copy(save.p); ctl.target.copy(save.t); cam.up.copy(save.u); cam.lookAt(ctl.target); ctl.update && ctl.update();
