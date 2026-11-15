@@ -349,6 +349,14 @@ export class GraphView extends ItemView {
    *  when the horizontal term bound: 1,920 -> 987 in one state, 2,090 -> 1,918
    *  in another, every node still on screen.) */
   plantFrameBulk = false;
+  /**
+   * Planted (G-5): the default frame is fitted ONCE and not held while the
+   * layout is still moving -- a fresh load's cloud spread after the tighten
+   * and left 14-206 page nodes off screen (runs 31-46).
+   */
+  plantNoFrameHold = false;
+  frameHoldStats = { holds: 0 };
+  private frameHold: (() => void) | null = null;
   /** How much of the pane the cloud fills and how far off-centre it sits. */
   screenCoverage: (() => { w: number; h: number; dx: number; dy: number } | null) | null = null;
   /** Frame what an expansion just opened. Set in `draw`. */
@@ -6824,7 +6832,9 @@ export class GraphView extends ItemView {
     if (this.plantNoZoomFloor) { ctl.minDistance = 0; return; }
     let floor = 1;
     const f = this.agent.focus;
-    if (f && Number.isFinite(f.x)) {
+    // Not under the chase: its distance is the agent's (see UserAgent.chase).
+    const chasing = this.agent.mode === "ego" && this.agent.view === "third" && !this.agent.plantFloorInChase;
+    if (f && Number.isFinite(f.x) && !chasing) {
       const t = ctl.target, P = cam.position;
       const d = Math.hypot(P.x - t.x, P.y - t.y, P.z - t.z) || 1;
       const off = Math.hypot(f.x - t.x, f.y - t.y, (f.z || 0) - t.z);
@@ -10576,7 +10586,7 @@ export class GraphView extends ItemView {
     // A tick MOVES nodes; it changes no look. Positions only, into the slots
     // the last full sync laid out (`SceneBatch.positions`); planted
     // `plantFullSyncOnTick`: a full sync per tick, as before.
-    graph.onEngineTick(() => { if (this.plantFullSyncOnTick) this.batchDirty = true; else this.posDirty = true; this.govern(); });
+    graph.onEngineTick(() => { if (this.plantFullSyncOnTick) this.batchDirty = true; else this.posDirty = true; this.govern(); this.frameHold?.(); });
     this.startBatch(graph, media);
     void this.loadSignal();
     // The profiler's listener reads the scene through this, so "visible"
@@ -10662,6 +10672,10 @@ export class GraphView extends ItemView {
     // difference is how the observer below tells "this pane has not been
     // looked at yet" from "the reader has orbited somewhere".
     let placed: { x: number; y: number; z: number } | null = null;
+    // Who has had the camera: the frame hold (G-5) acts only while this is
+    // what it was when the frame was placed.
+    const camSig = () => `${this.agent.placements}|${this.agent.mode}|${this.agent.stats.flights}|${this.agent.stats.keys}|${this.camMovedAt}`;
+    let placedAt = 0, placedSig = "";
     const initialMoveAt = this.camMovedAt;
     const initialFlights = this.agent.stats.flights;
     const initialKeys = this.agent.stats.keys;
@@ -10671,6 +10685,7 @@ export class GraphView extends ItemView {
         const z = c.z + frameDistance(c);
         graph.cameraPosition({ x: c.x, y: c.y, z }, c, 0);
         placed = { x: c.x, y: c.y, z };
+        placedAt = performance.now(); placedSig = camSig();
         this.fullViewDist = z - c.z;
       } catch {
         /* an empty scene has nothing to fit */
@@ -10892,16 +10907,21 @@ export class GraphView extends ItemView {
      * fill. Not 1.0: a node is drawn with a radius the projection does not
      * know about, and a billboard is drawn wider still.
      */
-    const tighten = (target = 0.88, steps = 2) => {
+    const tighten = (target = 0.88, steps = 2, recentre = false) => {
       const g: any = graph;
       for (let i = 0; i < steps; i++) {
         const cover = screenCoverage();
         if (!cover) return;
-        const filled = Math.max(cover.w, cover.h);
+        // Measured from the PANE's middle to the furthest node, not the
+        // picture's width: under perspective the near side of the cloud draws
+        // larger, the picture sits off centre, and a picture 0.88 wide can
+        // still cross an edge (G-5: 14 of 1,008 off at a "fitted" frame).
+        const filled = this.plantFrameBulk ? Math.max(cover.w, cover.h)
+          : Math.max(cover.w + 2 * Math.abs(cover.dx), cover.h + 2 * Math.abs(cover.dy));
         if (!(filled > 0.01)) return;
         const ratio = filled / target;
         // Already close enough; another step would only jitter the camera.
-        if (ratio > 0.92 && ratio < 1.08) return;
+        if (ratio > 0.92 && ratio < 1.08 && !(recentre && i === 0)) return;
         const cam: any = g.cameraPosition();
         const c = centre();
         const d = Math.hypot((cam.x ?? 0) - c.x, (cam.y ?? 0) - c.y, (cam.z ?? 0) - c.z);
@@ -10918,7 +10938,41 @@ export class GraphView extends ItemView {
         if (next < floor) next = floor;
         g.cameraPosition({ x: c.x, y: c.y, z: c.z + next }, c, 0);
         placed = { x: c.x, y: c.y, z: c.z + next };
+        placedAt = performance.now();
         this.fullViewDist = next;
+        if (!holding) placedSig = camSig();
+      }
+    };
+
+    // **The frame is HELD while the layout settles (G-5).** The tighten
+    // fits the cloud as it is at that instant, and on a fresh load that
+    // instant is mid-spread: the reframe's own reheat (and the load's
+    // first ticks) keep pushing the outer pages out, and runs 31-46 found
+    // 14-206 of ~1,050 page nodes off screen 1.5 s later. For a few seconds
+    // after a frame, while the camera is still exactly where the frame put
+    // it -- nobody (reader, agent, flight) has taken it -- a tick that finds
+    // the picture overflowing the pane re-tightens on the cloud as it is
+    // now. A camera anyone has moved is never touched.
+    let heldAt = 0, holding = false;
+    this.frameHold = () => {
+      if (this.plantNoFrameHold || !placed) return;
+      const now = performance.now();
+      if (now - placedAt > 10000 || now - heldAt < 250) return;
+      heldAt = now;
+      // Yields to anyone who has taken the camera since the frame -- the
+      // agent may only TURN it (a flight inside the standoff), which leaves
+      // the position where the frame put it (G-275's planted_zoom moved 3.5).
+      if (camSig() !== placedSig) return;
+      const cam: any = graph.cameraPosition();
+      if (Math.abs((cam?.x ?? 0) - placed.x) > 1 || Math.abs((cam?.y ?? 0) - placed.y) > 1
+          || Math.abs((cam?.z ?? 0) - placed.z) > 1) return;
+      const cover = screenCoverage();
+      if (!cover) return;
+      const edge = Math.max(Math.abs(cover.dx) + cover.w / 2, Math.abs(cover.dy) + cover.h / 2);
+      if (Math.max(cover.w, cover.h) > 0.95 || edge > 0.48) {
+        this.frameHoldStats.holds++;
+        holding = true;
+        try { tighten(0.88, 2, true); } finally { holding = false; }
       }
     };
 
@@ -11022,7 +11076,11 @@ export class GraphView extends ItemView {
         // and only while the camera is still this frame's.
         const ours = this.agent.placements === placed0 && this.agent.mode === mode0;
         if (!ours) this.reframeStats.tighten_yielded++;
-        if (!k && (ours || this.plantLateTighten)) tighten();
+        if (!k && (ours || this.plantLateTighten)) {
+          tighten();
+          // Already on target: the frame is still this one, and is held.
+          if (!placed) { const p: any = graph.cameraPosition(); placed = { x: p.x, y: p.y, z: p.z }; placedAt = performance.now(); placedSig = camSig(); }
+        }
       }, 450);
     };
     this.keepBillboards(canvas);

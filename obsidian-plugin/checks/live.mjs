@@ -5819,7 +5819,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-5",
-      asks: "every node is on screen at the default camera (2026-10-30: at BOTH levels -- the row was Partly because the check only ever saw the level that happened to be open; planted plantFrameBulk, a frame fitted to the median offset per axis instead of the extremes, puts nodes off screen and is caught)",
+      asks: "every node is on screen at the default camera, and STAYS on while the layout settles (2026-11-15: a fresh load spread after the tighten and left 14-206 page nodes off; the frame is held while nobody has moved the camera -- a cloud spread 1.35x after framing is still all on screen, and planted plantNoFrameHold it is not) (2026-10-30: at BOTH levels -- the row was Partly because the check only ever saw the level that happened to be open; planted plantFrameBulk, a frame fitted to the median offset per axis instead of the extremes, puts nodes off screen and is caught)",
       async run() {
         const got = await inPane(`
           for (let i = 0; i < 60 && !(v.graph && v.graph.graphData().nodes.length); i++) await sleep(500);
@@ -5857,6 +5857,33 @@ export function makeChecks(env) {
             await reframe();
             out.planted = census();
             v.plantFrameBulk = false;
+            // The settle, staged: the cloud spreads 1.35x about its middle
+            // after the frame (what a fresh load's layout does), positions
+            // restored after -- page places are never saved (chunk level only).
+            const spread = async (planted) => {
+              v.plantNoFrameHold = planted;
+              await reframe();
+              const ns = v.graph.graphData().nodes.filter((n) => Number.isFinite(n.x));
+              const keep = ns.map((n) => [n, n.x, n.y, n.z, n.fx, n.fy, n.fz]);
+              let cx = 0, cy = 0, cz = 0; for (const n of ns) { cx += n.x; cy += n.y; cz += n.z || 0; }
+              cx /= ns.length; cy /= ns.length; cz /= ns.length;
+              const h0 = v.frameHoldStats.holds;
+              try {
+                for (const n of ns) {
+                  n.x = cx + (n.x - cx) * 1.35; n.y = cy + (n.y - cy) * 1.35; n.z = cz + ((n.z || 0) - cz) * 1.35;
+                  if (n.fx != null) { n.fx = n.x; n.fy = n.y; n.fz = n.z; }
+                }
+                v.graph.d3ReheatSimulation?.();
+                await sleep(1500);
+                return { ...census(), holds: v.frameHoldStats.holds - h0 };
+              } finally {
+                for (const [n, x, y, z, fx, fy, fz] of keep) { n.x = x; n.y = y; n.z = z; n.fx = fx; n.fy = fy; n.fz = fz; }
+                v.plantNoFrameHold = false;
+                v.graph.d3ReheatSimulation?.();
+              }
+            };
+            out.spread = await spread(false);
+            out.spread_planted = await spread(true);
             await reframe();
             toggle();
             for (let i = 0; i < 120; i++) { await sleep(500); if (v.level === "chunk" && v.graph && v.graph.graphData().nodes.length > 50) break; }
@@ -5864,7 +5891,7 @@ export function makeChecks(env) {
             await reframe();
             out.chunk = census();
           } finally {
-            v.plantFrameBulk = false;
+            v.plantFrameBulk = false; v.plantNoFrameHold = false;
             await reframe();
             if (v.level === "chunk") { toggle(); await sleep(6000); }
           }
@@ -5873,7 +5900,8 @@ export function makeChecks(env) {
         if (got.error) return { pass: false, evidence: got };
         const all = (c) => c && c.nodes > 0 && c.onScreen === c.nodes && c.behind === 0;
         return {
-          pass: all(got.pages) && all(got.chunk) && !!got.planted && got.planted.onScreen < got.planted.nodes,
+          pass: all(got.pages) && all(got.chunk) && !!got.planted && got.planted.onScreen < got.planted.nodes
+                && all(got.spread) && !!got.spread_planted && got.spread_planted.onScreen < got.spread_planted.nodes,
           evidence: got,
         };
       },
@@ -7750,7 +7778,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-275",
-      asks: "a flight plan is DRAWN in 3D -- a path through its targets in order, the leg being flown brighter -- and planned per mode with the throttle: in the map view the plan is drawn and holds (the camera does not move), in the ego view it flies leg by leg and the drawn leg follows, a throttle of 0 holds it where it is; planted (plantNoPlanDraw) the plan is flown but not drawn; a play is a new navigation, so its first leg zooms in and the rest keep that zoom (PLUGIN_GOAL: 'fly-to-node should zoom initially, but preserve user zoom') -- planted (plantPlanKeepsZoom) every leg keeps the world's framing and the craft only turns",
+      asks: "a flight plan is DRAWN in 3D -- a path through its targets in order, the leg being flown brighter -- and planned per mode with the throttle: in the map view the plan is drawn and holds (the camera does not move), in the ego view it flies leg by leg and the drawn leg follows, a throttle of 0 holds it where it is; planted (plantNoPlanDraw) the plan is flown but not drawn; a play is a new navigation, so its first leg zooms in and the rest keep that zoom (PLUGIN_GOAL: 'fly-to-node should zoom initially, but preserve user zoom') -- planted (plantPlanKeepsZoom) every leg keeps the world's framing and the craft only turns -- it moves by the difference in its targets' distances, under 5% of the clean flight's travel (run 51: 6.1 against 873; the bound was 1 when the legs happened to be equidistant)",
       async run() {
         // PLUGIN_GOAL items 8-9: "we can also draw flight plans for various
         // searches and anchored nodes within different modes. We will have a
@@ -7817,7 +7845,7 @@ export function makeChecks(env) {
                 && got.ego.plan_at >= 1 && got.ego.drawn_leg === got.ego.plan_at && got.ego.leg_visible && got.ego.moved > 1
                 && got.throttle_zero.plan_at_after === got.throttle_zero.plan_at_before && got.throttle_zero.moved < 1
                 && got.planted.points === 0 && !got.planted.visible && got.planted.still_planned === 4
-                && !!got.planted_zoom && got.planted_zoom.moved < 1,
+                && !!got.planted_zoom && got.planted_zoom.moved < Math.max(1, 0.05 * got.ego.moved),
           evidence: got,
         };
       },
@@ -11757,7 +11785,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-311",
-      asks: "zoom passes through the cockpit (PLUGIN_GOAL 75, G-274): in the ego view's third person, wheel-in over the 3D view closes the chase on the vehicle and passes INTO the cockpit -- first person, the camera at the vehicle -- and wheel-out from that cockpit backs out to third person; a wheel-out in a cockpit entered by the keyboard is the ordinary zoom -- and its leftover momentum does not carry into the chase or the cockpit after V (the chase only closes, the cockpit is AT the vehicle); planted (plantNoZoomThrough) the wheel never changes the view, (plantKeepMomentum) the controls' damped zoom keeps moving the placed camera; a recentre's camera tween still in flight, and its deferred tighten, do not overwrite the chase or the cockpit (planted plantKeepTween + plantLateTighten: they do)",
+      asks: "zoom passes through the cockpit (PLUGIN_GOAL 75, G-274): in the ego view's third person, wheel-in over the 3D view closes the chase on the vehicle and passes INTO the cockpit -- first person, the camera at the vehicle -- and wheel-out from that cockpit backs out to third person; a wheel-out in a cockpit entered by the keyboard is the ordinary zoom -- and its leftover momentum does not carry into the chase or the cockpit after V (the chase only closes, the cockpit is AT the vehicle); planted (plantNoZoomThrough) the wheel never changes the view, (plantKeepMomentum) the controls' damped zoom keeps moving the placed camera; a recentre's camera tween still in flight, and its deferred tighten, do not overwrite the chase or the cockpit (planted plantKeepTween + plantLateTighten: they do); a zoom floor the map left (the focus node's fit) does not clamp the chase -- planted plantFloorInChase it does",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -11834,6 +11862,20 @@ export function makeChecks(env) {
                                                        tighten_yielded: v.reframeStats.tighten_yielded - y0 };
             }
             a.plantKeepTween = false; v.plantLateTighten = false;
+            // A zoom floor left by the map view (the focus node's fit) while
+            // the chase is taken: the chase's distance is the agent's, so the
+            // first wheel-in closes it; planted plantFloorInChase the
+            // controls clamp it at the floor (run 52: 81.4 asked, 183 drawn).
+            out.floor = {};
+            for (const keep of [true, false]) {
+              a.plantFloorInChase = keep;
+              a.setView("first"); a.setView("third");
+              ctl.minDistance = 400;
+              wheel(-100);
+              const want = a.chaseD * Math.hypot(1, 0.35);
+              out.floor[keep ? "planted" : "clean"] = { want: Math.round(want * 10) / 10, drawn: Math.round(dist(a.vehicle.p) * 10) / 10 };
+            }
+            a.plantFloorInChase = false;
             return out;
           } finally {
             v.plantNoZoomThrough = false;
@@ -11852,7 +11894,9 @@ export function makeChecks(env) {
         const tw = (clean && clean.tween) || {}, tc = tw.clean || {}, tp = tw.planted || {};
         const tweenHalted = tc.entered && tc.max_dev < 0.5 && tc.at_vehicle < 1e-3;
         const tweenWins = !tp.entered || tp.max_dev > 2 || tp.at_vehicle > 1;
-        return { pass: ok(clean) && !!planted && !planted.entered && steadyChase && thrown && tweenHalted && tweenWins, evidence: { clean, planted } };
+        const fl = (clean && clean.floor) || {}, fc = fl.clean || {}, fp = fl.planted || {};
+        const floorYields = fc.want > 0 && Math.abs(fc.drawn - fc.want) < 0.5 && fp.drawn > fp.want + 50;
+        return { pass: ok(clean) && !!planted && !planted.entered && steadyChase && thrown && tweenHalted && tweenWins && floorYields, evidence: { clean, planted } };
       },
     },
     {

@@ -479,6 +479,8 @@ export class UserAgent {
   plantKeepMomentum = false;
   /** Planted: a running camera tween is left to finish (it overwrites the placement). */
   plantKeepTween = false;
+  /** Planted (G-311): the wheel's zoom floor clamps the chase camera. */
+  plantFloorInChase = false;
   /** Every time the agent places the camera: a deferred camera move begun
    *  before (the recentre's tighten, 450 ms on) yields to it. */
   placements = 0;
@@ -497,6 +499,13 @@ export class UserAgent {
     this.settle(ctl);
     const D = this.chaseD || Math.max(20, this.vmax * 0.6), v = this.vehicle;
     const up = v3(cam.up.x, cam.up.y, cam.up.z);
+    // The wheel's floor (item 38) is the READER's zoom toward a node; the
+    // chase's distance is the agent's. A floor left by the map view -- the
+    // focus node's fit, ~180 -- clamped every chase placement inside it in
+    // the controls' own update, so the wheel did not close the chase for the
+    // first ~150 ms after a recentre (G-311, run 52). Planted
+    // `plantFloorInChase`: the floor applies, as before.
+    if (!this.plantFloorInChase && typeof ctl.minDistance === "number" && ctl.minDistance > 1) ctl.minDistance = 1;
     cam.position.set(v.p.x - v.dir.x * D + up.x * D * 0.35, v.p.y - v.dir.y * D + up.y * D * 0.35, v.p.z - v.dir.z * D + up.z * D * 0.35);
     ctl.target.set(v.p.x, v.p.y, v.p.z);
     cam.lookAt(ctl.target);
