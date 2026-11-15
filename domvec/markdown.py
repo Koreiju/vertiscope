@@ -3753,6 +3753,58 @@ def _size_of(
     return _render_sized(node, url, url_depth, memo)
 
 
+#: Planted: a vault note's `state` subtree merges with its neighbours, as
+#: before 2026-11-15 -- the slate's search cell shared one chunk with the rest
+#: of the slate, and the search route could not tell its query from the note.
+PLANT_NO_STATE_BOUNDARY = False
+
+#: Planted: a notebook cell's `output` merges with its source, as before
+#: 2026-11-15 -- in a short note the cell's heading, source and output came
+#: out as ONE chunk at `/`, so T-13's rule (an output is kept to the ego
+#: scope, read off the chunk's xpath) never fired and every scope found it.
+PLANT_NO_OUTPUT_BOUNDARY = False
+
+
+def _scope_step(seg: str) -> bool:
+    """Is this trie segment one the search route scopes by address?
+
+    `state` (a slate's search cell, `vault._tag_slate`) and `output` (a
+    notebook cell's stored result, `vault.tag_note`'s nb-output block). Both
+    are kept to the ego scope by `sidecar.search_payload`, which reads the
+    CHUNK's xpath, so neither may share a chunk with the note around it.
+    Asked only on `vault://` pages: `output` is also an HTML element."""
+    if (seg == "state" or seg.startswith("state[")) and not PLANT_NO_STATE_BOUNDARY:
+        return True
+    if (seg == "output" or seg.startswith("output[")) and not PLANT_NO_OUTPUT_BOUNDARY:
+        return True
+    return False
+
+
+def _is_state(node: TrieNode) -> bool:
+    # The trie drops a first `[1]`, so both spellings are steps.
+    return _scope_step(str(getattr(node, "segment", "")))
+
+
+def _holds_state(node: TrieNode) -> bool:
+    """Does this subtree hold a scoped step (`_scope_step`: a slate's
+    `state`, a notebook `output`)? Cached on the node against its
+    `exact_hash` AND the two planted flags -- the verdict is a function of
+    the subtree and of which steps count, and nothing else (CLAUDE.md 5c).
+    A clean subtree answers in one comparison. Asked only for `vault://`
+    pages."""
+    flags = (PLANT_NO_STATE_BOUNDARY, PLANT_NO_OUTPUT_BOUNDARY)
+    cached = getattr(node, "_holds_state", None)
+    eh = getattr(node, "exact_hash", 0)
+    if cached is not None and cached[0] == eh and cached[1] == flags:
+        return cached[2]
+    got = any(_is_state(c) or _holds_state(c) for c in node.children.values())
+    try:
+        node._holds_state = (eh, flags, got)
+    except AttributeError:
+        pass
+    return got
+
+
 def _descend(
     node: TrieNode,
     url: str,
@@ -3866,10 +3918,24 @@ def _descend(
     # hyperparameter is not a property of the page.
     records = _record_children(sized, window)
 
+    # A slate's search STATE (`vault._tag_slate`) and a notebook cell's
+    # OUTPUT are each their own chunk: the search route keeps them to the ego
+    # scope by their address (T-13), which it can only read if no chunk merged
+    # them with the note around them. So a subtree holding one is never taken
+    # whole, a child holding one is split, and the step itself stands alone as
+    # a record does. Planted: `PLANT_NO_STATE_BOUNDARY`, `PLANT_NO_OUTPUT_BOUNDARY`.
+    state_split = set()
+    if url.startswith("vault://") and _holds_state(node):
+        for child, _r, _c in sized:
+            if _is_state(child):
+                records = set(records) | {id(child)}
+            elif _holds_state(child):
+                state_split.add(id(child))
+
     if _certainly_overflows(child_chars, window):
         if memo is not None:
             memo.skipped_fit_tests += 1
-    elif records:
+    elif records or state_split:
         # Fits, and is a record set. Fall through to the merge, which emits
         # one chunk per record.
         pass
@@ -3908,7 +3974,7 @@ def _descend(
     for child, rendered, rendered_chars in sized:
         # `rendered is None` is `_size_of` saying it proved the overflow
         # without drawing anything, which is exactly the case that splits.
-        fits = rendered is not None and rendered_chars <= window
+        fits = rendered is not None and rendered_chars <= window and id(child) not in state_split
         pieces.append(("fits" if fits else "split",
                        rendered if fits else child, rendered_chars,
                        _piece_hash(rendered) if fits else 0,
