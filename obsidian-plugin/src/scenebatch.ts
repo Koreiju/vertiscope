@@ -43,6 +43,7 @@ uniform float uMaxPicPx;
 uniform float uMinPicPx;
 uniform float uMaxShownPx;
 uniform float uLitPx;
+uniform float uLitMinPx;
 uniform float uOldTiers;
 float nearK(float z, float size) { return uNear > 0.0 ? clamp(pow(max(-z / (uNear * max(size, 1e-3)), 0.0), uNearPow), uNearMin, 1.0) : 1.0; }
 varying vec2 vCorner;
@@ -67,8 +68,8 @@ void main() {
     // so s is the HALF-width: before 161 every limit drew at twice its number.
     // iColor.g names the tier:
     // - presented, 3: the hovered picture, uMinPicPx..uMaxShownPx;
-    // - lit, 2: a shown search result or a hover's neighbour, at most uLitPx
-    //   (the midpoint);
+    // - lit, 2: a shown search result or a hover's neighbour, uLitMinPx..uLitPx
+    //   (the midpoint: a band, so a lit picture reads as lit);
     // - every other picture, 1: at most uMaxPicPx.
     // Before 161 "presented" was any picture with glow (iColor.r > 1.05), so
     // every lit picture drew in the presented range. Planted uOldTiers: as before.
@@ -76,7 +77,7 @@ void main() {
     bool shown = uOldTiers > 0.5 ? iColor.r > 1.05 : iColor.g > 2.5;
     bool lit = uOldTiers < 0.5 && iColor.g > 1.5 && !shown;
     if (shown && uMinPicPx > 0.0) s = clamp(s, uMinPicPx * px, max(uMaxShownPx, uMinPicPx) * px);
-    else if (lit && uLitPx > 0.0) s = min(s, uLitPx * px);
+    else if (lit && uLitPx > 0.0) s = clamp(s, uLitMinPx * px, max(uLitPx, uLitMinPx) * px);
     else if (uMaxPicPx > 0.0) s = min(s, uMaxPicPx * px);
   }
   mv.xy += position.xy * s;
@@ -125,7 +126,9 @@ void main() {
 /** A picture's size tier, carried in iColor.g (161): 3 presented (the hovered
  *  node's), 2 lit (any glow: a shown result, a hover's neighbour), 1 the rest. */
 /** The picture widths on screen, px (161): the one place they are set. */
-export const PIC_PX = { rest: 28, lit: 56, shownMin: 72, shownMax: 144 };
+// lit is a BAND, litMin..lit: a cap alone left the lit pictures at their
+// own 4-7 px, as small as any other (seen 2026-11-15).
+export const PIC_PX = { rest: 28, litMin: 28, lit: 56, shownMin: 72, shownMax: 144 };
 
 export function picTier(n: any, glow: number): number { return n && n.hovered ? 3 : glow > 0.05 ? 2 : 1; }
 
@@ -410,7 +413,7 @@ export class SceneBatch {
         const mu = m?.mesh?.material?.uniforms;
         if (mu?.uPxView) mu.uPxView.value = pxv;
         if (mu?.uMinPicPx) { mu.uMinPicPx.value = this.presentMinPx; mu.uMaxPicPx.value = this.picMaxPx; if (mu.uMaxShownPx) mu.uMaxShownPx.value = this.presentMaxPx;
-                             if (mu.uLitPx) mu.uLitPx.value = this.litPx; if (mu.uOldTiers) mu.uOldTiers.value = this.plantOldPicTiers ? 1 : 0; }
+                             if (mu.uLitPx) mu.uLitPx.value = this.litPx; if (mu.uLitMinPx) mu.uLitMinPx.value = this.litMinPx; if (mu.uOldTiers) mu.uOldTiers.value = this.plantOldPicTiers ? 1 : 0; }
       }
     }
     // PLUGIN_GOAL 137(6), seen 2026-11-08: at the full 60,927-node chunk
@@ -444,6 +447,7 @@ export class SceneBatch {
    *  presented range: 128-280 px, a ring of them round a hover. */
   picMaxPx = PIC_PX.rest;
   litPx = PIC_PX.lit;
+  litMinPx = PIC_PX.litMin;
   presentMinPx = PIC_PX.shownMin;
   presentMaxPx = PIC_PX.shownMax;
   /** Planted (161): the old tiers -- presented = any glow, limits drawn at 2x. */
@@ -473,7 +477,7 @@ export class SceneBatch {
         const r = m.color.getX(i), g = m.color.getY(i);
         const shown = old ? r > 1.05 : g > 2.5, lit = !old && g > 1.5 && !shown;
         if (shown && u.uMinPicPx.value > 0) s = Math.min(Math.max(s, u.uMinPicPx.value * px), Math.max(u.uMaxShownPx.value, u.uMinPicPx.value) * px);
-        else if (lit && u.uLitPx.value > 0) s = Math.min(s, u.uLitPx.value * px);
+        else if (lit && u.uLitPx.value > 0) s = Math.min(Math.max(s, u.uLitMinPx.value * px), Math.max(u.uLitPx.value, u.uLitMinPx.value) * px);
         else if (u.uMaxPicPx.value > 0) s = Math.min(s, u.uMaxPicPx.value * px);
         const n = this.slots[k][i];
         out.push({ tier: shown ? 3 : lit ? 2 : 1, px: Math.round(2 * s / (depth * pxv)), id: n ? String(n.id).slice(0, 24) : "" });
@@ -525,7 +529,7 @@ export class SceneBatch {
     }
     return new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
-      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 }, uZoom: { value: this.zoom }, uNear: { value: 0 }, uNearMin: { value: this.nearMin }, uNearPow: { value: this.nearPow }, uPxView: { value: 0.002 }, uMaxPicPx: { value: this.picMaxPx }, uMinPicPx: { value: this.presentMinPx }, uMaxShownPx: { value: this.presentMaxPx }, uLitPx: { value: this.litPx }, uOldTiers: { value: 0 } },
+      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 }, uZoom: { value: this.zoom }, uNear: { value: 0 }, uNearMin: { value: this.nearMin }, uNearPow: { value: this.nearPow }, uPxView: { value: 0.002 }, uMaxPicPx: { value: this.picMaxPx }, uMinPicPx: { value: this.presentMinPx }, uMaxShownPx: { value: this.presentMaxPx }, uLitPx: { value: this.litPx }, uLitMinPx: { value: this.litMinPx }, uOldTiers: { value: 0 } },
       transparent: translucent, depthWrite: !translucent,
     });
   }

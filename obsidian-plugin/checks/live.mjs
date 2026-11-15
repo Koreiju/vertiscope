@@ -10823,7 +10823,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-362",
-      asks: "picture sizes have an upper limit and a midpoint (PLUGIN_GOAL 161: 'the image billboard sizing needs a better upper limit but also a better midpoint'): with one picture hovered and its neighbours lit, the hovered one is drawn 72-144 px wide, each lit one at most 56 px, every other picture at most 28 px, widths as drawn on screen; planted (plantOldPicTiers): every lit picture drew in the presented range and every limit at twice its number",
+      asks: "picture sizes have an upper limit and a midpoint (PLUGIN_GOAL 161: 'the image billboard sizing needs a better upper limit but also a better midpoint'): with one picture hovered and its neighbours lit, the hovered one is drawn 72-144 px wide, each lit one 28-56 px (the midpoint, a band), every other picture at most 28 px, widths as drawn on screen; planted (plantOldPicTiers): every lit picture drew in the presented range and every limit at twice its number",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -10854,7 +10854,7 @@ export function makeChecks(env) {
             const litIds = new Set(lit.map((n) => String(n.id).slice(0, 24)));
             return { planted: ${planted}, pictures: got.length, level: v.level,
                      presented: got.filter((p) => p.tier === 3).length, lit: got.filter((p) => p.tier === 2).length,
-                     presented_px: [min(3), max(3)], lit_max: max(2), rest_max: max(1),
+                     presented_px: [min(3), max(3)], lit_px: [min(2), max(2)], lit_max: max(2), rest_max: max(1),
                      lit_as_drawn: got.filter((p) => litIds.has(p.id)).map((p) => p.px) };
           } finally {
             setOld(false); hov.hovered = false; v.glowNear = was; v.batchDirty = true; v.batchSync();
@@ -10862,7 +10862,7 @@ export function makeChecks(env) {
         })()`, { timeout: 60000 });
         const c = (await arm(false)) || {}, p = (await arm(true)) || {};
         return {
-          pass: !c.error && c.presented === 1 && c.presented_px[0] >= 72 && c.presented_px[1] <= 144 && c.lit >= 1 && c.lit_max <= 56 && c.rest_max <= 28
+          pass: !c.error && c.presented === 1 && c.presented_px[0] >= 72 && c.presented_px[1] <= 144 && c.lit >= 1 && c.lit_px[0] >= 28 && c.lit_max <= 56 && c.rest_max <= 28
             && !p.error && (p.presented > 1 || Math.max(0, ...(p.lit_as_drawn || [])) > 56),
           evidence: { clean: c, planted: p },
         };
