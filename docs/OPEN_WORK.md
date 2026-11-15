@@ -568,6 +568,28 @@ Open (not started this session):
   - Cold minute after a worker restart: G-91 failed once (run 77, Radix_tree
     drawn as 63 force nodes, 0 projected) and passed a minute later (run
     78). The projector's state is not ready until `index_warm` ends.
+    Not yet known: whether a page landed in that minute is re-placed once
+    the projector answers, or stays force-drawn until revisited.
+  - **Why the store grows 1.4-1.8 GB per checkpoint and is compacted every
+    20-40 minutes** (store_growth.log, today: 08:37 an 8.4 MB WAL grew the
+    store 1,849 -> 3,659 MB). Measured on synthetic kuzu 0.11.3 stores
+    (20,480 rows, FLOAT[1536]): a SET of the vector column on one row in
+    each of 10 node groups grew the file +251.7 MB, twice, then 0 for four
+    more cycles -- the touched groups' vector columns rewritten into new
+    space once, then the freed space reused. A string-column SET, 100
+    CREATEs and 10 DELETEs: 0 MB. Delete + create of a vector in its own
+    table: +134.5 MB once, then 0. So the growth is a bounded working size
+    of a few times the compacted store, driven by `SET c.embedding` (re-
+    embeds) and `SET c.group_embedding` (a page re-grouped) on rows from
+    earlier checkpoints -- not a leak. Compaction then fires at 2x the base
+    whenever the reader has been idle 10 minutes, which long check runs
+    satisfy; each is ~60 s offline and a cold start. Options, not taken:
+    vectors in their own table (about half the growth), or a higher ratio.
+  - Crashes today: two native access violations (0xC0000005), 07:53 on a
+    `SET c.snap` and 09:51 in the CHECKPOINT the graceful `/shutdown` takes
+    before exit -- the one I asked for. The store replayed its WAL both
+    times. Other threads may still be using the store while the exiting
+    one checkpoints; not investigated.
   - Retrieval: G-210's first tier-1 answer took 12.8 s, and 22.8 s on a
     freshly restarted worker (cold). **Re-measured 2026-11-15 after
     3365015, 7707854, 79c5948**: tiered first answer 235-1,414 ms over six
