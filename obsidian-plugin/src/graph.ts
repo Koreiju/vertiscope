@@ -702,6 +702,14 @@ export class GraphView extends ItemView {
     // The web half on the search BUTTON (and Enter) only -- typing never
     // reaches the browser cell (item 107).
     this.searchField.onSubmit = (q) => { this.searchStats.web_asked++; this.onWebSearch(q); this.followStore(q); };
+    // Per query, on BOTH paths (tiered and single): counted, the store
+    // followed, and the plants applied where the field really asks.
+    this.searchField.onAsked = (q) => {
+      this.searchStats.asked++;
+      if (this.plantWebOnType) { this.searchStats.web_asked++; this.onWebSearch(q); }
+      this.followStore(q);
+    };
+    this.searchField.onAnswered = async (_q, hits) => { if (this.plantPlaceResults) await this.placeResultsPlanted(hits); };
     // The results strip (G-222): each item named as its node is, and a hover
     // on one takes the hover's own path -- the stored node placed if it is
     // not drawn, flown to, its panel opened (PLUGIN_GOAL 151: "hovering scroll
@@ -3211,7 +3219,7 @@ export class GraphView extends ItemView {
   hoverPanelCap = 1;
   /** Planted: the old close-on-hover-end behaviour. */
   plantCloseOnLeave = false;
-  hoverStats: { empty_skipped: number; units?: number; stale_stored?: number } = { empty_skipped: 0 };
+  hoverStats: { empty_skipped: number; units?: number; stale_stored?: number; moved_on?: number } = { empty_skipped: 0 };
   private hoverSweep = 0;
 
   private expireHoverPanels(): void {
@@ -3339,7 +3347,7 @@ export class GraphView extends ItemView {
       // no panel ("(no lines stored for this chunk)", 2026-10-10).
       const pay: any = await this.chunkPayload(target.id);
       if (!(pay && pay.lines && pay.lines.length) && !getSnapshot(target.id)) { this.hoverStats.empty_skipped++; return; }
-      if (this.hoverBbPending) return;              // the pointer moved on meanwhile
+      if (this.hoverBbPending) { this.hoverStats.moved_on = (this.hoverStats.moved_on || 0) + 1; return; }   // the pointer moved on meanwhile
       this.hoverBb = target.id;
       await this.openBillboard(target, false, true);
       const e: any = this.billboards.get(target.id);
@@ -6262,7 +6270,7 @@ export class GraphView extends ItemView {
   /** Planted (item 96): the first version -- undrawn results PLACED in the scene. */
   plantPlaceResults = false;
   searchStats = { strip_hovers: 0, asked: 0, shown: 0, lights: 0, last_ms: 0, resolved_chunk: 0, resolved_page: 0, unresolved: 0,
-                  placed: 0, web_merged: 0, flown_top: 0, web_asked: 0, reranks: 0, rerank_changed: 0, scroll_flown: 0 };
+                  placed: 0, web_merged: 0, flown_top: 0, top_reflown: 0, web_asked: 0, reranks: 0, rerank_changed: 0, scroll_flown: 0 };
   /** The strip item the pointer is on, if any (item 31: a hover wins over the scroll). */
   private stripHovered: FieldHit | null = null;
   /** The front result the scroll last flew to, for this query. */
@@ -6495,13 +6503,11 @@ export class GraphView extends ItemView {
 
   private async searchAsk(query: string, total: number): Promise<FieldAnswer | null> {
     const t0 = performance.now();
-    this.searchStats.asked++;
-    if (this.plantWebOnType) { this.searchStats.web_asked++; this.onWebSearch(query); }
-    this.followStore(query);
+    // Counting, store-following and the plants are the field's onAsked /
+    // onAnswered now, which both of its paths call.
     const got: any = await this.sidecar.search(query, { k: total, where: this.searchWhere });
     if (!got) return null;
     const hits: FieldHit[] = (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || "") }));
-    if (this.plantPlaceResults) await this.placeResultsPlanted(hits);
     this.searchStats.last_ms = Math.round(performance.now() - t0);
     return { hits, n: Number(got.n || hits.length) };
   }
@@ -6563,17 +6569,38 @@ export class GraphView extends ItemView {
     // same link and idea").
     const q = this.searchState.query;
     const top = this.searchState.targets[0];
-    if (top && q && q !== this.flownFor && !this.plantNoTopFlight) {
+    // The tiered search STREAMS: pages answer one by one and the top result
+    // can change while the query is still the same one. Flown once per query,
+    // the flight and its panel went to whichever page answered first -- the
+    // provisional top, not the result the strip ends up leading with (found
+    // 2026-11-15 by G-157's trace: flown to 01bff717, top f9d1f095). A new top
+    // for the same query is flown to again, and the panel the superseded
+    // flight opened (only that one: never a panel the reader already had) is
+    // closed. Planted `plantFirstTopOnly`: flown once, as before.
+    const reflyTop = !!top && q === this.flownFor && String(top.id) !== this.flownTop && !this.plantFirstTopOnly;
+    if (top && q && (q !== this.flownFor || reflyTop) && !this.plantNoTopFlight) {
+      if (reflyTop) {
+        const was: any = this.flightOpened ? this.billboards.get(this.flightOpened) : null;
+        if (was && was.fromHover && !was.pinned) this.closeBillboard(this.flightOpened);
+        this.searchStats.top_reflown++;
+      } else this.searchStats.flown_top++;
       this.flownFor = q;
+      this.flownTop = String(top.id);
+      this.flightOpened = this.billboards.has(String(top.id)) ? "" : String(top.id);
       this.frontFlown = 0;
       this.focusOn(top);
       if (top.level !== "page" && top.level !== "path") this.hoverPanel(top);
-      this.searchStats.flown_top++;
     } else {
       this.flyToScrollFront(soft);
     }
   }
   private flownFor = "";
+  /** The top result this query was last flown to, and the panel that flight opened (if it opened one). */
+  private flownTop = "";
+  private flightOpened = "";
+  /** Planted: the first top a streaming query shows is the one flown to, whatever leads after. */
+  plantFirstTopOnly = false;
+  plantHoverBbSticks = false;
   /**
    * With no result hovered, the camera goes to the top-most ranked result in
    * view of the scroll (2026-10-29, item 31: "the camera should fly at the
@@ -6600,7 +6627,7 @@ export class GraphView extends ItemView {
     window.clearInterval(this.webTimer);
     this.webTimer = 0;
     this.followQuery = "";
-    this.flownFor = "";
+    this.flownFor = ""; this.flownTop = ""; this.flightOpened = "";
     this.searchState = null;
     this.batch?.setLights([], 1);
     this.searchStats.shown = 0; this.searchStats.lights = 0;
@@ -8150,6 +8177,12 @@ export class GraphView extends ItemView {
     if (entry.cellLeaf) { try { entry.cellLeaf.detach(); } catch { /* gone */ } entry.cellLeaf = null; }
     entry.el.remove();
     this.billboards.delete(id);
+    // The hover panel closed is no longer the hover panel: `hoverPanel`
+    // skipped any target equal to `hoverBb`, so a chunk whose panel the
+    // reader closed could not be reopened by a hover or a search's top-result
+    // flight until another chunk was hovered (found 2026-11-14 by G-157).
+    // Planted `plantHoverBbSticks`: kept, as before.
+    if (id === this.hoverBb && !this.plantHoverBbSticks) this.hoverBb = "";
     this.stopBillboardLoop();
     // A unit node exists for its panel: it goes with it (G-251). Kept, they
     // stood as grey nodes no projection would ever place -- read as scans

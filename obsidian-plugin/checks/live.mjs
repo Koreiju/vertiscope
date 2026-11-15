@@ -3797,6 +3797,9 @@ export function makeChecks(env) {
           for (let i = 0; i < 60 && !(v.graph && v.searchField); i++) await sleep(500);
           const f = v.searchField;
           if (!f) return { error: "no search field" };
+          // The NAKED bar is this check's subject; since 159 the field opens as the
+          // retrieval panel and folds to the bar (G-359 covers the panel).
+          const wasPanel = f.el.classList.contains("is-panel"), savedPlace = localStorage.getItem("domvec-search-panel"); f.setPanel(false); await sleep(100);
           // In CHUNK view: every result is its own drawn node there. In the url
           // view a closed page's chunks are not drawn, so its results light the
           // page node once (G-167) -- not what this check asks.
@@ -3815,12 +3818,20 @@ export function makeChecks(env) {
           const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
           if (bv) bv.plantNoWebSearch = true;
           const flown0 = v.searchStats.flown_top;
+          // Panels persist after a hover (G-125), across runs too: each arm starts
+          // with none open, so a panel open afterwards was opened by its query.
+          for (const k of [...v.billboards.keys()]) { try { v.closeBillboard(k); } catch (e) {} }
+          const bb0 = new Set(v.billboards.keys()), hs0 = { ...v.hoverStats };
           try {
             const box = f.el.getBoundingClientRect(), cv = v.canvasEl.getBoundingClientRect();
             const placement = { centre_off: Math.round((box.left + box.width / 2) - (cv.left + cv.width / 2)),
                                 bottom_gap: Math.round(cv.bottom - box.bottom), placeholder: f.input.placeholder,
                                 naked: !f.el.classList.contains("is-active") };
             f.input.value = "protocol"; f.k = 12;
+            // Each showSearch the query causes, as it saw it: was there a top, and was it flown.
+            const trace = [], ss0 = v.showSearch;
+            v.showSearch = function (...a) { const r = ss0.apply(this, a); const t = this.searchState && this.searchState.targets[0];
+              trace.push({ ms: Math.round(performance.now()), n: a[0] && a[0].length, shown: a[1], top: t ? String(t.id).slice(0, 8) : null, lvl: t && t.level, flown: this.searchStats.flown_top, ff: this.flownFor === this.searchState?.query }); return r; };
             await f.run();
             for (let i = 0; i < 20 && !v.searchState; i++) await sleep(250);
             await sleep(600); v.batchSync();
@@ -3829,17 +3840,27 @@ export function makeChecks(env) {
                            ...v.batch.lastStats, lights: v.batch.lightStats.lights, scroll_left: f.scroller.scrollLeft };
             // Which nodes draw as themselves: the shown results, and nothing else.
             const rs = v.graph.nodeRelSize(), d = v.graph.graphData();
-            const asSelf = d.nodes.filter((n) => { const l = v.lookOf(n, rs, v.drawnMedia); return !l.glass; }).map((n) => String(n.id));
+            // Drawn as itself: visible and not a colourless lens. Results are glass
+            // orbs in their own colour since 2026-10-17 (G-209), so "not glass"
+            // counted only the ego's notes, which the world hides at size 0.
+            const asSelf = d.nodes.filter((n) => { const l = v.lookOf(n, rs, v.drawnMedia); return l.half > 0 && !(l.glass && l.alpha === 0); }).map((n) => String(n.id));
             const shownIds = v.searchState.targets.slice(0, f.shown).filter(Boolean).map((n) => String(n.id));
             left.self_ids = asSelf.length; left.self_are_shown = asSelf.every((id) => shownIds.includes(id));
+            left.self_not_shown = asSelf.filter((id) => !shownIds.includes(id)).slice(0, 8).map((id) => { const n = d.nodes.find((m) => String(m.id) === id); return String(id).slice(0, 24) + ":" + (n && (n.kind || n.level || n.type || "")); });
             // Colourless lenses: glass with no glow of its own -- what a search
             // turns every other node into (the default orb glows, alpha 1).
             const lensCount = () => d.nodes.filter((n) => { const l = v.lookOf(n, rs, v.drawnMedia); return l.glass && l.alpha === 0; }).length;
             left.colourless = lensCount();
             // The top result flown to and its panel opened, as a hover does (item 94).
-            await sleep(700);
+            // Keyed by the node the top hit RESOLVED to (searchState.targets[0]):
+            // a store-wide copy is drawn as its lead, under the lead's id, and
+            // the hover's panel opens after its dwell -- up to 3 s, not 700 ms.
+            const topId = () => (v.searchState && v.searchState.targets[0] && v.searchState.targets[0].id) || (f.hits[0] && f.hits[0].cid);
+            for (let i = 0; i < 30 && !(v.billboards.has(topId()) && !bb0.has(topId())); i++) await sleep(100);
             left.flown_top = v.searchStats.flown_top - flown0;
-            left.top_panel = !!(f.hits[0] && v.billboards.has(f.hits[0].cid));
+            left.top_panel = !!topId() && v.billboards.has(topId()) && !bb0.has(topId());
+            left.top_id = String(topId() || "").slice(0, 60); left.top_is_hit = !!f.hits[0] && topId() === f.hits[0].cid;
+            left.trace = trace.slice(0, 12); v.showSearch = ss0; left.hover = Object.fromEntries(Object.entries(v.hoverStats).map(([k, x]) => [k, x - (hs0[k] || 0)]).filter(([, dd]) => dd)); left.hover_bb = String(v.hoverBb || "").slice(0, 20); left.pending = String(v.hoverBbPending || "").slice(0, 20);
             // The soft index: at s = 1.5 the second result is part-way in -- a
             // half-coloured orb, not yet lit (2026-10-11: "smoothly brighten on
             // soft integer result nodes").
@@ -3853,7 +3874,9 @@ export function makeChecks(env) {
             // Scrolled to the right: more shown, the brightest at the scrolled index.
             f.scroller.scrollLeft = f.scroller.scrollWidth; f.scroller.dispatchEvent(new Event("scroll"));
             await sleep(500); v.batchSync();
-            const glowOf = (n) => (n ? (v.lookOf(n, rs, v.drawnMedia).glow || 0) : null);
+            // A result's brightness b: a picture carries it as \`glow\`; a glass orb
+            // (the default since G-209, 2026-10-17) as its alpha, 1 + 1.5 b.
+            const glowOf = (n) => { if (!n) return null; const l = v.lookOf(n, rs, v.drawnMedia); return l.glow !== undefined ? l.glow : (l.glass && l.alpha >= 1 ? Math.round((l.alpha - 1) / 1.5 * 1000) / 1000 : 0); };
             const tg = v.searchState.targets;
             const right = { shown: f.shown, window: f.window.length, ...v.batch.lastStats, lights: v.batch.lightStats.lights,
                             glow_first: glowOf(tg[0]), glow_last: glowOf(tg[f.shown - 1]), distinct_last: tg.indexOf(tg[f.shown - 1]) === f.shown - 1 };
@@ -3861,6 +3884,7 @@ export function makeChecks(env) {
             const cleared = { colourless: lensCount(), orbs: v.batch.lastStats.glass, lights: v.batch.lightStats.lights, state: !!v.searchState };
             return { planted: ${planted}, level: v.level, placement, left, right, cleared, stats: { ...v.searchStats } };
           } finally {
+            try { if (savedPlace === null) localStorage.removeItem("domvec-search-panel"); else localStorage.setItem("domvec-search-panel", savedPlace); if (wasPanel) f.setPanel(true); } catch (e) {}
             v.plantNoGlass = false; v.plantNoTopFlight = false; if (bv) bv.plantNoWebSearch = false; f.input.value = ""; await f.run();
             if (v.level !== startLevel && unit) { unit.click(); await settle(); }
           }
@@ -3868,7 +3892,7 @@ export function makeChecks(env) {
         const clean = await arm(false), planted = await arm(true);
         const c = clean;
         const pass = !c.error && c.placement.naked && c.placement.placeholder === "search" && Math.abs(c.placement.centre_off) <= 4 && c.placement.bottom_gap < 60
-          && c.left.hits >= 2 && c.left.shown === 1 && /^showing \/ results · \d+ matching$/.test(c.left.count_text)
+          && c.left.hits >= 2 && c.left.shown === 1 && /^showing \/ results · (\d+ retrieved of )?\d+ matching$/.test(c.left.count_text)
           && c.left.colourless > 0 && c.left.lights === 1 && c.left.self_are_shown
           && c.right.shown === c.right.window && c.right.window === Math.min(12, c.left.hits) && c.right.lights >= 1 && c.right.lights <= 16
           && (!c.right.distinct_last || (c.right.glow_last === 1 && c.right.glow_first < c.right.glow_last))
@@ -10793,6 +10817,173 @@ export function makeChecks(env) {
           pass: !c.error && c.flown === 1 && c.arrived === 1 && c.travel > 0 && c.miss !== null && c.miss <= Math.max(0.05, c.travel * 0.01)
                 && Math.abs(c.moved - c.travel) <= Math.max(1, c.travel * 0.02) && c.turned < 1e-4 && (c.already + c.tagged) >= 1
                 && !p.error && p.flown === 0 && p.moved === 0,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-361",
+      asks: "the tiered search streams pages in and its top result can change while the query is the same: the flight and its panel follow the top the strip ends up leading with, and the superseded flight's panel is closed (found 2026-11-15: flown to the first page's top, the panel on a result no longer first); planted (plantFirstTopOnly): the first top is the one flown to, whatever leads after",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1000);
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const f = v && v.searchField;
+          if (!f || !v.graph) return { error: "no search field or graph" };
+          const unit = [...v.containerEl.querySelectorAll(".domvec-graph-bar button")].find((b) => /^(pages|chunks)$/.test(b.textContent.trim()));
+          if (v.level !== "chunk" && unit) {
+            unit.click();
+            for (let i = 0; i < 240 && !(v.level === "chunk" && v.umapOnly && v.graph && v.graph.graphData().nodes.length > 2000); i++) await sleep(500);
+            let last = -1; for (let i = 0; i < 90; i++) { await sleep(500); const c = v.graph ? v.graph.graphData().nodes.length : 0; if (c && c === last) break; last = c; }
+          }
+          if (v.level !== "chunk") return { error: "chunk view never arrived", level: v.level };
+          const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+          if (bv) bv.plantNoWebSearch = true;
+          for (const k of [...v.billboards.keys()]) { try { v.closeBillboard(k); } catch (e) {} }
+          v.plantFirstTopOnly = ${planted};
+          const tops = [], ss0 = v.showSearch;
+          v.showSearch = function (...a) { const r = ss0.apply(this, a); const t = this.searchState && this.searchState.targets[0]; const id = t ? String(t.id) : ""; if (id && tops[tops.length - 1] !== id) tops.push(id); return r; };
+          const st0 = { ...v.searchStats };
+          // Which page answers first is a race; the rank-1 page (which holds the
+          // final top) is held back 800 ms so the provisional top always comes
+          // from another page -- the case this check is about, every run.
+          const pg0 = f.tiers.page; let held = false;
+          f.tiers.page = async (...a) => { if (!held) { held = true; await sleep(800); } return pg0.apply(f.tiers, a); };
+          try {
+            f.input.value = "protocol"; f.k = 12; await f.run();
+            const top = () => (v.searchState && v.searchState.targets[0] && String(v.searchState.targets[0].id)) || "";
+            for (let i = 0; i < 40 && !v.billboards.has(top()); i++) await sleep(100);
+            await sleep(300);
+            const final = top();
+            return { planted: ${planted}, tops: tops.map((t) => t.slice(0, 8)), changed: tops.length > 1, final: final.slice(0, 8),
+                     final_open: v.billboards.has(final), open: [...v.billboards.keys()].map((k) => String(k).slice(0, 8)),
+                     stale_open: tops.slice(0, -1).filter((t) => v.billboards.has(t)).length,
+                     flown: v.searchStats.flown_top - st0.flown_top, reflown: v.searchStats.top_reflown - (st0.top_reflown || 0) };
+          } finally {
+            f.tiers.page = pg0; v.showSearch = ss0; v.plantFirstTopOnly = false; if (bv) bv.plantNoWebSearch = false;
+            f.input.value = ""; await f.run();
+          }
+        })()`, { timeout: 200000 });
+        const c = (await arm(false)) || {}, p = (await arm(true)) || {};
+        return {
+          // Non-vacuous only where the top DID change mid-stream: the arm says so.
+          pass: !c.error && c.changed && c.flown === 1 && c.reflown >= 1 && c.final_open && c.stale_open === 0
+            && !p.error && p.changed && p.reflown === 0 && !p.final_open,
+          evidence: { clean: c, planted: p },
+        };
+      },
+    },
+    {
+      id: "G-360",
+      asks: "a panel the reader closed opens again (found 2026-11-14 by G-157): search a query and its top result's panel opens; close that panel; clear the search and ask the same query again -- its top result's panel opens again; planted (plantHoverBbSticks: closing left the graph believing the panel still open) it never reopens",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1000);
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const f = v && v.searchField;
+          if (!f || !v.graph) return { error: "no search field or graph" };
+          // CHUNK view, as G-157: in the url view a query's top result is often
+          // a page node, which a hover lights rather than opening a chunk panel.
+          const unit = [...v.containerEl.querySelectorAll(".domvec-graph-bar button")].find((b) => /^(pages|chunks)$/.test(b.textContent.trim()));
+          if (v.level !== "chunk" && unit) {
+            unit.click();
+            for (let i = 0; i < 240 && !(v.level === "chunk" && v.umapOnly && v.graph && v.graph.graphData().nodes.length > 2000); i++) await sleep(500);
+            let last = -1; for (let i = 0; i < 90; i++) { await sleep(500); const c = v.graph ? v.graph.graphData().nodes.length : 0; if (c && c === last) break; last = c; }
+          }
+          if (v.level !== "chunk") return { error: "chunk view never arrived", level: v.level };
+          const bv = app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+          if (bv) bv.plantNoWebSearch = true;
+          const topId = () => (v.searchState && v.searchState.targets[0] && v.searchState.targets[0].id) || "";
+          const trail = [];
+          const ask = async (q) => { const fl0 = v.searchStats.flown_top, hb0 = String(v.hoverBb || "").slice(0, 8), pd0 = String(v.hoverBbPending || "").slice(0, 8);
+            f.input.value = q; await f.run();
+            // This query's own state: a superseded run returns early, and the last
+            // query's open panel would satisfy a bare "top has a panel".
+            for (let i = 0; i < 150 && !(v.searchState && v.searchState.query === q && v.flownFor === q && topId() && v.billboards.has(topId())); i++) await sleep(100);
+            trail.push({ q: q.slice(0, 8), top: topId().slice(0, 8), flown: v.searchStats.flown_top - fl0, hb0, pd0, hb: String(v.hoverBb || "").slice(0, 8), pd: String(v.hoverBbPending || "").slice(0, 8), open: v.billboards.has(topId()), bbs: v.billboards.size, ff: v.flownFor === q });
+            return topId(); };
+          try {
+            for (const k of [...v.billboards.keys()]) { try { v.closeBillboard(k); } catch (e) {} }
+            v.plantHoverBbSticks = ${planted};
+            const A = "patricia trie insert and split";
+            const t1 = await ask(A); const opened1 = !!t1 && v.billboards.has(t1);
+            if (t1) v.closeBillboard(t1);
+            const closed = !!t1 && !v.billboards.has(t1);
+            // The reader closes it and asks the SAME query again (a different query
+            // between would open its own panel and move hoverBb, which hides the defect).
+            f.input.value = ""; await f.run(); await sleep(300);
+            const t2 = await ask(A);
+            return { planted: ${planted}, top: String(t1).slice(0, 40), same_top: t1 === t2, opened1, closed, reopened: !!t2 && v.billboards.has(t2), trail };
+          } finally {
+            v.plantHoverBbSticks = false; if (bv) bv.plantNoWebSearch = false;
+            f.input.value = ""; await f.run();
+          }
+        })()`, { timeout: 200000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.opened1 && c.closed && c.same_top && c.reopened === true && !p.error && p.opened1 && p.same_top && p.reopened === false,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-359",
+      asks: "the search bar is the database retrieval CELL PANEL (PLUGIN_GOAL 159: 'The search bar should be expanded and become a draggable cell panel that is the database retrieval function in our README'): on the 3D pane the search field is a panel with a header naming it; the real pointer dragging that header moves it by the drag (and keeps it in the pane); dragging its right edge widens it; a query typed into it fills it with results; planted (__domvecPlantNakedSearch) it stays the naked bar",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1000);
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const f = g && g.searchField;
+          if (!f) return { error: "no search field" };
+          const savedPlace = localStorage.getItem("domvec-search-panel");
+          window.__domvecPlantNakedSearch = ${planted};
+          const pe = (t, x, y, tg) => (tg || window).dispatchEvent(new PointerEvent(t, { clientX: x, clientY: y, bubbles: true, cancelable: true, button: 0, buttons: t === "pointerup" ? 0 : 1, pointerId: 1, pointerType: "mouse" }));
+          try {
+            f.setPanel(true); await sleep(100);
+            const el = f.el, panel = el.classList.contains("is-panel");
+            const title = (f.head.querySelector(".domvec-search3d-title") || {}).textContent || "";
+            if (!panel) return { planted: ${planted}, panel, title };
+            f.placeAt(0, 0); await sleep(50);
+            const r0 = el.getBoundingClientRect(), h = f.head.getBoundingClientRect();
+            // What the drag CAN move it, the pane being the bound (a 460 px panel in a narrow pane has little room).
+            const H0 = el.offsetParent.getBoundingClientRect();
+            const room = [Math.max(0, H0.right - r0.right), Math.max(0, H0.bottom - r0.bottom)];
+            const want = [Math.min(120, room[0]), Math.min(60, room[1])];
+            const hx = h.left + 30, hy = h.top + h.height / 2;
+            pe("pointerdown", hx, hy, f.head); for (let i = 1; i <= 5; i++) { pe("pointermove", hx + 24 * i, hy + 12 * i); await sleep(16); } pe("pointerup", hx + 120, hy + 60);
+            await sleep(50);
+            const r1 = el.getBoundingClientRect();
+            // The right edge, 3 px inside it: hover first (the cursor band), then drag 80 px.
+            const ex = r1.right - 3, ey = r1.top + r1.height / 2;
+            el.dispatchEvent(new PointerEvent("pointermove", { clientX: ex, clientY: ey, bubbles: true, buttons: 0 }));
+            pe("pointerdown", ex, ey, el); for (let i = 1; i <= 4; i++) { pe("pointermove", ex + 20 * i, ey); await sleep(16); } pe("pointerup", ex + 80, ey);
+            await sleep(50);
+            const r2 = el.getBoundingClientRect();
+            f.input.value = "patricia trie insert"; f.input.dispatchEvent(new Event("input"));
+            let items = 0;
+            for (let i = 0; i < 40 && !items; i++) { await sleep(250); items = f.strip.querySelectorAll(".domvec-search3d-item").length; }
+            const home = el.offsetParent.getBoundingClientRect();
+            return { planted: ${planted}, panel, title, room: room.map(Math.round), want: want.map(Math.round), moved: [Math.round(r1.left - r0.left), Math.round(r1.top - r0.top)],
+                     widened: Math.round(r2.width - r1.width), inside: r2.left >= home.left - 1 && r2.top >= home.top - 1 && r2.bottom <= home.bottom + 1,
+                     items, drags: f.panelStats.drags };
+          } finally {
+            window.__domvecPlantNakedSearch = false;
+            f.input.value = ""; f.input.dispatchEvent(new Event("input"));
+            // The reader's place and size, as they were: a check leaves no trace in them.
+            try { if (savedPlace === null) localStorage.removeItem("domvec-search-panel"); else localStorage.setItem("domvec-search-panel", savedPlace); } catch (e) {}
+            try { const sp = JSON.parse(savedPlace || "null"); f.el.style.width = ""; f.el.style.height = ""; f.setPanel(!sp || sp.panel !== false); } catch (e) {}
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.panel === true && /retrieval/.test(c.title) && (c.want[0] + c.want[1]) >= 20
+                && Math.abs(c.moved[0] - c.want[0]) <= 3 && Math.abs(c.moved[1] - c.want[1]) <= 3
+                && Math.abs(c.widened - 80) <= 3 && c.inside && c.items > 0 && !p.error && p.panel === false,
           evidence: { clean, planted },
         };
       },

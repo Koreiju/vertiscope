@@ -374,6 +374,11 @@ Done and confirmed live (each check carries a planted arm that fails):
 | Hover headers, not raw markdown (the okapi tooltip); tooltip text escaped | G-351 | b05ce8d |
 | The selected node seen through a panel: the tether's end ring drawn over the card | G-352 | 15e79f8 |
 | The tiny hover preview: the presented picture 64-140 px, others still at most 28 | G-353 -- PARAMETER check only | 46db1c2 |
+| The search bar is the draggable database-retrieval CELL PANEL (159) | G-359, live: moved [120,60] by a real pointer drag, widened 80 px, 12 results; planted stays the bar | 2026-11-15 |
+| A panel the reader closed reopens on the same query (closing left `hoverBb` set) | G-360, live: reopened; planted never | 2026-11-15 |
+| The top-result flight follows the top the strip ENDS with (the tiered search streams; it flew to the first page's top) | G-361, live: 4 provisional tops, re-flown 3x, only the final panel open; planted: the stale one open | 2026-11-15 |
+| G-157 green again: three stale readings in the check, not the app -- `!glass` counted the ego's hidden notes (results are glass since G-209), brightness read from `glow` (glass carries it in alpha), the count text predates G-211 | G-157, live: 1 drawn as itself = the shown 1; glow 0.2 -> 1 | 2026-11-15 |
+| G-167 / G-178 plants were vacuous: the tiered path bypassed `searchAsk`; the hooks moved to the field's `onAsked`/`onAnswered` on both paths | G-167, G-178 live | 2026-11-15 |
 
 Measured, not fixed:
 - **G-113 fails** (passed 2026-10-07): hovering a chunk on the fixture

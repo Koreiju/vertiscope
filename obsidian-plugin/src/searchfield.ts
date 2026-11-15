@@ -18,6 +18,8 @@
  *  as the slider passes it rather than at an integer step (2026-10-11: "a
  *  soft brightness gradient to the scroll slider so that we can smoothly
  *  brighten on soft integer result nodes"). */
+import { edgeResizable } from "./edgeresize";
+
 export function softIndex(frac: number, k: number): number {
   if (!(k > 0)) return 0;
   const f = Math.min(1, Math.max(0, Number.isFinite(frac) ? frac : 0));
@@ -162,6 +164,14 @@ export class SearchField {
   private onClear: () => void;
   /** Told when the reader presses search: the web half (item 107). */
   onSubmit: (query: string) => void = () => {};
+  /** Every query typed, whichever path answers it (tiered or single): the
+   *  graph's per-query work. The tiered path (G-210) never reached the
+   *  graph's `searchAsk`, so its plants and its store-following stopped
+   *  running there -- G-167's and G-178's planted arms read exactly as clean
+   *  (2026-11-14). */
+  onAsked: (query: string) => void = () => {};
+  /** The answer, whichever path: the graph may act on the hits. */
+  onAnswered: (query: string, hits: FieldHit[]) => Promise<void> | void = () => {};
   /** Tiered retrieval (G-210), when the host provides it. */
   tiers: FieldTiers | null = null;
   /** Planted: one ranking of every chunk, as before. */
@@ -264,12 +274,85 @@ export class SearchField {
     return this.hits;
   }
 
+  head!: HTMLElement;
+  private unedge: (() => void) | null = null;
+  panelStats = { panel: false, drags: 0, toggles: 0, last: "" };
+  private static PLACE_KEY = "domvec-search-panel";
+  private loadPlace(): { panel?: boolean; x?: number; y?: number; w?: number; h?: number } | null {
+    try { return JSON.parse(window.localStorage.getItem(SearchField.PLACE_KEY) || "null"); } catch { return null; }
+  }
+  private savePlace(): void {
+    const on = this.el.hasClass("is-panel");
+    const rec: any = { panel: on };
+    if (on) { rec.x = this.el.offsetLeft; rec.y = this.el.offsetTop; rec.w = this.el.offsetWidth; rec.h = this.el.offsetHeight; }
+    try { window.localStorage.setItem(SearchField.PLACE_KEY, JSON.stringify({ ...(this.loadPlace() || {}), ...rec })); } catch { /* a convenience only */ }
+  }
+  /** Within the pane: the panel never leaves it. */
+  private placeAt(x: number, y: number): void {
+    const home = (this.el.offsetParent as HTMLElement | null) || this.el.parentElement;
+    const W = home?.clientWidth || 800, H = home?.clientHeight || 600;
+    const w = this.el.offsetWidth, h = this.el.offsetHeight;
+    this.el.style.left = `${Math.round(Math.max(0, Math.min(W - w, x)))}px`;
+    this.el.style.top = `${Math.round(Math.max(0, Math.min(H - h, y)))}px`;
+  }
+  /** The panel (true) or the naked bar (false). */
+  setPanel(on: boolean): void {
+    if ((window as any).__domvecPlantNakedSearch) on = false;
+    const was = this.el.hasClass("is-panel");
+    this.el.toggleClass("is-panel", on);
+    this.panelStats.panel = on;
+    if (on !== was) { this.panelStats.toggles++; this.panelStats.last = on ? "panel" : "bar"; }
+    if (on) {
+      const at = this.loadPlace();
+      const home = (this.el.offsetParent as HTMLElement | null) || this.el.parentElement;
+      const W = home?.clientWidth || 800, H = home?.clientHeight || 600;
+      // A saved size never exceeds the pane it opens in (a 564 px panel was
+      // saved, then opened in a 404 px pane and could not move at all).
+      if (at && Number.isFinite(at.w) && Number.isFinite(at.h)) {
+        this.el.style.width = `${Math.min(at.w!, W)}px`; this.el.style.height = `${Math.min(Math.max(150, at.h!), H)}px`;
+      } else if (this.el.offsetWidth > W) this.el.style.width = `${W}px`;
+      if (at && Number.isFinite(at.x) && Number.isFinite(at.y)) this.placeAt(at.x!, at.y!);
+      else this.placeAt((W - this.el.offsetWidth) / 2, H - this.el.offsetHeight - 18);
+    } else {
+      this.el.style.left = ""; this.el.style.top = ""; this.el.style.width = ""; this.el.style.height = "";
+      this.el.style.maxWidth = ""; this.el.style.maxHeight = "";
+    }
+    this.savePlace();
+  }
+  /** Carried by its header: the real pointer, captured so a drag that leaves the pane still ends. */
+  private dragFrom(e: PointerEvent): void {
+    if (e.button !== 0 || !this.el.hasClass("is-panel") || (e.target as HTMLElement).closest("button")) return;
+    if (this.el.dataset.domvecEdge) return;                     // an edge: the resize has it
+    e.preventDefault(); e.stopPropagation();
+    const r = this.el.getBoundingClientRect(), home = ((this.el.offsetParent as HTMLElement | null) || this.el.parentElement)!.getBoundingClientRect();
+    const dx = e.clientX - r.left, dy = e.clientY - r.top;
+    const move = (m: PointerEvent) => this.placeAt(m.clientX - home.left - dx, m.clientY - home.top - dy);
+    const up = () => {
+      window.removeEventListener("pointermove", move, true); window.removeEventListener("pointerup", up, true);
+      this.panelStats.drags++; this.savePlace();
+    };
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", up, true);
+  }
+
   constructor(host: HTMLElement,
               ask: (query: string, total: number) => Promise<FieldAnswer | null>,
               onShow: (hits: FieldHit[], shown: number, soft: number) => void,
               onClear: () => void) {
     this.ask = ask; this.onShow = onShow; this.onClear = onClear;
     this.el = host.createDiv({ cls: "domvec-search3d" });
+    // THE DATABASE RETRIEVAL CELL (PLUGIN_GOAL 159: "The search bar should be
+    // expanded and become a draggable cell panel that is the database
+    // retrieval function in our README"). A header names it and carries it;
+    // any edge resizes it; its place is kept for this viewer. The header's
+    // toggle folds it back to the naked bar (84-87). Planted
+    // `window.__domvecPlantNakedSearch`: the naked bar only, as before.
+    this.head = this.el.createDiv({ cls: "domvec-search3d-head" });
+    this.head.createSpan({ cls: "domvec-search3d-title", text: "database retrieval" });
+    this.head.createSpan({ cls: "domvec-search3d-sub", text: "frequency × PageRank × semantic" });
+    const fold = this.head.createEl("button", { cls: "domvec-search3d-fold", text: "–" });
+    fold.title = "fold to the bar";
+    fold.addEventListener("click", (e) => { e.stopPropagation(); this.setPanel(false); });
     // The results strip, above the input (G-222). Scrolled by the bar below
     // and scrolling it back; each item lit as its node is; hovering one flies
     // to its node.
@@ -311,6 +394,13 @@ export class SearchField {
     this.scroller = this.el.createDiv({ cls: "domvec-search3d-scroll" });
     this.track = this.scroller.createDiv({ cls: "domvec-search3d-track" });
     this.paint();
+    const unfold = row.createEl("button", { cls: "domvec-search3d-unfold", text: "⤢" });
+    unfold.title = "open as a panel";
+    unfold.addEventListener("click", (e) => { e.stopPropagation(); this.setPanel(true); });
+    this.head.addEventListener("pointerdown", (e) => this.dragFrom(e));
+    this.unedge = edgeResizable(this.el, { band: 6, minW: 300, minH: 150,
+      enabled: () => this.el.hasClass("is-panel"), onEnd: () => this.savePlace() });
+    window.requestAnimationFrame(() => this.setPanel(!(window as any).__domvecPlantNakedSearch && this.loadPlace()?.panel !== false));
 
     this.input.addEventListener("input", () => {
       window.clearTimeout(this.debounce);
@@ -406,10 +496,11 @@ export class SearchField {
     }
     this.stats.queries++;
     const t0 = performance.now();
+    this.onAsked(q);
     if (this.tiers && !this.plantSingleTier) {
       const done = await this.tiered(q, seq, false);
       if (seq !== this.seq) return;
-      if (done) { this.stats.answered++; this.stats.lastMs = Math.round(performance.now() - t0); return; }
+      if (done) { await this.onAnswered(q, this.hits); this.stats.answered++; this.stats.lastMs = Math.round(performance.now() - t0); return; }
     }
     const got = await this.ask(q, this.total);
     this.tierStats.single_ms = Math.round(performance.now() - t0);
@@ -419,6 +510,7 @@ export class SearchField {
     this.stats.answered++;
     this.hits = got.hits.slice(0, this.total);
     this.matching = Math.max(got.n || 0, this.hits.length);
+    await this.onAnswered(q, this.hits);
     this.scroller.scrollLeft = 0;                 // it begins at the very left
     this.paint();
     this.onScroll(true);
