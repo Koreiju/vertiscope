@@ -132,6 +132,34 @@ def test_an_early_stall_is_killed_before_the_deadline(tmp_path, monkeypatch):
     assert code == sv.STUCK_CODE and time.time() - t0 < 20
 
 
+# A child that has LOADED something (200 MB resident) and then waits, as a
+# fresh venv's worker waits on Defender scanning its DLLs.
+LOADED_WAITER = [sys.executable, "-c", "import time; b = b'x' * 200_000_000; time.sleep(60)"]
+
+
+def test_a_large_waiting_child_is_not_an_early_stall(tmp_path, monkeypatch):
+    """2026-11-15, the README proof: a new user's first start was killed as an
+    early stall three times. Large and waiting is loading, not hung."""
+    import domvec.obsidian.supervise as sv
+    monkeypatch.setattr(sv, "EARLY_S", 2.0)
+    monkeypatch.setattr(sv, "START_DEADLINE_S", 600.0)
+    t0 = time.time()
+    code = sv._run_child(LOADED_WAITER, None, 1, timeout=8.0)
+    code = code[0] if isinstance(code, tuple) else code
+    assert code == sv.STUCK_CODE and time.time() - t0 >= 7.5      # left to the timeout, not killed at 2 s
+
+
+def test_planted_cpu_only_kills_the_large_waiting_child(tmp_path, monkeypatch):
+    import domvec.obsidian.supervise as sv
+    monkeypatch.setattr(sv, "EARLY_S", 2.0)
+    monkeypatch.setattr(sv, "START_DEADLINE_S", 600.0)
+    monkeypatch.setenv("DOMVEC_PLANT_EARLY_CPU_ONLY", "1")
+    t0 = time.time()
+    code = sv._run_child(LOADED_WAITER, None, 1, timeout=30.0)
+    code = code[0] if isinstance(code, tuple) else code
+    assert code == sv.STUCK_CODE and time.time() - t0 < 7.0
+
+
 def test_a_stalled_compaction_child_is_skipped_not_waited(tmp_path, monkeypatch):
     import domvec.obsidian.supervise as sv
     monkeypatch.setattr(sv, "EARLY_S", 2.0)
@@ -276,3 +304,11 @@ def test_the_front_reports_a_worker_that_died_as_dead_not_busy(monkeypatch):
     monkeypatch.delenv("DOMVEC_PLANT_NO_FATAL_WATCH")
     st.health_at, st.backend = time.time(), "up"            # it answered since: a handled exception
     assert health_body(st)["backend"] == "up"
+
+
+def test_compacting_a_store_that_was_never_created_says_so(tmp_path):
+    """A first start that died before opening the store left compaction to
+    crash on FileNotFoundError, read as a second failure (2026-11-15)."""
+    from domvec.obsidian.compact import compact
+    got = compact(tmp_path)
+    assert got["swapped"] is False and "no store" in got["why_not"]

@@ -63,6 +63,13 @@ START_STALL_S = float(os.environ.get("DOMVEC_START_STALL_S") or 60.0)
 #: timeout). Planted `DOMVEC_PLANT_NO_START_DEADLINE` covers both.
 EARLY_S = float(os.environ.get("DOMVEC_EARLY_S") or 25.0)
 EARLY_CPU_S = 0.5
+#: ...and still SMALL. A child of a freshly installed venv waits on Windows
+#: Defender scanning every new torch/numba DLL as it loads them: little CPU
+#: for half a minute, but hundreds of MB resident. Killed on CPU alone, a new
+#: user's first start was killed three times and the supervisor gave up
+#: (2026-11-15, the README proof: exit 70 three times in 84 s). The hang this
+#: rule exists for sat at 13 MB. Planted `DOMVEC_PLANT_EARLY_CPU_ONLY=1`.
+EARLY_RSS_MB = 40.0
 #: Stalled starts in a row after which this supervisor gives up: once one
 #: hangs, every later child of the same supervisor hung too (2026-10-25,
 #: five in a row), while a FRESH supervisor's first child always started. It
@@ -199,7 +206,9 @@ def _run_child(command: List[str], env: dict, port: Optional[int], *,
             early_done = True
             try:
                 t = ps.cpu_times() if ps is not None else None
-                if t is not None and (t.user + t.system) < EARLY_CPU_S:
+                rss = ps.memory_info().rss / 1e6 if ps is not None else 0.0
+                small = rss < EARLY_RSS_MB or os.environ.get("DOMVEC_PLANT_EARLY_CPU_ONLY") == "1"
+                if t is not None and (t.user + t.system) < EARLY_CPU_S and small:
                     proc.kill(); proc.wait()
                     return done(STUCK_CODE)
             except Exception:                       # noqa: BLE001

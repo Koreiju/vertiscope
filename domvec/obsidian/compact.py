@@ -85,6 +85,11 @@ def compact(workspace: Path, *, keep_as: Optional[str] = None, pool_bytes: int =
     stamp = time.strftime("%Y%m%d-%H%M%S")
     work = workspace / ("compact-work-" + stamp)
     t = {}
+    # A store never created (a first start that died before opening it) has
+    # nothing to compact; it crashed here with FileNotFoundError and read as a
+    # compaction failure on top of the real one (2026-11-15, the README proof).
+    if not db.exists():
+        return {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "swapped": False, "why_not": "no store yet: nothing to compact"}
     out: Dict = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "before_mb": round(db.stat().st_size / 1e6, 1),
                  "swapped": False}
     t0 = time.time()
