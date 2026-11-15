@@ -563,11 +563,23 @@ Open (not started this session):
       a Python loop over every row; now the changed rows are spliced in
       (54 ms against 490 ms at 20k rows, identical output);
     - tf-idf by sparse products; now on the data array (1.3-1.6x).
+    - **the machine itself** (0382ae2): Windows moved the sidecar, a
+      long-lived background process, onto the efficiency cores after ~3 s
+      of work -- a fixed loop 53-60 ms, then 140-230 ms for good. Opted out
+      (`domvec.qos`, read back from the OS in `/health`): 51-56 ms for 10 s.
+      G-210 then (run 73, right after the confirm's plugin reload): first
+      answer 1,106 ms (run 72: 18.5 s; run 70: 29.7 s), the whole check
+      5.5 s against 25-112 s.
+    - the render: an unchanged page answered by one Merkle comparison
+      again (31205aa), 1.9-4.6 ms at N=1,600 -- a regression since
+      2026-08-29 (56.8-155 ms), found by the projection harness.
     Still open:
     - the first search after a worker restart waits for `index_warm` (62.7 s
-      seen, index_warm 104.6 s);
-    - G-210's clean arm runs right after the confirm's plugin reload and
-      still reads 18.5 s; its planted arm, second, 1.6 s;
+      seen, index_warm 104.6 s -- throttled; not re-measured since);
+    - an edit's render is O(page) in its page-global passes: 62 ms at
+      N=1,600, against 9-12 ms on 2026-08-29;
+    - tests/test_projection_place.py::test_the_fit_itself_is_unchanged
+      fails on HEAD (axis 0 spread to -0.015..1.000), not from this work;
     - tier 1's lexical phase reads 2.6-2.8 s in windows full of capture,
       projector and chunk-route work. At most ~0.4 s of that is the rebuild
       after a write (synthetic, 90k rows, 4.2M counts); the rest is
