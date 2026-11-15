@@ -458,6 +458,40 @@ Open (not started this session):
     It now accepts any `{ref}` row, which is what the requirement asks.
   Code-module black boxes (G-308) were already done and are unchanged.
   Not yet seen by a person: G-364 is in Confirm.
+- The ego's camera, first and third person (PLUGIN_GOAL 146/159, re-run
+  2026-11-15). Live:
+  - Passing: G-299, G-303, G-333, G-342, G-339, G-338, G-291, G-282,
+    G-307, G-319, G-345, G-352, G-355, G-340.
+  - Three defects found and fixed in G-311 (zoom through the cockpit). Each
+    moved a camera the agent had just placed:
+    (1) TrackballControls' damped momentum from an earlier ordinary zoom:
+        12.97 off the chase, 0.3 off the vehicle;
+    (2) a recentre's 400 ms tween still running;
+    (3) the recentre's deferred `tighten()`, which JUMPS the camera 450 ms
+        later -- a chase sample at 1,939-2,012 and a cockpit 533-2,759
+        units off its vehicle whenever a check (or a reader) left the map
+        view within half a second.
+    The agent now clears the momentum, ends the tween, and the late tighten
+    yields to it. Run 29: chase deviation 0, cockpit 0; planted 12.97 /
+    2,759.
+  - G-337 (the inset holds still): the check read a mesh the craft had
+    replaced. A check run flips the craft's membership and it rebuilds, and
+    the arm measured the old ego -- 1.5 px, swept 3.5 NDC, a drag into
+    empty space. It now waits for the craft to settle and follows the
+    current ego: spread 0, 12.7 px, 60 px drag.
+  - **Failing, and NOT caused by this change.** An A/B with the three fixes
+    switched off by their plants (run 32) failed the same way:
+    - G-344's planted arm is pinned at camera-space z = -1, even from a
+      recentred camera;
+    - G-320's microscope steps nearer but never opens the panel;
+    - G-275's ego-view flight plan never moves the camera;
+    - G-5 has 14-52 page nodes off screen at the default camera;
+    - G-231 spreads retrieval over 5 pages (floor 6).
+    G-94 has been failing since 2026-11-04. Each needs its own diagnosis.
+  - Also found: the map view can be left with its focus ONE unit ahead of
+    the camera (a cockpit's framing), and checks that save and restore the
+    camera pass it on across plugin reloads. Recentre clears it (1 -> 427).
+    Where it first comes from is not yet known.
 - Chat cells: prompt/response cells hard-linked in sequence; context
   control. **Latency, measured 2026-11-14** (`/profile` -> `chat_stream`,
   which now records `first_ms`, `tok_s`, `waited_ms`, `in_flight`,

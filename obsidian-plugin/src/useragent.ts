@@ -47,6 +47,8 @@ export interface AgentHost {
   /** World units: the nearest a camera may be to `n` and still see all of
    *  it (graph.ts: its drawn radius over the half field of view). */
   fit?(n: any): number;
+  /** End a running camera tween where the camera is now (G-311). */
+  haltTween?(): void;
 }
 
 const KEY = "domvec.useragent";
@@ -456,9 +458,31 @@ export class UserAgent {
     }
     return false;
   }
+  /** The controls' own momentum, cleared when the AGENT places the camera
+   *  (as `fly` does): Trackball's damped zoom, pan and turn keep applying a
+   *  past gesture on every frame's update, and moved the chase camera off its
+   *  vehicle -- a sample at 1,937 in a chase closing 81 -> 52, a cockpit
+   *  1,427 units from its vehicle (G-311, 2026-11-15). Planted
+   *  `plantKeepMomentum`: kept, as before. */
+  plantKeepMomentum = false;
+  /** Planted: a running camera tween is left to finish (it overwrites the placement). */
+  plantKeepTween = false;
+  /** Every time the agent places the camera: a deferred camera move begun
+   *  before (the recentre's tighten, 450 ms on) yields to it. */
+  placements = 0;
+  private settle(ctl: any): void {
+    this.placements++;
+    if (!this.plantKeepTween) this.host.haltTween?.();
+    if (this.plantKeepMomentum || !ctl) return;
+    if (ctl._zoomStart && ctl._zoomEnd) ctl._zoomStart.copy(ctl._zoomEnd);
+    if (ctl._panStart && ctl._panEnd) ctl._panStart.copy(ctl._panEnd);
+    if (ctl._movePrev && ctl._moveCurr) ctl._movePrev.copy(ctl._moveCurr);
+    if (typeof ctl._lastAngle === "number") ctl._lastAngle = 0;
+  }
   private chase(): void {
     const { cam, ctl } = this.axes();
     if (!ctl || !this.vehicle) return;
+    this.settle(ctl);
     const D = this.chaseD || Math.max(20, this.vmax * 0.6), v = this.vehicle;
     const up = v3(cam.up.x, cam.up.y, cam.up.z);
     cam.position.set(v.p.x - v.dir.x * D + up.x * D * 0.35, v.p.y - v.dir.y * D + up.y * D * 0.35, v.p.z - v.dir.z * D + up.z * D * 0.35);
@@ -485,6 +509,7 @@ export class UserAgent {
       this.view = "first";
       if (v) {
         const L = Math.max(1, Math.hypot(ctl.target.x - cam.position.x, ctl.target.y - cam.position.y, ctl.target.z - cam.position.z));
+        this.settle(ctl);
         cam.position.set(v.p.x, v.p.y, v.p.z);
         ctl.target.set(v.p.x + v.dir.x * L, v.p.y + v.dir.y * L, v.p.z + v.dir.z * L);
         cam.lookAt(ctl.target);

@@ -11388,15 +11388,47 @@ export function makeChecks(env) {
           const after0 = scene.onAfterRender;
           try {
             c.plantInsetOnTick = planted === "tick"; g.plantNoCraftDrag = planted === "drag"; c.plantStaleMatrices = planted === "stale";
-            g.agent.setMode("ego"); await sleep(1500);
-            const ego = c.nodes.find((n) => n.kind === "ego");
+            // Read once the render hook has PLACED the inset and its nodes are
+            // SPREAD (G-299's lesson): a run straight after a rebuild read a
+            // 2.1 px ego and a drag that hit nothing -- fresh meshes, unplaced.
+            const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 100) await sleep(100); return ok(); };
+            // ...and SETTLED: a check run flips the craft's membership (check
+            // notes count only while a run is on), which rebuilds it -- every
+            // node replaced. Measured across that, the check held the OLD ego
+            // mesh, which nothing places: it read 1.5 px, swept 3.5 NDC across
+            // the screen and a drag aimed at empty space (runs 22, 23, 26).
+            const settled = () => !c.building && !c.stale && c.builtDuringRun === c.checksRunning();
+            await until(settled, 10000); await sleep(300); await until(settled, 5000);
+            out.settled = settled();
+            const rp0 = c.insetStats.render_places;
+            g.agent.setMode("ego");
+            await until(() => c.insetStats.render_places >= rp0 + 2, 6000);
+            const spreadOut = () => new Set(c.nodes.filter((n) => n.mesh).map((n) => [n.mesh.position.x, n.mesh.position.y, n.mesh.position.z].map((v) => Math.round(v * 10)).join(","))).size > 1;
+            const tw = Date.now();
+            await until(spreadOut, 8000);
+            out.placed = { renders: c.insetStats.render_places - rp0, spread_after_ms: Date.now() - tw, spread: spreadOut() };
+            {
+              const egoN = c.nodes.find((n) => n.kind === "ego");
+              const wp = egoN && egoN.mesh ? egoN.mesh.position.clone().setFromMatrixPosition(egoN.mesh.matrixWorld) : null;
+              out.inset_state = { view: g.agent.view, mode: g.agent.mode, planeScale: c.planeScale, radius: c.stats.radius, visible: c.stats.visible,
+                                  building: c.building, stale: c.stale, anchor: c.stats.anchor, craft_view: c.stats.view,
+                                  ego_cam_d: wp ? Math.round(wp.distanceTo(g.graph.camera().position) * 10) / 10 : null,
+                                  ego_scale: egoN && egoN.mesh ? Math.round(egoN.mesh.scale.x * 1000) / 1000 : null,
+                                  ego_parent: egoN && egoN.mesh && egoN.mesh.parent ? egoN.mesh.parent.type : null };
+            }
+            await sleep(300);
+            // The ego the reader SEES: the craft may rebuild mid-arm (a vault
+            // event inside its two-second throttle), replacing every node --
+            // so each read takes the current one.
+            const egoNow = () => c.nodes.find((n) => n.kind === "ego");
+            let ego = egoNow();
             if (!ego || !ego.mesh) return { error: "no ego node" };
             // One shape: every craft node's geometry is the ego's own.
             out.shapes = new Set(c.nodes.filter((n) => n.mesh).map((n) => n.mesh.geometry.type + ":" + n.mesh.geometry.uuid)).size;
             // 1. Steadiness: the ego node's NDC at every DRAW, the camera yawing.
             const seen = [];
             // From matrixWorld -- what the draw and the pick actually use.
-            scene.onAfterRender = (r, sc, camera) => { const v = ego.mesh.position.clone().setFromMatrixPosition(ego.mesh.matrixWorld).project(camera); seen.push([v.x, v.y]); };
+            scene.onAfterRender = (r, sc, camera) => { const e = egoNow() || ego; if (!e.mesh) return; const v = e.mesh.position.clone().setFromMatrixPosition(e.mesh.matrixWorld).project(camera); seen.push([v.x, v.y]); };
             const q0 = cam.quaternion.clone();
             for (let i = 0; i < 50; i++) { g.agent.key(new KeyboardEvent("keydown", { key: "ArrowLeft" })); await frame(); }
             await frame(); await frame();
@@ -11404,8 +11436,10 @@ export function makeChecks(env) {
             const turned = 2 * Math.acos(Math.min(1, Math.abs(q0.dot(cam.quaternion)))) * 180 / Math.PI;
             const xs = seen.map((p) => p[0]), ys = seen.map((p) => p[1]);
             const spread = seen.length ? Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) : null;
+            out.rebuilt_during_yaw = egoNow() !== ego;
             out.steady = { draws: seen.length, camera_turned_deg: Math.round(turned * 10) / 10, spread_ndc: spread == null ? null : Math.round(spread * 10000) / 10000 };
             await sleep(600);
+            ego = egoNow() || ego;
             // 2. Size: the ego node's drawn diameter in pixels.
             const r = el.getBoundingClientRect();
             const geo = ego.mesh.geometry; geo.computeBoundingSphere();
@@ -11671,7 +11705,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-311",
-      asks: "zoom passes through the cockpit (PLUGIN_GOAL 75, G-274): in the ego view's third person, wheel-in over the 3D view closes the chase on the vehicle and passes INTO the cockpit -- first person, the camera at the vehicle -- and wheel-out from that cockpit backs out to third person; a wheel-out in a cockpit entered by the keyboard is the ordinary zoom; planted (plantNoZoomThrough) the wheel never changes the view",
+      asks: "zoom passes through the cockpit (PLUGIN_GOAL 75, G-274): in the ego view's third person, wheel-in over the 3D view closes the chase on the vehicle and passes INTO the cockpit -- first person, the camera at the vehicle -- and wheel-out from that cockpit backs out to third person; a wheel-out in a cockpit entered by the keyboard is the ordinary zoom -- and its leftover momentum does not carry into the chase or the cockpit after V (the chase only closes, the cockpit is AT the vehicle); planted (plantNoZoomThrough) the wheel never changes the view, (plantKeepMomentum) the controls' damped zoom keeps moving the placed camera; a recentre's camera tween still in flight, and its deferred tighten, do not overwrite the chase or the cockpit (planted plantKeepTween + plantLateTighten: they do)",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -11697,6 +11731,57 @@ export function makeChecks(env) {
             a.setView("first"); wheel(100); await sleep(50);
             out.keyboard_cockpit_kept = a.view === "first";
             out.stats = a.zoomStats;
+            // The reader's sequence (2026-11-15: the camera thrown 1,427 units
+            // out of the cockpit, a chase sample at 1,937): an ORDINARY wheel-out
+            // in a keyboard cockpit -- the controls take it, and Trackball's
+            // damped zoom keeps applying it frame after frame -- then V at once,
+            // then wheel in. Each arm both ways: the agent clears the controls'
+            // momentum when it places the camera (plantKeepMomentum: it doesn't).
+            const dist = (q) => cam.position.distanceTo(new cam.position.constructor(q.x, q.y, q.z));
+            out.momentum = {};
+            for (const keep of [true, false]) {
+              a.plantKeepMomentum = keep;
+              a.setView("first"); a.setView("third"); a.setView("first");
+              wheel(300); wheel(300); await sleep(20);
+              a.setView("third");
+              const vm = { ...a.vehicle.p }, dm = [];
+              // Each sample against the chase's own geometry: D behind, 0.35 D up.
+              let dev = 0;
+              for (let i = 0; i < 14 && a.view === "third"; i++) {
+                wheel(-100); await sleep(30);
+                const d = dist(vm); dm.push(Math.round(d * 10) / 10);
+                if (a.view === "third" && a.chaseD) dev = Math.max(dev, Math.abs(d - a.chaseD * Math.hypot(1, 0.35)));
+              }
+              const entered = a.view === "first";
+              await sleep(300);
+              let rises = 0; for (let i = 1; i < dm.length; i++) if (dm[i] > dm[i - 1] + 0.5) rises++;
+              out.momentum[keep ? "planted" : "clean"] = { closing: dm.slice(0, 8), rises, max_dev: Math.round(dev * 100) / 100, entered, at_vehicle: Math.round(dist(a.vehicle.p) * 1000) / 1000 };
+            }
+            a.plantKeepMomentum = false;
+            // A recentre's camera tween (400 ms) still in flight when the chase
+            // is taken -- map and back to ego, then V and the wheel (the
+            // sequence that threw a chase sample to 1,939 after a previous
+            // check restored the map view). The agent ends the tween when it
+            // places the camera; planted plantKeepTween: the tween wins.
+            out.tween = {};
+            for (const keep of [true, false]) {
+              a.plantKeepTween = keep; v.plantLateTighten = keep;
+              const y0 = v.reframeStats.tighten_yielded;
+              a.setView("first"); a.setMode("map"); a.setMode("ego"); await sleep(30);
+              a.setView("third");
+              const vm = { ...a.vehicle.p }, dm = [];
+              let dev = 0;
+              for (let i = 0; i < 14 && a.view === "third"; i++) {
+                wheel(-100); await sleep(30);
+                const d = dist(vm); dm.push(Math.round(d * 10) / 10);
+                if (a.view === "third" && a.chaseD) dev = Math.max(dev, Math.abs(d - a.chaseD * Math.hypot(1, 0.35)));
+              }
+              const entered = a.view === "first";
+              await sleep(700);
+              out.tween[keep ? "planted" : "clean"] = { closing: dm.slice(0, 8), max_dev: Math.round(dev * 100) / 100, entered, at_vehicle: Math.round(dist(a.vehicle.p) * 1000) / 1000,
+                                                       tighten_yielded: v.reframeStats.tighten_yielded - y0 };
+            }
+            a.plantKeepTween = false; v.plantLateTighten = false;
             return out;
           } finally {
             v.plantNoZoomThrough = false;
@@ -11709,7 +11794,13 @@ export function makeChecks(env) {
         const planted = await arm(true);
         const ok = (x) => !!x && x.entered && x.at_vehicle < 1e-3 && x.closing.length >= 2 && x.closing[1] < x.closing[0]
           && x.backed_out && x.keyboard_cockpit_kept;
-        return { pass: ok(clean) && !!planted && !planted.entered, evidence: { clean, planted } };
+        const m = (clean && clean.momentum) || {}, mc = m.clean || {}, mp = m.planted || {};
+        const steadyChase = mc.entered && mc.rises === 0 && mc.max_dev < 0.5 && mc.at_vehicle < 1e-3;
+        const thrown = !mp.entered || mp.rises > 0 || mp.max_dev > 2 || mp.at_vehicle > 0.1;
+        const tw = (clean && clean.tween) || {}, tc = tw.clean || {}, tp = tw.planted || {};
+        const tweenHalted = tc.entered && tc.max_dev < 0.5 && tc.at_vehicle < 1e-3;
+        const tweenWins = !tp.entered || tp.max_dev > 2 || tp.at_vehicle > 1;
+        return { pass: ok(clean) && !!planted && !planted.entered && steadyChase && thrown && tweenHalted && tweenWins, evidence: { clean, planted } };
       },
     },
     {

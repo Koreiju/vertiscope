@@ -7114,10 +7114,24 @@ export class GraphView extends ItemView {
     return this.craftIds.get(id) || null;
   }
 
+  /** Planted (G-311): the recentre's deferred tighten jumps the camera even after the agent took it. */
+  plantLateTighten = false;
+  reframeStats = { tighten_yielded: 0 };
   agent: UserAgent = new UserAgent({
     camera: () => (this.graph as any)?.camera(),
     controls: () => (this.graph as any)?.controls(),
     recentre: () => this.reframe?.(),
+    // A camera tween in flight (the recentre's 400 ms) writes the camera every
+    // frame until it ends: a placement inside it was overwritten (G-311, a
+    // chase sample at 1,939). The library ends the running tween when a new
+    // position is set, so the camera is set where it already is.
+    haltTween: () => {
+      const g: any = this.graph, cam = g?.camera(), ctl = g?.controls();
+      if (!cam || !g?.cameraPosition) return;
+      const p = { x: cam.position.x, y: cam.position.y, z: cam.position.z };
+      const t = ctl?.target ? { x: ctl.target.x, y: ctl.target.y, z: ctl.target.z } : undefined;
+      g.cameraPosition(p, t, 0);
+    },
     fit: (n: any) => this.fitDistance(n),
     touched: (what: string, trusted = true) => {
       const by: Record<string, number> = ((window as any).__domvecReaderBy = (window as any).__domvecReaderBy || {});
@@ -10949,6 +10963,12 @@ export class GraphView extends ItemView {
         eye = { x: c.x + w.x * this.fullViewDist, y: c.y, z: c.z + w.z * this.fullViewDist };
       }
       graph.cameraPosition(eye, c, 400);
+      // The tighten below JUMPS the camera to the world's framing; once the
+      // agent has placed it since (V, the chase, the cockpit) or left the map
+      // view, the frame is no longer this one's -- it threw a chase sample to
+      // 2,012 and a cockpit 533 units off its vehicle (G-311). Planted
+      // `plantLateTighten`: it jumps regardless, as before.
+      const placed0 = this.agent.placements, mode0 = this.agent.mode;
       // After the flight, not during it: the camera is animating for 400ms
       // and a measurement taken mid-flight frames the halfway point.
       window.setTimeout(() => {
@@ -10956,8 +10976,11 @@ export class GraphView extends ItemView {
         const d: any = graph.graphData();
         this.fitChunkSizes(d);
         graph.d3ReheatSimulation?.();
-        // Tightened onto the world alone only when no craft is in the shot.
-        if (!k) tighten();
+        // Tightened onto the world alone only when no craft is in the shot,
+        // and only while the camera is still this frame's.
+        const ours = this.agent.placements === placed0 && this.agent.mode === mode0;
+        if (!ours) this.reframeStats.tighten_yielded++;
+        if (!k && (ours || this.plantLateTighten)) tighten();
       }, 450);
     };
     this.keepBillboards(canvas);
