@@ -351,9 +351,27 @@ class Proof:
                 hits, top = got["hits"], got.get("top", "")
                 break
             time.sleep(3.0)
+        why = {}
+        if not hits:
+            # The store's side of a search that found nothing: what it holds,
+            # and what it answers itself when asked the field's two questions.
+            h = _health(PORT) or {}
+            why["store"] = {k: h.get(k) for k in ("pages", "chunks_total", "chunks_without_vector",
+                                                   "chunks_without_lexical_row", "chunks_empty_md")}
+            for path in ("/search_pages?q=%s&k=5" % word, "/search?q=%s&k=5" % word):
+                try:
+                    with urllib.request.urlopen(f"http://127.0.0.1:{PORT}{path}", timeout=30) as r:
+                        why[path.split("?")[0]] = json.dumps(json.load(r))[:600]
+                except Exception as exc:                # noqa: BLE001
+                    why[path.split("?")[0]] = "error: %s" % str(exc)[:200]
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/pages", timeout=30) as r:
+                    why["/pages"] = json.dumps(json.load(r))[:600]
+            except Exception as exc:                    # noqa: BLE001
+                why["/pages"] = "error: %s" % str(exc)[:120]
         ok = opened.get("health_ok") and pages >= 1 and (g or {}).get("nodes", 0) > 0 and hits >= 1
         return self.record("use", ok, t0, page=FIXTURE, pages=pages, page_after_s=t_page, graph=g,
-                           graph_after_s=t_graph, word=word, hits=hits, top=top, **opened)
+                           graph_after_s=t_graph, word=word, hits=hits, top=top, why=why, **opened)
 
     # -- the whole thing ------------------------------------------------------
 
