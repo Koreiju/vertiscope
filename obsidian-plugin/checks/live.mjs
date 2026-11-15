@@ -10400,6 +10400,64 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-347",
+      asks: "panels resize from any edge, found by hovering (PLUGIN_GOAL 159: 'panels should be resizable with regular hover on edges, since our current displays are quite tight'): over a chunk panel's right edge the pointer shows ew-resize and a drag of 140 px widens it by 140 past its old 340/500 px cap; its left edge drag moves the left edge and keeps the right; over a plane card's bottom edge ns-resize, and a 90 px drag makes it 90 px taller and marks it sized by the reader; planted (__domvecPlantNoEdgeResize) no edge shows a cursor and no drag resizes",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, desk = window.__domvecPlane;
+          if (!g || !g.graph || !desk) return { error: "no graph or plane" };
+          window.__domvecPlantNoEdgeResize = ${planted};
+          const NL = String.fromCharCode(10);
+          const path = "domvec-checks/g347 " + (${planted} ? "p" : "c") + Date.now() + ".md";
+          let bbId = null;
+          const pe = (el, t, x, y) => (t === "pointerdown" ? el : window).dispatchEvent(new PointerEvent(t, { clientX: x, clientY: y, bubbles: true, cancelable: true, button: 0, buttons: t === "pointerup" ? 0 : (t === "pointerdown" ? 1 : 0), pointerId: 7, pointerType: "mouse" }));
+          const drag = async (el, x, y, dx, dy) => { pe(el, "pointerdown", x, y); for (let i = 1; i <= 5; i++) { window.dispatchEvent(new PointerEvent("pointermove", { clientX: x + dx * i / 5, clientY: y + dy * i / 5, bubbles: true, buttons: 1, pointerId: 7, pointerType: "mouse" })); await sleep(16); } pe(el, "pointerup", x + dx, y + dy); await sleep(60); };
+          const hoverAt = (el, x, y) => { el.dispatchEvent(new PointerEvent("pointermove", { clientX: x, clientY: y, bubbles: true, buttons: 0, pointerId: 7, pointerType: "mouse" })); return el.dataset.domvecEdge || ""; };
+          try {
+            // A chunk panel: a drawn chunk's own.
+            const n = g.graph.graphData().nodes.find((m) => m.level !== "page" && !String(m.id).startsWith("page:") && Number.isFinite(m.x) && !g.billboards.has(m.id));
+            if (!n) return { error: "no chunk drawn" };
+            await g.openBillboard(n); bbId = n.id;
+            const bb = g.billboards.get(n.id)?.el; if (!bb) return { error: "no panel" };
+            bb.removeClass("is-preview"); await sleep(300);
+            let r = bb.getBoundingClientRect();
+            const w0 = r.width, right0 = r.right;
+            const bb_cursor = hoverAt(bb, r.right - 2, r.top + r.height / 2);
+            await drag(bb, r.right - 2, r.top + r.height / 2, 140, 0);
+            r = bb.getBoundingClientRect(); const w1 = r.width;
+            const right1 = r.right;
+            await drag(bb, r.left + 2, r.top + r.height / 2, -60, 0);
+            r = bb.getBoundingClientRect();
+            const left_moved = Math.round(r.width - w1), right_kept = Math.abs(r.right - right1) < 2;
+            // A plane card.
+            await desk.create("slate", { path, text: ["---", "domvec: slate", "---", "g347", ""].join(NL) });
+            let card = null; for (let i = 0; i < 30 && !card; i++) { await sleep(200); card = desk.panelOf(path)?.card || null; }
+            if (!card) return { error: "no card" };
+            await sleep(400);
+            let cr = card.getBoundingClientRect(); const h0 = cr.height;
+            const card_cursor = hoverAt(card, cr.left + cr.width / 2, cr.bottom - 2);
+            await drag(card, cr.left + cr.width / 2, cr.bottom - 2, 0, 90);
+            cr = card.getBoundingClientRect();
+            return { planted: ${planted}, bb_cursor, bb_widened: Math.round(w1 - w0), bb_width: Math.round(w1), left_moved, right_kept, card_cursor, card_taller: Math.round(cr.height - h0), card_manual: !!desk.panelOf(path)?.manual };
+          } finally {
+            window.__domvecPlantNoEdgeResize = false;
+            if (bbId) { try { g.closeBillboard(bbId); } catch (e) {} }
+            try { desk.panelOf(path)?.leaf.detach(); } catch (e) {}
+            const f = app.vault.getAbstractFileByPath(path); if (f) await app.vault.trash(f, true);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.bb_cursor === "ew-resize" && Math.abs(c.bb_widened - 140) <= 3 && c.left_moved >= 55 && c.right_kept
+                && c.card_cursor === "ns-resize" && Math.abs(c.card_taller - 90) <= 3 && c.card_manual
+                && !p.error && p.bb_cursor === "" && Math.abs(p.bb_widened) <= 1 && p.card_cursor === "" && Math.abs(p.card_taller) <= 1,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-340",
       asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) scales the 2D ego plane and leaves the camera's distance alone; a pinch (wheel + ctrl) does NOT touch the plane (159: 'remove the pinch gesture ... stick to shift scroll'); a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
       async run() {

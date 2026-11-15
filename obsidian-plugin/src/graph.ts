@@ -42,6 +42,7 @@ import { baseFor, faviconFor, getSnapshot, pictureFor, putSnapshot, renderSnapsh
 import type { ActRecord, ActResult } from "./panelact";
 import { PANEL_VIEW, PanelView } from "./panelview";
 import { SearchField, brightness, fade, holdStep, type FieldHit, type FieldAnswer } from "./searchfield";
+import { edgeResizable } from "./edgeresize";
 
 export const GRAPH_VIEW = "domvec-graph-view";
 
@@ -3675,6 +3676,12 @@ export class GraphView extends ItemView {
     // (2026-10-18, PLUGIN_GOAL 172). A click keeps it (see above), and it is
     // an ordinary panel from then on. Planted `plantPreviewBlocks`.
     if (fromHover && !this.plantPreviewBlocks) el.addClass("is-preview");
+    // Resized from any edge or corner, found by hovering (159: "panels should
+    // be resizable with regular hover on edges"); never while a preview.
+    edgeResizable(el, { enabled: () => !el.hasClass("is-preview"),
+      // A panel following its node is placed by an offset from it: a left /
+      // top edge drag moves that offset, or the next frame undoes it.
+      shift: (dl, dt) => { const en: any = this.billboards.get(node.id); if (en && !en.pinned) { en.dx = (en.dx ?? 12) + dl; en.dy = (en.dy ?? 12) + dt; } } });
     // Which chunk this panel is, readable without the view: a hover panel and
     // a pinned one can be open at once, and "the first .domvec-bb" read the
     // wrong one (D-36, 2026-10-07).

@@ -28,6 +28,7 @@ import { TERMINAL_VIEW } from "./terminal";
  */
 import { App, MarkdownView, TFile } from "obsidian";
 import { chunkNoteState, clampToPlane, makeDraggable, type PlaceStats } from "./planecard";
+import { edgeResizable } from "./edgeresize";
 import { isSlate, COCKPIT_PATH } from "./cockpit";
 
 export interface PlaneHost {
@@ -330,7 +331,10 @@ export class PlaneDesk {
         (x, y) => this.wireDrop(fpath, x, y),
         () => this.host.moved?.(fpath));
       clampToPlane(card, plane);
-      p = { path: file.path, card, leaf, head, undrag };
+      // Any edge or corner resizes it, found by hovering (159); a resize is the
+      // READER sizing it, as the corner's was (G-326).
+      const unedge = edgeResizable(card, { onEnd: () => { const q = this.panelOf(fpath); if (q) { q.manual = true; this.foldStats.manual++; } } });
+      p = { path: file.path, card, leaf, head, undrag: () => { unedge(); undrag(); } };
       // The panel is the note's as soon as the note shows; anything mounted
       // beneath it (the browser under its cockpit) arrives after -- a browser
       // booting for seconds once hid the panel itself (G-300).

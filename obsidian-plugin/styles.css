@@ -1374,3 +1374,14 @@ body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) 
 .domvec-plane-card:has(.domvec-slate-graph) .workspace-leaf,
 .domvec-plane-card:has(.domvec-slate-graph) .view-content,
 .domvec-plane-card:has(.domvec-slate-graph) .cm-scroller { height: auto !important; overflow: visible !important; }
+
+/* Edge resize (PLUGIN_GOAL 159): the edge's cursor over the whole band,
+   children included -- the panel's content sets its own cursors otherwise. */
+[data-domvec-edge="ns-resize"], [data-domvec-edge="ns-resize"] * { cursor: ns-resize !important; }
+[data-domvec-edge="ew-resize"], [data-domvec-edge="ew-resize"] * { cursor: ew-resize !important; }
+[data-domvec-edge="nwse-resize"], [data-domvec-edge="nwse-resize"] * { cursor: nwse-resize !important; }
+[data-domvec-edge="nesw-resize"], [data-domvec-edge="nesw-resize"] * { cursor: nesw-resize !important; }
+.domvec-bb.is-resizing, .domvec-plane-card.is-resizing { user-select: none; }
+.domvec-bb.is-resizing *, .domvec-plane-card.is-resizing * { user-select: none; }
+/* A resized chunk panel's body fills its new height. */
+.domvec-bb > .domvec-bb-body, .domvec-bb > .domvec-bb-md { flex: 1 1 auto; min-height: 0; }
