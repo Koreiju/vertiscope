@@ -457,6 +457,17 @@ Open (not started this session):
   re-index of sidecar.py (~6k lines + its CPG) is ~36 s.
 - The search bar as a draggable retrieval cell panel; the empty-cell
   hyperlink chain (needs the reader's screenshots to know which link).
+  Checked 2026-11-15 15:24 on the most plausible reading (PLUGIN_GOAL 159:
+  "searching for a cell ... clicking on the empty cell hyperlink to the
+  actual artifact"): the retrieval cell asked "unionRect xpaths sensor
+  resolver shadow roots" returns 20 hits, the first 12 all `code://repo/...`
+  modules, every one with a node to fly to; right-clicking the first
+  (media_coverage.py) opens a billboard holding 1,105 characters of the
+  module's docstring -- NOT empty. What it does not have: a link. Its header
+  names `code://repo/analytics/media_coverage.py : /module/docstring` as
+  plain text (0 anchors in the panel), so nothing in the cell opens the
+  artifact itself. Whether that is the "hyperlink to the actual artifact"
+  the reader meant is still theirs to say.
 - Cell hierarchies / black-box unfolding for markdown and notebook cells,
   as ego states: LIVE-CONFIRMED (G-364, run 21; regressions G-277, G-278,
   G-280, G-308, G-322, G-329 pass, run 20). What was built:
