@@ -2685,14 +2685,20 @@ export function makeChecks(env) {
             // A SIMPLE TREE: how many drawn nodes hang from more than one
             // parent (2026-09-27: an open page read as a web of links).
             const end = (x) => (typeof x === "object" && x ? x.id : x);
-            const parents = new Map();
+            // Over the OPEN page's chunks only (2026-11-15): counted over every
+            // link it read 133 in every arm, clean and planted alike -- the
+            // corpus's page-to-page links, not the open page's tree.
+            const open = new Set(ns.filter((c) => !c.force && c.level !== "page" && String(c.url || "").split("#")[0] === String(PAGE).split("#")[0]).map((c) => c.id));
+            const parents = new Map(), parentsAll = new Map();
             for (const l of v.graph.graphData().links) {
               if (l.force) continue;
               const t = end(l.target);
-              parents.set(t, (parents.get(t) || 0) + 1);
+              parentsAll.set(t, (parentsAll.get(t) || 0) + 1);
+              if (open.has(t)) parents.set(t, (parents.get(t) || 0) + 1);
             }
             const multi = [...parents.values()].filter((k) => k > 1).length;
-            return { chunks: r.length, p50: q(0.5), p90: q(0.9), max: q(1), multi_parent: multi };
+            const multiAll = [...parentsAll.values()].filter((k) => k > 1).length;
+            return { chunks: r.length, p50: q(0.5), p90: q(0.9), max: q(1), multi_parent: multi, open_chunks: open.size, multi_parent_corpus: multiAll };
           };
           try {
             await land(PAGE, 30000);
@@ -2705,7 +2711,7 @@ export function makeChecks(env) {
             await sleep(1500);
             const orbited = await orbit();
             const afterOrbit = orbited ? v.seenLayout() : null;
-            if (afterOrbit) afterOrbit.tree_seen = treeSeen();
+            if (afterOrbit) { afterOrbit.tree_seen = treeSeen(); afterOrbit.near_page = nearPage(); }
             b.go("about:blank");
             // Collapsed: the page's chunks fold into its node once it is settled.
             for (let i = 0; i < 40; i++) {
@@ -2744,6 +2750,8 @@ export function makeChecks(env) {
         // distance to the nearest other page).
         const near = (x) => !!x && !!x.near_page && x.near_page.chunks > 0 && x.near_page.max <= 0.5;   // < D/2: nearer its own page than any other
         const tree = (x) => !!x && !!x.near_page && x.near_page.multi_parent === 0;
+        // At both moments: the web plant's links land after the first sample (run 57).
+        const treeBoth = (r) => tree(r.on_page) && (!r.after_orbit || tree(r.after_orbit));
         // A tree drawn in 3D: the edges it projects to the screen are counted
         // and REPORTED (a 3D tree seen from any side crosses itself on screen;
         // nothing turns it to face the camera -- 2026-09-28: "this is an
@@ -2754,9 +2762,9 @@ export function makeChecks(env) {
         // Projected chunks sit at their fit (G-97 judges that); the follow
         // test and the distance spread are reported, not judged -- an open
         // page is the fit's picture, not a force layout (2026-09-28).
-        const ok = (r) => near(r.on_page) && tree(r.on_page) && legible(r.on_page) && planar(r.on_page)
+        const ok = (r) => near(r.on_page) && treeBoth(r) && legible(r.on_page) && planar(r.on_page)
           && legible(r.collapsed);
-        return { pass: ok(clean) && !legible(planted.on_page) && !near(plantedBig.on_page) && !tree(plantedWeb.on_page),
+        return { pass: ok(clean) && !legible(planted.on_page) && !near(plantedBig.on_page) && !treeBoth(plantedWeb),
                  evidence: { clean, planted_overlap: planted, planted_big: plantedBig, planted_web: plantedWeb } };
       },
     },
