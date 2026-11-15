@@ -137,7 +137,9 @@ class Proof:
 
     def script(self, step: str) -> str:
         body = "\n".join(self.blocks.get(step, []))
-        body = body.replace(GITHUB, "file:///" + REPO.as_posix())
+        # The committed tree in the folder a reader's clone makes (`vertiscope`,
+        # from the URL), not the one this repository's path would name.
+        body = body.replace(GITHUB, "file:///" + REPO.as_posix() + " " + GITHUB.rsplit("/", 1)[1])
         body = body.replace(VAULT_PLACEHOLDER, self.vault.as_posix())
         if self.plant in PLANTS:
             a, b = PLANTS[self.plant]
