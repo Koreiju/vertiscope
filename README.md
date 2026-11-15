@@ -83,9 +83,13 @@ restarts it.
 ```
 
 It serves on port 8787, which is where the plugin looks. It is up when
-`http://127.0.0.1:8787/health` answers `"backend": "up"`, which took about
-15 s in the proof. The first start downloads the embedding model (nomic,
-about 260 MB) into gpt4all's cache.
+`http://127.0.0.1:8787/health` answers. In the proof the first start in a
+fresh environment took 67-99 s: it compiles and loads torch and numba for
+the first time. Later starts take about 10 s. The first start also downloads
+the embedding model (nomic, about 260 MB) into gpt4all's cache.
+
+The sidecar also indexes this repository's own Python modules into the
+store, as `code://repo/...` pages, so they can be searched like any page.
 
 ### Use
 
@@ -93,8 +97,10 @@ about 260 MB) into gpt4all's cache.
   command *domvec bridge: Open the 3D graph*). It is empty until something is
   scanned.
 - **Open the browser cell** with the command *domvec bridge: Open the browser
-  cell*, and browse to a page by typing its address. As it loads, its chunks
-  stream into the store and appear in the 3D graph as nodes.
+  cell*, and browse to a web page (`http://` or `https://`) by typing its
+  address. As it loads, its chunks stream into the store and appear in the 3D
+  graph as nodes. In the proof a page was in the store 2 s after it loaded.
+  In the proof a `file://` page was never stored.
 - **Search** in the *database retrieval* panel at the bottom of the 3D graph.
   Type a word from a page you have scanned. The results are listed in the
   panel, and the top one is flown to and its panel opened.
