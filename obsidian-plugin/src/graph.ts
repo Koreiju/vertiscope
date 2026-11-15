@@ -610,6 +610,8 @@ export class GraphView extends ItemView {
           window.clearTimeout(this.craftClickTimer); this.craftClickAt = 0;
           this.craftClicks.double++; this.craft!.click(cn); return;
         }
+        // A tagged web chunk has no halo (no note): ONE click opens its panel.
+        if (cn.kind === "web" && !this.plantWebNodeNoOpen) { this.craft!.select(cn.id); this.craft!.click(cn); return; }
         this.craftClickAt = now; this.craftClickId = cn.id;
         // Selected at once, and SEEN selected (158: "I also can't select the
         // nodes"): a ring on it; the halo still opens after the double-click window.
@@ -6684,6 +6686,9 @@ export class GraphView extends ItemView {
   /** The chunks tagged into the ego (item 74b), as the store last said. */
   egoTags = new Set<string>();
   egoTagUrls: Record<string, string> = {};
+  egoTagTitles: Record<string, string> = {};
+  egoTagsMissing = 0;
+  plantDrawMissingTags = false;
   private egoPosted = "";
   /** The `+ ego` tag on a billboard: the chunk joins the ego set, or leaves it. */
   async tagEgo(cid: string, on: boolean): Promise<boolean> {
@@ -6758,8 +6763,20 @@ export class GraphView extends ItemView {
           const got: any = await this.sidecar.ego();
           this.egoTags = new Set((got && got.cids) || []);
           this.egoTagUrls = (got && got.cid_urls) || {};
-          return [...this.egoTags];
+          this.egoTagTitles = (got && got.cid_titles) || {};
+          // A tag the store holds no chunk for is not drawn -- it names nothing
+          // and opens nothing (159: the "beef" node was one). Kept in the ego
+          // set; counted. Planted `plantDrawMissingTags`: drawn, as before.
+          const missing = new Set<string>((got && got.missing) || []);
+          this.egoTagsMissing = missing.size;
+          return [...this.egoTags].filter((c) => this.plantDrawMissingTags || !missing.has(c));
         },
+        tagTitle: (cid: string) => this.egoTagTitles[cid] || "",
+        // A tagged chunk's ego node opens the WORLD node's own panel -- placed
+        // first if its page is not unfolded -- held on the plane (159: "Clicking
+        // on an ego node should open the markdown or linked nodes locally";
+        // the 3D world's panel is the authority for its representation).
+        openChunk: async (cid: string) => { const ok = await this.pinChunk(cid); this.pinWanted.delete(cid); return ok; },
       });
       (window as any).__domvecCraft = this.craft;
       // Only a NOTE changes the craft: it reads markdown and nothing else.
@@ -6794,6 +6811,8 @@ export class GraphView extends ItemView {
    * scene, as before.
    */
   plantPanelsPassThrough = false;
+  /** Planted (159): a click on a tagged web chunk's ego node opens nothing, as before. */
+  plantWebNodeNoOpen = false;
   panelGuardStats = { kept_off: 0 };
   onScene(e: Event): boolean {
     if (this.plantPanelsPassThrough) return true;

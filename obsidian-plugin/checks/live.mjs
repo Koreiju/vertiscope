@@ -10298,6 +10298,69 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-345",
+      asks: "a chunk tagged into the ego is named and opens (PLUGIN_GOAL 159: 'Clicking on an ego node should open the markdown or linked nodes locally'; 'Also not sure what \"beef\" ego node is about, nothing shows when it's clicked either'): its ego node's label is a title -- not its cid -- and one click on it, through the pane's own pointer handlers, opens THAT chunk's panel (the world node's own, placed first if its page is not unfolded); a tag whose chunk the store does not hold (the 'beef' node was one) is not drawn at all; planted (plantCidLabel) the label is the cid, (plantWebNodeNoOpen) the click opens nothing, (plantDrawMissingTags) the missing tags are drawn",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const c = window.__domvecCraft;
+          if (!g || !c || !g.graph) return { error: "no graph or craft" };
+          const planted = ${JSON.stringify(planted)};
+          const mode0 = g.agent.mode, flat0 = c.flatView;
+          let tagged = null;
+          try {
+            c.plantCidLabel = planted === "label"; g.plantWebNodeNoOpen = planted === "open"; g.plantDrawMissingTags = planted === "missing";
+            c.flatView = true; g.agent.setMode("map"); await sleep(800);
+            await c.fresh();
+            const eg = await g.sidecar.ego().catch(() => null), miss = new Set((eg && eg.missing) || []);
+            const drawn_missing = c.nodes.filter((n) => n.kind === "web" && miss.has(n.id.slice("craft:web:".length))).length;
+            if (planted === "missing") return { planted, missing: miss.size, drawn_missing };
+            // A cold sidecar answers past the build's bound; the late answer rebuilds the craft.
+            for (let i = 0; i < 4 && !c.nodes.some((n) => n.kind === "web"); i++) { await sleep(2000); await c.fresh(); }
+            let web = c.nodes.find((n) => n.kind === "web" && !miss.has(n.id.slice("craft:web:".length)));
+            if (!web) {
+              // None tagged: tag a drawn chunk for the check, untagged after.
+              const ch = g.graph.graphData().nodes.find((n) => n.cid || (n.kind === "chunk"));
+              const cid = ch && (ch.cid || ch.id);
+              if (!cid) return { error: "no web node and no chunk to tag" };
+              await g.tagEgo(cid, true); tagged = cid; await c.fresh();
+              web = c.nodes.find((n) => n.kind === "web" && n.id === "craft:web:" + cid);
+            }
+            if (!web || !web.mesh) return { error: "no web node" };
+            const cid = web.id.slice("craft:web:".length);
+            const hex = /^[0-9a-f]{8,}$/i.test(web.label) || cid.startsWith(web.label);
+            for (let i = 0; i < 4; i++) await frame();
+            const cam = g.graph.camera(), el = g.graph.renderer().domElement, r = el.getBoundingClientRect();
+            c.group.updateMatrixWorld(true);
+            const p = web.mesh.position.clone().project(cam);
+            const x = r.left + (p.x + 1) / 2 * r.width, y = r.top + (1 - p.y) / 2 * r.height;
+            const before = new Set([...g.billboards.keys()]);
+            const pe = (t) => el.dispatchEvent(new PointerEvent(t, { clientX: x, clientY: y, bubbles: true, button: 0, buttons: t === "pointerdown" ? 1 : 0, pointerId: 1, pointerType: "mouse" }));
+            pe("pointerdown"); await sleep(40); pe("pointerup");
+            let opened = [];
+            for (let i = 0; i < 40; i++) { await sleep(250); opened = [...g.billboards.keys()].filter((k) => !before.has(k)); if (opened.length) break; }
+            for (const k of opened) { try { g.closeBillboard(k); } catch (e) {} }
+            return { planted, missing: miss.size, drawn_missing, label: web.label, cid, label_is_cid: hex, opened, opened_this: opened.includes(cid) || opened.length === 1, title: g.egoTagTitles?.[cid] || "" };
+          } finally {
+            c.plantCidLabel = false; g.plantWebNodeNoOpen = false; g.plantDrawMissingTags = false; c.flatView = flat0;
+            if (tagged) { try { await g.tagEgo(tagged, false); } catch (e) {} }
+            g.agent.setMode(mode0); c.dirty();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(null), label = await arm("label"), open = await arm("open"), missing = await arm("missing");
+        const c = clean || {};
+        return {
+          pass: !c.error && c.label_is_cid === false && c.opened_this === true && c.drawn_missing === 0
+                && !!missing && (missing.missing === 0 || missing.drawn_missing > 0)
+                && !!label && label.label_is_cid === true
+                && !!open && !open.error && open.opened.length === 0,
+          evidence: { clean, label, open, missing },
+        };
+      },
+    },
+    {
       id: "G-340",
       asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) scales the 2D ego plane and leaves the camera's distance alone; a pinch (wheel + ctrl) does NOT touch the plane (159: 'remove the pinch gesture ... stick to shift scroll'); a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
       async run() {

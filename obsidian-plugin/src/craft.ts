@@ -74,6 +74,10 @@ export interface CraftHost {
   world(): { cx: number; cy: number; cz: number; r: number };
   /** A node of the WORLD graph by id (a chunk's cid, `page:<url>`). */
   worldNode(id: string): any;
+  /** A tagged chunk's title (its first line with words), from the sidecar. */
+  tagTitle?(cid: string): string;
+  /** Open a tagged chunk's panel (the world node's own), placing it if needed. */
+  openChunk?(cid: string): Promise<boolean>;
   /** Each recorded run's input -> its cell note (G-292). */
   signalEdges(): { note: string; cid: string; url: string }[];
   isOpen(path: string): boolean;
@@ -303,15 +307,22 @@ export class Craft {
    */
   sidecarWaitMs = 4000;
   plantUnboundedSidecar = false;
+  /** Planted: a sidecar answer past the bound is dropped; no rebuild follows. */
+  plantNoLateRebuild = false;
   sidecarStats = { timeouts: 0, last_timeout: "" };
   private lastTags: string[] = [];
   private lastProj: any = null;
   private within<T>(what: string, p: Promise<T>, fallback: T): Promise<T> {
     if (this.plantUnboundedSidecar) return p;
-    let timer = 0;
+    let timer = 0, late = false;
+    // An answer that arrives after the bound is not thrown away: it is what
+    // the next build will read (the host caches it), so the craft is rebuilt
+    // then -- bounded now, right soon after (G-345's first arm found no tags
+    // on a cold start).
+    p.then(() => { if (late && !this.plantNoLateRebuild) { (this.sidecarStats as any).late_rebuilds = ((this.sidecarStats as any).late_rebuilds || 0) + 1; this.dirty(); } }, () => {});
     return Promise.race([
       p.finally(() => window.clearTimeout(timer)),
-      new Promise<T>((r) => { timer = window.setTimeout(() => { this.sidecarStats.timeouts++; this.sidecarStats.last_timeout = what; r(fallback); }, this.sidecarWaitMs); }),
+      new Promise<T>((r) => { timer = window.setTimeout(() => { late = true; this.sidecarStats.timeouts++; this.sidecarStats.last_timeout = what; r(fallback); }, this.sidecarWaitMs); }),
     ]);
   }
 
@@ -424,7 +435,12 @@ export class Craft {
       const tags = this.host.egoTags ? await this.within("tags", this.host.egoTags().then((t) => (this.lastTags = t)), this.lastTags) : [];
       for (const cid of tags) {
         const w = this.host.worldNode(cid);
-        const label = String((w && (w.name || w.title)) || cid).slice(0, 18);
+        // Named as a reader names it (159: "not sure what 'beef' ego node is
+        // about"): the chunk's title from the store (markdown taken off -- a
+        // drawn node's own name is its raw first line, "[[Only include res"),
+        // else that name, else its page's -- the bare cid only when none exists.
+        const own = w && w.id === cid ? (w.name || w.title) : "";
+        const label = this.plantCidLabel ? cid.slice(0, 18) : String(this.host.tagTitle?.(cid) || own || (w && (w.name || w.title)) || cid).slice(0, 18);
         nodes.push({ id: "craft:web:" + cid, kind: "web", path: "", line: -1, label, local: { x: 0, y: 0, z: 0 } });
         edges.push({ a: ego.id, b: "craft:web:" + cid, kind: "root" });
       }
@@ -615,6 +631,8 @@ export class Craft {
   flatExtent: { x: number; y: number } | null = null;
   /** Planted: the inset at the fixed angle's distance, however wide the layout. */
   plantInsetFixedDistance = false;
+  /** Planted (159): a tagged chunk's node labelled by its cid, as the "beef" node was. */
+  plantCidLabel = false;
   /** Planted: on the 2D plane, the 3D layout's ellipse instead of the label's box. */
   plantFlatEllipse = false;
   /** Planted: labels offset along the world's x and y, not the craft's frame. */
@@ -1219,7 +1237,13 @@ export class Craft {
 
   /** A click on a craft node: its panel on the plane, or closed back into it. */
   click(n: CraftNode): "opened" | "closed" {
-    if (n.kind === "web" || n.kind === "code") return "opened";   // their panels are elsewhere
+    if (n.kind === "web") {
+      const cid = n.id.slice("craft:web:".length);
+      this.stats.opened++; (this.stats as any).web_opened = ((this.stats as any).web_opened || 0) + 1;
+      void this.host.openChunk?.(cid);
+      return "opened";
+    }
+    if (n.kind === "code") return "opened";   // its panel is elsewhere
     if (n.kind !== "ego" && this.host.isOpen(n.path) && (n.kind === "note")) {
       this.host.closePanel(n.path);
       this.stats.closed++;

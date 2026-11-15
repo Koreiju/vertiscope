@@ -60,6 +60,22 @@ _JSON_LINE = re.compile(r"^\s*(?:- )?`?[\[{]\s*\"", re.M)
 _LINKISH = re.compile(r"!?\[[^\]]*\]\([^)]*\)")
 
 
+
+def md_title(md: str, limit: int = 60) -> str:
+    """A chunk's title as a reader would name it: its first line with words
+    in it -- a heading's text, a link's text (not its url), no image -- with
+    the markdown taken off. "" when no line has a word."""
+    for line in (md or "").splitlines():
+        t = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", line)                 # images
+        t = re.sub(r"\[+\(?\s*([^\[\]]*?)\s*\)?\]+\(+[^)]*\)+", r"\1", t)   # links -> their text
+        t = re.sub(r"https?://\S+", " ", t)                                   # bare urls
+        t = re.sub(r"\b[0-9a-fA-F]{8,}\b", " ", t)                            # cids, hashes
+        t = re.sub(r"<[^>]+>|`|\*\*|__|[\[\]]|^\s*(#+|[-*+>]|\d+\.)\s*", " ", t)
+        t = re.sub(r"\s+", " ", t).strip(" |-")
+        if re.search(r"[^\W\d_]{2,}", t):
+            return t if len(t) <= limit else t[: limit - 1].rstrip() + "…"
+    return ""
+
 def _content_kinds(mds) -> Dict[str, int]:
     """Counts of content kinds across a page's chunk markdown: pictures,
     other media (video/audio, drawn ``(alt)[url]``), JSON-looking lines, and
@@ -4578,12 +4594,21 @@ class _Handler(BaseHTTPRequestHandler):
             ego_load(self.workspace)
             # Each tagged chunk's page too: its own node is drawn only when its
             # page is open, and a line to it falls back to the page's node.
-            cid_urls = {}
+            # And a title for each (PLUGIN_GOAL 159: a tagged chunk drawn in
+            # the ego as its bare cid, "not sure what 'beef' ego node is
+            # about"): the chunk's first line with words in it.
+            # A tag whose chunk this store does not hold (tagged in another
+            # store, or since dropped) is listed as missing: it names nothing.
+            cid_urls, cid_titles, missing = {}, {}, []
             for cid in EGO["cids"]:
                 c = self.workspace.store.chunk(cid)
                 if c is not None:
                     cid_urls[cid] = c.url
-            self._send(200, {"urls": sorted(EGO["urls"]), "cids": sorted(EGO["cids"]), "cid_urls": cid_urls})
+                    cid_titles[cid] = md_title(c.md) or c.url
+                else:
+                    missing.append(cid)
+            self._send(200, {"urls": sorted(EGO["urls"]), "cids": sorted(EGO["cids"]),
+                             "cid_urls": cid_urls, "cid_titles": cid_titles, "missing": sorted(missing)})
             return
 
         if segments[0] == "ref":
