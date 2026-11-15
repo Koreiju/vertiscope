@@ -2130,7 +2130,8 @@ class RenderMemo:
     """
 
     __slots__ = ("_prev", "_cur", "hits", "misses", "reused_lines",
-                 "peeks", "skipped_fit_tests", "page_key", "page_out", "page_hits")
+                 "peeks", "skipped_fit_tests", "page_key", "page_out", "page_hits",
+                 "facts_prev", "facts_cur", "facts_hits", "facts_misses")
 
     def __init__(self) -> None:
         self._prev: Dict[tuple, object] = {}
@@ -2150,6 +2151,12 @@ class RenderMemo:
         self.page_key = None
         self.page_out = None
         self.page_hits = 0
+        # The page-global facts per element subtree (`_page_facts`), keyed on
+        # the subtree's `exact_hash`, in two generations like the renders.
+        self.facts_prev: Dict[int, tuple] = {}
+        self.facts_cur: Dict[int, tuple] = {}
+        self.facts_hits = 0
+        self.facts_misses = 0
 
     def get(self, key: tuple):
         entry = self._cur.get(key)
@@ -2185,6 +2192,7 @@ class RenderMemo:
 
     def rotate(self) -> None:
         self._prev, self._cur = self._cur, {}
+        self.facts_prev, self.facts_cur = self.facts_cur, {}
 
     @property
     def resident(self) -> int:
@@ -2484,9 +2492,9 @@ def render_trie(
     # The trie's leaves, read ONCE for the three page-global passes below:
     # each walked the whole trie on its own (2026-11-15: three walks of 22k
     # nodes were most of an edit's render).
-    page_leaves = list(trie.leaves())
+    absorbed_facts, controls_facts, spans_facts = _page_facts(trie, memo)
     for url in trie.urls():
-        _name_the_collapse(chunks, _absorbed_by_element(trie, url, page_leaves))
+        _name_the_collapse(chunks, absorbed_facts)
         break
 
     # Last, so it sees the lines the fold and the collapse-naming settled on:
@@ -2494,14 +2502,14 @@ def render_trie(
     # entered those passes, and the affordance belongs on the line a reader
     # actually sees. It only ever appends to `inline`; the address slot is
     # what the store persists and the crawl reads back.
-    _carry_affordance(chunks, _suppressed_controls(trie, page_leaves))
+    _carry_affordance(chunks, controls_facts)
 
     # Tables as tables (`D-5`, `M-3`): after the affordances are carried, so a
     # row line holds every cell's addresses, and before the depths are levelled.
     if not PLANT_NO_TABLES:
         # Each table's header row, from wherever on the page it was drawn --
         # read before any chunk is rewritten (`D-9`).
-        layouts = _table_layouts(chunks, {} if PLANT_NO_SPANS else _cell_spans(trie, page_leaves))
+        layouts = _table_layouts(chunks, {} if PLANT_NO_SPANS else spans_facts)
         for chunk in chunks:
             chunk.lines = _tabulate(chunk.lines, layouts)
     # The page repeating itself, drawn once (`D-4`, `M-8`).
@@ -2590,6 +2598,109 @@ def _one_is_bare(xpath: str) -> str:
 def _ordinal(step: str) -> int:
     m = re.search(r"\[(\d+)\]$", step)
     return int(m.group(1)) if m else 1
+
+
+#: Planted (2026-11-15): the three page-global facts read by walking every
+#: leaf of the trie on every render, as before -- O(page) per edit.
+PLANT_FACTS_EVERY_LEAF = False
+
+
+def _subtree_facts(node: TrieNode, memo: "RenderMemo") -> tuple:
+    """(drops, controls, spans) for one element subtree, each in LEAF order.
+
+    A `_dedupe` group is keyed on an element's exact xpath, and every unit
+    with that xpath hangs under that element's own terminal pairs -- so the
+    subtree of a non-terminal node holds whole groups, and what `_dedupe`
+    drops inside it depends on that subtree alone. Cached on `exact_hash`
+    (the strict Merkle, CLAUDE.md 5b): an edit recomputes the path it
+    touched and reuses every sibling. Lists, not dicts, so the caller can
+    rebuild exactly what the walk-every-leaf passes built, in their order.
+    """
+    key = node.exact_hash
+    hit = memo.facts_cur.get(key)
+    if hit is None:
+        hit = memo.facts_prev.get(key)
+        if hit is not None:
+            memo.facts_cur[key] = hit
+    if hit is not None:
+        memo.facts_hits += 1
+        return hit
+    memo.facts_misses += 1
+    kids = node.ordered_children()
+    own_nodes = {id(k) for k in kids if _is_terminal_pair(k)}
+    own_units: List[Tuple[ContentAddress, str, str]] = []
+    own_from: List[int] = []                        # which child each unit came from
+    for ci, child in enumerate(kids):
+        if id(child) in own_nodes:
+            for leaf in child.leaves():
+                a = leaf.address
+                if a is None or not (leaf.value or "").strip():
+                    continue
+                own_units.append((a, leaf.value, a.tag))
+                own_from.append(ci)
+    dropped_idx: set = set()
+    if len(own_units) > 1:
+        kept = _dedupe(own_units)
+        kept_ids = {id(u) for u in kept}
+        dropped_idx = {i for i, u in enumerate(own_units) if id(u) not in kept_ids}
+    drops: List[Tuple[str, ContentAddress]] = []
+    controls: List[Tuple[str, ContentAddress]] = []
+    spans: List[Tuple[str, str, int]] = []
+    ui = 0
+    for ci, child in enumerate(kids):
+        if id(child) in own_nodes:
+            for leaf in child.leaves():
+                a = leaf.address
+                if a is None:
+                    continue
+                if _is_span(a):
+                    try:
+                        spans.append((_one_is_bare(a.xpath), a.accessor.split("|")[0],
+                                      max(1, int(str(leaf.value).strip()))))
+                    except ValueError:
+                        pass
+                if not (leaf.value or "").strip():
+                    continue
+                if ui in dropped_idx:
+                    drops.append((a.xpath.split("/text()")[0], a))
+                if a.is_control:
+                    controls.append((a.xpath.split("/text()")[0], a))
+                ui += 1
+        else:
+            d, c, s = _subtree_facts(child, memo)
+            drops.extend(d)
+            controls.extend(c)
+            spans.extend(s)
+    out = (drops, controls, spans)
+    memo.facts_cur[key] = out
+    return out
+
+
+def _page_facts(trie: AddressTrie, memo: Optional["RenderMemo"]):
+    """`_absorbed_by_element`, `_suppressed_controls` and `_cell_spans` in
+    one pass -- from the per-subtree cache when there is a memo, from every
+    leaf when there is not (or planted `PLANT_FACTS_EVERY_LEAF`)."""
+    if memo is None or PLANT_FACTS_EVERY_LEAF:
+        leaves = list(trie.leaves())
+        url = next(iter(trie.urls()), "")
+        return (_absorbed_by_element(trie, url, leaves), _suppressed_controls(trie, leaves),
+                _cell_spans(trie, leaves))
+    drops, controls, spans = _subtree_facts(trie.root, memo)
+    absorbed: Dict[str, List[ContentAddress]] = {}
+    for owner, a in drops:
+        absorbed.setdefault(owner, []).append(a)
+    ctl: Dict[str, ContentAddress] = {}
+    for owner, a in controls:
+        ctl.setdefault(owner, a)
+    sp: Dict[str, Tuple[int, int]] = {}
+    for k, acc, v in spans:
+        rs, cs = sp.get(k, (1, 1))
+        if acc == "rowspan":
+            rs = v
+        else:
+            cs = v
+        sp[k] = (rs, cs)
+    return absorbed, ctl, sp
 
 
 def _cell_spans(trie: AddressTrie, leaves=None) -> Dict[str, Tuple[int, int]]:

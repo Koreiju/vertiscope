@@ -336,3 +336,35 @@ def test_c3_allows_prose_about_the_distinction():
                "# not subtree_hash: that one is blind to word order\n"
                "    key = node.exact_hash\n"}
     assert inv.c3_projections_key_on_exact_hash(allowed) == []
+
+
+def test_page_facts_reuse_unchanged_subtrees_and_equal_every_leaf():
+    """The page-global facts (dropped spellings, controls, cell spans) are
+    cached per element subtree on `exact_hash` (2026-11-15): an edit
+    recomputes the path it touched. Equal to the walk-every-leaf passes;
+    planted `PLANT_FACTS_EVERY_LEAF`, nothing is reused."""
+    from domvec import markdown as md
+    items = _items(60, seed=5)
+    before = _page(items)
+    items[30] = (items[30][0], items[30][1] + " edited")
+    after = _page(items)
+
+    def facts(planted):
+        scan = StreamingScan("https://memo.test/page")
+        memo = RenderMemo()
+        md.PLANT_FACTS_EVERY_LEAF = planted
+        try:
+            render_trie(scan.push(before, passno=0).trie, context_window=1200, memo=memo)
+            h0, m0 = memo.facts_hits, memo.facts_misses
+            trie = scan.push(after, passno=1).trie
+            render_trie(trie, context_window=1200, memo=memo)
+            got = md._page_facts(trie, None)          # every leaf, the reference
+            return memo.facts_hits - h0, memo.facts_misses - m0, md._page_facts(trie, memo), got
+        finally:
+            md.PLANT_FACTS_EVERY_LEAF = False
+
+    hits, misses, cached, reference = facts(False)
+    assert cached == reference
+    assert hits > 0 and hits > misses            # most of the page reused
+    p_hits, p_misses, _c, _r = facts(True)
+    assert (p_hits, p_misses) == (0, 0)
