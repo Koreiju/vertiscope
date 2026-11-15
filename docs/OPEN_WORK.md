@@ -398,10 +398,9 @@ Measured, not fixed:
   three times today; the process was healthy each time).
 
 Open (not started this session):
-- Double-click fly: BUILT (a0aae8c), NOT live-confirmed. `Craft.linkedWorld`
+- Double-click fly: LIVE-CONFIRMED (G-355, run 41: travel 932, miss 0, turned 0; planted: did not move). `Craft.linkedWorld`
   (rank-1 world addresses + centroid), `GraphView.flyThroughPlane` (camera
   carried by target - plane centre; linked chunks tagged at arrival);
-  G-355 written, not run -- needs tagged web nodes, i.e. a live worker.
 - World nodes' panels as the authority for every 2D representation;
   "rendering issues with representations" not yet itemised.
 - Semantic keyword anchors beside hover pictures (the tooltip header is
@@ -425,8 +424,8 @@ Open (not started this session):
   - CRASH: two turns on the one gpt4all model at once -> "Windows fatal
     exception: access violation" in `prompt_model`. FIXED: `chat.GEN_LOCK`
     serializes every generation on the shared model (a second turn waits,
-    never refused). Not yet live-confirmed: the worker could not be brought
-    back (below).
+    never refused). LIVE-CONFIRMED (G-354, run 42): the second of two
+    turns waited 1,540 ms, in_flight 1; planted: in_flight 2.
   - The crashed worker NEVER EXITED: nine minutes in teardown, then even
     TerminateProcess left it holding its port, 565 handles, 23 GB of RAM
     and 7.9 GB of VRAM -- a kernel rundown stuck in a driver. Nothing
@@ -437,7 +436,6 @@ Open (not started this session):
     `backend: dead`), tested with planted arms; the RUNNING supervisor is
     the old code until it restarts.
 - Scanning and streaming to the 3D graph: still slow.
-- Lag between node form and panel form: BUILT (7ceb38c) as the node
-  following its card every frame of a drag (it moved only on release);
-  G-356 written, not run -- every craft check needs the graph, which
-  needs the sidecar.
+- Lag between node form and panel form: LIVE-CONFIRMED (G-356, run 41):
+  the node follows its card every frame of a drag -- 85% of its travel
+  covered halfway through; planted (on release only): 0%.
