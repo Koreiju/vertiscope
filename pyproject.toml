@@ -22,6 +22,28 @@ semantic = ["gpt4all>=2.7"]
 # use sklearn for spectral partitioning.
 mining = ["scikit-learn>=1.4"]
 dev = ["pytest>=8.0"]
+# Everything the Obsidian plugin's sidecar imports (`python -m domvec.obsidian
+# supervise ... --semantic --capture --enact --kernel`). Every one of these is
+# imported lazily, so `pip install -e .` alone installs cleanly and the sidecar
+# then crashes on its first import (proved 2026-11-15 in a clean venv:
+# "No module named 'gpt4all'", five crashes in 60 s). torch from PyPI is the
+# CPU build on Windows; for a GPU install torch from the PyTorch index first.
+obsidian = [
+    "gpt4all>=2.7",
+    "torch>=2.2",
+    "umap-learn>=0.5.5",
+    "numba>=0.59",
+    "scikit-learn>=1.4",
+    "psutil>=5.9",
+    "libcst>=1.1",
+    "ipykernel>=6.0",
+    "jupyter_client>=8.0",
+    "tiktoken>=0.5",
+    "websocket-client>=1.6",
+    "pandas>=2.0",
+    "pillow>=10.0",
+    "pymupdf>=1.23",
+]
 # The physical stage of scripts/mouse_probe.py only. Everything else about
 # the pointer path is proved without a device.
 pointer = ["pynput>=1.7"]
