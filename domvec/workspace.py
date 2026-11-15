@@ -245,6 +245,10 @@ class Workspace:
         except Exception:  # noqa: BLE001 - closing must still save the rest
             pass
         try:
+            self.save_embeddings()
+        except Exception:  # noqa: BLE001 - a cache; closing goes on
+            pass
+        try:
             self.freq.save(self.path / "freq")
         finally:
             self.store.close()
@@ -1579,6 +1583,20 @@ class Workspace:
         # their vectors in one read, and markdown only for those a backfill
         # will embed. It was one query per chunk inside a loop that loaded
         # every chunk's markdown first.
+        # The saved matrix first (`EmbeddingMatrix.load`): the store is then
+        # asked only for the chunks the file does not hold, and the file is
+        # checked against the store in the background (`_reconcile_embeddings`).
+        # Planted `PLANT_NO_EMBED_CACHE`: every vector read from the store, as before.
+        cached = False
+        if (not self.PLANT_NO_EMBED_CACHE[0] and self.path is not None
+                and (self.embeddings is None or not self.embeddings.rows)):
+            from .vectors import EmbeddingMatrix as _EM
+            got_cache = _EM.load(Path(self.path) / "embeddings")
+            if got_cache is not None:
+                self.embeddings = got_cache
+                self._embeddings_saved = got_cache.version
+                counts["cached"] = len(got_cache._row_of)
+                cached = True
         loaded = (lambda c: self.embeddings is not None
                   and self.embeddings.row_of(c) is not None)
         todo = [c for (c,) in self.store._rows("MATCH (c:Chunk) RETURN c.cid")
@@ -1621,7 +1639,81 @@ class Workspace:
                     "SET c.embedding = r.emb",
                     rows,
                 )
+        if cached:
+            self._schedule_embed_reconcile()
         return counts
+
+    #: Planted: no saved matrix; every vector is read from the store at start.
+    PLANT_NO_EMBED_CACHE = [os.environ.get("DOMVEC_PLANT_NO_EMBED_CACHE") == "1"]
+    #: Planted: the background check against the store never runs, so a stale
+    #: saved vector stays (the arm that shows the reconcile is what fixes it).
+    PLANT_NO_EMBED_RECONCILE = [False]
+
+    def save_embeddings(self) -> bool:
+        """Write the query-side matrix if it changed since the last write.
+        The copy is taken under the matrix lock; the disk write is not."""
+        if self.read_only or self.path is None or self.embeddings is None:
+            return False
+        if self.embeddings.version == getattr(self, "_embeddings_saved", None):
+            return False
+        snap = self.embeddings.snapshot()
+        if snap is None:
+            return False
+        from .vectors import EmbeddingMatrix as _EM
+        _EM.write_snapshot(Path(self.path) / "embeddings", snap)
+        self._embeddings_saved = snap["version"]
+        return True
+
+    def _schedule_embed_reconcile(self) -> None:
+        import threading
+        if self.PLANT_NO_EMBED_RECONCILE[0]:
+            return
+        t = threading.Thread(target=self._reconcile_embeddings, name="domvec-embed-reconcile", daemon=True)
+        self._embed_reconciler = t
+        t.start()
+
+    def _reconcile_embeddings(self, batch: int = 4000) -> Dict[str, int]:
+        """The saved matrix against the store, off the request path: every
+        vector the store holds that the matrix holds differently is set, and
+        every cached row whose chunk is gone is forgotten; both reach the
+        index as a delta. In batches, so no read holds the store for long."""
+        stats = {"checked": 0, "changed": 0, "forgotten": 0}
+        t0 = time.perf_counter()
+        try:
+            cids = [c for (c,) in self.store._rows("MATCH (c:Chunk) RETURN c.cid") if c]
+            live = set(cids)
+            changed: List[str] = []
+            for lo in range(0, len(cids), batch):
+                part = cids[lo:lo + batch]
+                for cid, vec in self.store._rows(
+                        "MATCH (c:Chunk) WHERE list_contains($cids, c.cid) "
+                        "RETURN c.cid, c.embedding", {"cids": part}):
+                    stats["checked"] += 1
+                    if vec is None or not any(vec):
+                        continue
+                    v = np.asarray(vec, dtype=np.float32)
+                    n = float(np.linalg.norm(v))
+                    row = self.embeddings.row_of(cid)
+                    if row is not None and n and float(np.abs(self.embeddings.matrix[row, :v.shape[0]] - v / n).max()) <= 1e-5:
+                        continue
+                    self.embeddings.set(cid, v)
+                    changed.append(cid)
+            gone = [c for c in list(self.embeddings._row_of) if c not in live]
+            if gone:
+                stats["forgotten"] = self.embeddings.forget(gone)
+            stats["changed"] = len(changed)
+            if changed or gone:
+                # After any build in progress: a delta sent while `_index` is
+                # None is dropped, and the build may have read the matrix
+                # before these rows were set.
+                with self._index_lock:
+                    pass
+                self._index_changed(changed + gone)
+        except Exception as exc:                    # noqa: BLE001
+            stats["error"] = "%s: %s" % (type(exc).__name__, exc)
+        stats["ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        self.embed_reconciled = stats
+        return stats
 
     @property
     def index(self) -> ThreeFormIndex:

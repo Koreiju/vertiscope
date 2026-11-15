@@ -1484,6 +1484,26 @@ def _save_lexical_due(workspace, every: float = 30.0) -> None:
         pass
 
 
+_EMBED_SAVED_AT = [0.0]
+
+
+def _save_embeddings_due(workspace, every: float = 120.0) -> None:
+    """Persist the query-side embedding matrix (`EmbeddingMatrix.load`'s
+    cache) at most every `every` seconds, if it changed. The copy is taken
+    under the matrix lock, the ~264 MB write outside every lock. Never raises."""
+    now = time.monotonic()
+    if now - _EMBED_SAVED_AT[0] < every:
+        return
+    _EMBED_SAVED_AT[0] = now
+    try:
+        started = time.perf_counter()
+        if workspace.save_embeddings():
+            _profile("embed_save", {"ms": round((time.perf_counter() - started) * 1000, 1),
+                                    "rows": len(workspace.embeddings.rows)})
+    except Exception as exc:                        # noqa: BLE001
+        _profile("embed_save", {"error": str(exc)[:160]})
+
+
 #: Seconds without a store write before a page is re-clustered (137(20)).
 _AGGREGATE_QUIET_S = 8.0
 #: Planted (137(20)): re-cluster as soon as due, mid-stream.
@@ -1551,6 +1571,7 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
             # And the lexical rows go to disk once things are quiet, so a
             # hard kill costs seconds of them, not the whole session's.
             _save_lexical_due(workspace)
+            _save_embeddings_due(workspace)
             _warm_lexical(workspace)
             continue
         _EMBED_WANTED.clear()
@@ -4952,6 +4973,7 @@ class _Handler(BaseHTTPRequestHandler):
             got = {k: list(v) for k, v in _PROFILE.items()}
             # The query index's rebuilds, timed where they happen.
             got["index_build"] = list(getattr(self.workspace, "index_builds", []) or [])
+            got["embed_reconcile"] = getattr(self.workspace, "embed_reconciled", None)
             self._send(200, got)
             return
 

@@ -313,7 +313,10 @@ def test_vectors_are_reloaded_into_a_reopened_workspace(tmp_path):
 
     with Workspace(tmp_path / "ws", embedder=_FakeEmbedder()) as ws:
         counts = ws._hydrate_embeddings()
-        assert counts["loaded"] > 0
+        # From the store or from the saved matrix (`EmbeddingMatrix.load`,
+        # written at close): either way READ, never recomputed.
+        assert counts["loaded"] + counts.get("cached", 0) > 0, counts
+        assert ws.embeddings is not None and ws.embeddings.matrix.any()
         assert counts["embedded"] == 0, "reloading should not recompute"
 
 
@@ -337,7 +340,7 @@ def test_semantic_backfills_a_workspace_indexed_without_it(tmp_path):
         assert ws.embeddings.matrix.any(), "backfill produced only zeros"
 
 
-def test_a_backfill_is_persisted(tmp_path):
+def test_a_backfill_is_persisted(tmp_path, monkeypatch):
     """Paid once, not on every query."""
     url, html = _html()
     with Workspace(tmp_path / "ws") as ws:
@@ -346,6 +349,9 @@ def test_a_backfill_is_persisted(tmp_path):
     with Workspace(tmp_path / "ws", embedder=_FakeEmbedder()) as ws:
         first = ws._hydrate_embeddings()
 
+    # Read from the STORE, not the saved matrix: the question is whether
+    # the backfill was written back there.
+    monkeypatch.setattr(Workspace, "PLANT_NO_EMBED_CACHE", [True])
     with Workspace(tmp_path / "ws", embedder=_FakeEmbedder()) as ws:
         second = ws._hydrate_embeddings()
 

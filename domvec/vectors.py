@@ -769,6 +769,8 @@ class EmbeddingMatrix:
         default_factory=threading.RLock, repr=False, compare=False)
     #: The allocation behind `_matrix`, which is a view of its used rows.
     _buf: Optional[np.ndarray] = field(default=None, repr=False, compare=False)
+    #: Bumped by every write, so a save can tell there is nothing new.
+    version: int = field(default=0, repr=False, compare=False)
 
     def set(self, cid: str, vector: np.ndarray) -> int:
         vec = np.asarray(vector, dtype=np.float32).ravel()[: self.dim]
@@ -783,6 +785,7 @@ class EmbeddingMatrix:
             # Stored normalised so similarity is a plain dot product and a
             # zero vector (an un-embedded chunk) scores 0 rather than NaN.
             self._matrix[row, : vec.shape[0]] = vec / norm if norm else vec
+            self.version += 1
         return row
 
     def _grow(self, n_rows: int) -> None:
@@ -827,6 +830,7 @@ class EmbeddingMatrix:
             if self._matrix is not None and row < self._matrix.shape[0]:
                 self._matrix[row] = 0.0
             gone += 1
+            self.version += 1
         return gone
 
     def row_of(self, cid: str) -> Optional[int]:
@@ -846,6 +850,63 @@ class EmbeddingMatrix:
         if not norm:
             return np.zeros(self._matrix.shape[0], dtype=np.float32)
         return self._matrix @ (vec / norm)
+
+    # -- persistence: the query side's own copy, so a restart need not wait --
+    #
+    # The authoritative vectors live on the Chunk nodes. Reading all of them
+    # back is what the first search after a restart waited on: 21.8 s of a
+    # 32.3 s `index_warm` (2026-11-15, 86k x 768). This file is a CACHE of the
+    # matrix, read in well under a second; `Workspace` reconciles it against
+    # the store off the request path, so what it can be wrong about is only
+    # what was embedded after its last save, and only until that lands.
+
+    def snapshot(self):
+        """{version, rows, matrix} copied under the lock, or None if empty."""
+        with self._lock:
+            if self._matrix is None or not self._matrix.shape[0]:
+                return None
+            return {"version": self.version, "dim": self.dim, "rows": list(self.rows),
+                    "matrix": self._matrix.copy()}
+
+    @staticmethod
+    def write_snapshot(base: Path, snap) -> bool:
+        """`<base>.npy` and `<base>.json`, each written aside and swapped in.
+        The json names the rows and the npy's shape, so a pair from two
+        different saves is refused on load rather than misaligned."""
+        import os as _os
+        base = Path(base)
+        npy, meta = base.with_suffix(".npy"), base.with_suffix(".json")
+        tmp_npy, tmp_meta = base.with_suffix(".npy.tmp"), base.with_suffix(".json.tmp")
+        with open(tmp_npy, "wb") as fh:
+            np.save(fh, snap["matrix"], allow_pickle=False)
+        tmp_meta.write_text(json.dumps({"version": snap["version"], "dim": snap["dim"],
+                                        "shape": list(snap["matrix"].shape), "rows": snap["rows"]}),
+                            encoding="utf-8")
+        _os.replace(tmp_npy, npy)
+        _os.replace(tmp_meta, meta)
+        return True
+
+    @classmethod
+    def load(cls, base: Path) -> Optional["EmbeddingMatrix"]:
+        """The saved matrix, or None when there is none or the pair disagrees."""
+        base = Path(base)
+        npy, meta = base.with_suffix(".npy"), base.with_suffix(".json")
+        if not npy.exists() or not meta.exists():
+            return None
+        try:
+            info = json.loads(meta.read_text(encoding="utf-8"))
+            m = np.load(npy, allow_pickle=False)
+        except (OSError, ValueError):
+            return None
+        rows = list(info.get("rows") or [])
+        if m.ndim != 2 or list(m.shape) != list(info.get("shape") or []) or m.shape[0] != len(rows):
+            return None
+        out = cls(dim=int(m.shape[1]))
+        out.rows = rows
+        out._row_of = {c: i for i, c in enumerate(rows) if c}
+        out._buf = np.ascontiguousarray(m, dtype=np.float32)
+        out._matrix = out._buf[: len(rows)]
+        return out
 
 
 # --- the vectorisation queue ------------------------------------------------
