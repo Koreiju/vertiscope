@@ -28,3 +28,8 @@ pages/
 pages256/
 scripts/scan_secrets.py
 scripts/.identity.json
+
+# Claude Code: third-party skill copies (pinned by skills-lock.json), local state
+.claude/skills/
+.claude/worktrees/
+.claude/scheduled_tasks.lock
