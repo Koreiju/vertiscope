@@ -372,7 +372,8 @@ Done and confirmed live (each check carries a planted arm that fails):
 | (screenshot) code:// link raised the OS "Open external link?" | G-349 (window.open + anchor; the live-preview click itself not driven) | edb1aea |
 | Node shrinking from further away, less at the end | G-350 -- PARAMETER check only; not measured on screen | 28e30b4 |
 | Hover headers, not raw markdown (the okapi tooltip); tooltip text escaped | G-351 | b05ce8d |
-| The selected node seen through a panel: the tether's end ring drawn over the card | G-352 | (this commit) |
+| The selected node seen through a panel: the tether's end ring drawn over the card | G-352 | 15e79f8 |
+| The tiny hover preview: the presented picture 64-140 px, others still at most 28 | G-353 -- PARAMETER check only | 46db1c2 |
 
 Measured, not fixed:
 - **G-113 fails** (passed 2026-10-07): hovering a chunk on the fixture
