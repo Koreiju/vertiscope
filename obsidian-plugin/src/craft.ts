@@ -53,7 +53,7 @@ export interface CraftNode {
   flat?: { x: number; y: number; z: number };
   mesh?: any;
 }
-export interface CraftEdge { a: string; b: string; kind: "root" | "contains" | "order" | "ref" | "forward" | "instance" | "module" }
+export interface CraftEdge { a: string; b: string; kind: "root" | "contains" | "order" | "ref" | "forward" | "instance" | "module" | "link" }
 export interface V3 { x: number; y: number; z: number }
 
 export interface CraftHost {
@@ -138,7 +138,7 @@ function treesOf(text: string, fenced: Set<number>): { name: string; line: numbe
 export class Craft {
   nodes: CraftNode[] = [];
   edges: CraftEdge[] = [];
-  stats = { builds: 0, notes: 0, cells: 0, trees: 0, web: 0, edges: 0, io: 0, refs: 0, visible: false, opened: 0, closed: 0,
+  stats = { builds: 0, hard_links: 0, notes: 0, cells: 0, trees: 0, web: 0, edges: 0, io: 0, refs: 0, visible: false, opened: 0, closed: 0,
             projection: "", placed_by_ego: 0, io_to_ego: 0, lit: 0, readouts: 0, reattached: 0,
             anchor: null as V3 | null, radius: 0, map_scale: 0, map_left_overlapping: 0, modules: 0, modules_by_ego: 0, modules_total: 0, check_notes_kept_off: 0 };
   /**
@@ -191,6 +191,8 @@ export class Craft {
   plantPlaneNotCells = false;
   /** The ego's scaled map is an OPTION, off -- the sphere is the layout again (PLUGIN_GOAL 127). */
   useScaledMap = false;
+  /** Planted (159): wikilinks between ego notes are not drawn as edges. */
+  plantNoNoteLinks = false;
   /** Planted (item 67): the craft's nodes unlinked -- no edges inside it. */
   plantNoLinks = false;
   /** Per note: the distinct inputs its readout has been fed (item 96). */
@@ -499,6 +501,28 @@ export class Craft {
       this.stats.modules = nodes.filter((n) => n.id.startsWith("craft:mod:")).length;
       const vaultName = app.vault.getName();
       this.host.postEgo?.(nodes.filter((n) => n.kind === "note" || n.kind === "ego").map((n) => "vault://" + vaultName + "/" + n.path).concat(modUrls));
+      // HARD LINKS between the ego's notes (159: chat cells "chained after one
+      // another with hard links"; "references and actions that link to other
+      // nodes"): a wikilink from one ego note to another is an edge of the
+      // craft -- a prompt cell to its reply, a reply to the next prompt.
+      // Obsidian's own resolution, so a link means what the vault says it
+      // means. Planted `plantNoNoteLinks`: no such edges, as before.
+      let hard = 0;
+      if (!this.plantNoNoteLinks) {
+        const notes = new Set(nodes.filter((n) => n.kind === "note").map((n) => n.path));
+        const seen = new Set<string>();
+        const resolved: Record<string, Record<string, number>> = (app.metadataCache as any).resolvedLinks || {};
+        for (const from of notes) {
+          for (const to of Object.keys(resolved[from] || {})) {
+            if (to === from || !notes.has(to)) continue;
+            const key = from < to ? from + "|" + to : to + "|" + from;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            edges.push({ a: "craft:" + from, b: "craft:" + to, kind: "link" }); hard++;
+          }
+        }
+      }
+      this.stats.hard_links = hard;
       let refs = 0;
       for (const p of pending) {
         const head = p.ref.split(".")[0].trim().toLowerCase();

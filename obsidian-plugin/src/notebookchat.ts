@@ -66,7 +66,7 @@ export class NotebookChat {
 
   /** Set by the plugin (G-305): the prompt written into the ego, and its reply after. */
   record: ((note: string, prompt: string, context: { cid: string; url: string; head: string }[]) => Promise<string | null>) | null = null;
-  recordReply: ((at: string, reply: string, error: string) => Promise<void>) | null = null;
+  recordReply: ((at: string, reply: string, error: string, sent?: { sent: number; dropped: number; chars: number }) => Promise<void>) | null = null;
   constructor(private app: App, private owner: Component, private view: MarkdownView, private sidecar: Sidecar,
               private marks: NoteMarks | null = null) {
     this.el = view.contentEl.createDiv({ cls: "domvec-nbchat" });
@@ -291,7 +291,8 @@ export class NotebookChat {
         if (rec && this.recordReply) await this.recordReply(rec, "", this.lastError).catch(() => null);
         return null;
       }
-      if (rec && this.recordReply) await this.recordReply(rec, got.turn.reply || "", "").catch(() => null);
+      if (rec && this.recordReply) await this.recordReply(rec, got.turn.reply || "", "",
+        { sent: got.turn.context.length, dropped: got.turn.resent_dropped.length, chars: got.turn.delta_chars }).catch(() => null);
       const t = got.turn;
       this.pins = this.pins.filter((p) => !pulled.includes(p));
       const turn: NotebookTurn = { prompt: prompt || raw, cells: given, source: this.lastSource, sent: t.context.length,

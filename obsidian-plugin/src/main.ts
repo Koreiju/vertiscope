@@ -327,25 +327,70 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         if (u.startsWith("vault://")) return `[[${u.replace(/^vault:\/\/[^/]+\//, "").replace(/\.md$/, "")}]]`;
         return u.startsWith("http") ? `[${(c.head || u).slice(0, 60)}](${u})` : "";
       }).filter(Boolean);
+      const given = links.length ? ` · given ${[...new Set(links)].join(", ")}` : "";
+      // CHAT CELLS (PLUGIN_GOAL 159: "chat cells in prompts and responses in
+      // their own cells, chained after one another with hard links"): each
+      // turn is TWO notes of the ego -- the prompt's cell and the reply's --
+      // linked prompt -> reply -> next prompt, so the conversation is a chain
+      // in the 2D graph (the craft draws a link between ego notes as an edge).
+      // The prompts note stays the chat's index. Planted `plantChatOneNote`:
+      // the turn lives in the index alone, as before.
+      let cells: { prompt: string; reply: string } | null = null;
+      if (!this.plantChatOneNote) {
+        const prefix = `${base} chat `;
+        const nums = this.app.vault.getMarkdownFiles().filter((x) => x.path.startsWith(`${folder}/${prefix}`))
+          .map((x) => /chat (\d+) (?:prompt|reply)$/.exec(x.basename)).filter(Boolean).map((m) => Number(m![1]));
+        const n = (nums.length ? Math.max(...nums) : 0) + 1, pad = (k: number) => String(k).padStart(3, "0");
+        const pName = `${prefix}${pad(n)} prompt`, rName = `${prefix}${pad(n)} reply`;
+        const prev = n > 1 ? `${prefix}${pad(n - 1)} reply` : "";
+        await this.app.vault.create(`${folder}/${pName}.md`, `# prompt ${n} of [[${base}]]` + NL + NL
+          + `> ${prompt.replace(/\n/g, NL + "> ")}` + NL + NL
+          + (prev ? `after [[${prev}]]` : "the chat's first turn") + NL + NL
+          + `context: ${context.length} item${context.length === 1 ? "" : "s"}${given}` + NL);
+        await this.app.vault.create(`${folder}/${rName}.md`, `# reply ${n} of [[${base}]]` + NL + NL
+          + `answers [[${pName}]]` + NL + NL + "*(awaiting the reply)*" + NL);
+        cells = { prompt: `${folder}/${pName}.md`, reply: `${folder}/${rName}.md` };
+        this.chatCellStats.turns++;
+        this.chatCellStats.last = { ...cells, after: prev };
+      }
+      const name = (p: string) => p.split("/").pop()!.replace(/\.md$/, "");
       const entry = `## ${at}` + NL + NL + `> ${prompt.replace(/\n/g, NL + "> ")}` + NL + NL
-        + `from [[${base}]]` + (links.length ? ` · given ${[...new Set(links)].join(", ")}` : "") + NL + NL + "*(awaiting the reply)*" + NL;
+        + `from [[${base}]]` + given + NL + NL
+        + (cells ? `[[${name(cells.prompt)}]] -> [[${name(cells.reply)}]]` + NL + NL : "")
+        + "*(awaiting the reply)*" + NL;
       const f = this.app.vault.getAbstractFileByPath(path);
       if (f instanceof TFile) await this.app.vault.process(f, (t) => t.replace(/\s*$/, "") + NL + NL + entry);
       else await this.app.vault.create(path, `# prompts of [[${base}]]` + NL + NL + entry);
       this.promptStats.kept++;
       this.promptStats.last = { path, links: links.length };
-      return path + "#" + at;
+      return path + "#" + at + (cells ? "#" + cells.reply + "#" + cells.prompt : "");
     };
-    this.nbChats.recordReply = async (at, reply, error) => {
-      const [path, stamp] = at.split("#");
-      const f = this.app.vault.getAbstractFileByPath(path);
-      if (!(f instanceof TFile)) return;
-      await this.app.vault.process(f, (t) => {
-        const i = t.lastIndexOf("## " + stamp);
-        if (i < 0) return t;
-        const j = t.indexOf("*(awaiting the reply)*", i);
-        return j < 0 ? t : t.slice(0, j) + (reply ? reply.trim() : `*(no reply: ${error})*`) + t.slice(j + "*(awaiting the reply)*".length);
-      });
+    this.nbChats.recordReply = async (at, reply, error, sent) => {
+      const [path, stamp, replyCell, promptCell] = at.split("#");
+      const AWAIT = "*(awaiting the reply)*";
+      const swap = async (p: string, from: string, body: string) => {
+        const f = this.app.vault.getAbstractFileByPath(p);
+        if (!(f instanceof TFile)) return;
+        await this.app.vault.process(f, (t) => {
+          const i = from ? t.lastIndexOf(from) : 0;
+          const j = i < 0 ? -1 : t.indexOf(AWAIT, i);
+          return j < 0 ? t : t.slice(0, j) + body + t.slice(j + AWAIT.length);
+        });
+      };
+      const body = reply ? reply.trim() : `*(no reply: ${error})*`;
+      if (replyCell) {
+        // The reply in its own cell; the index points at it, not a second copy.
+        await swap(replyCell, "", body);
+        await swap(path, "## " + stamp, reply ? "*(replied)*" : body);
+      } else await swap(path, "## " + stamp, body);
+      // What the model was actually GIVEN, on the prompt's own cell (159:
+      // "whether or not we have context control correct"): how much was new
+      // to the conversation and how much was already in it, not resent.
+      if (promptCell && sent) {
+        const f = this.app.vault.getAbstractFileByPath(promptCell);
+        if (f instanceof TFile) await this.app.vault.process(f, (t) => t.replace(/\s*$/, "") + "\n\n"
+          + `sent: ${sent.sent} new to the chat, ${sent.dropped} already in it (not resent), ${sent.chars} characters` + "\n");
+      }
     };
     (window as any).__domvecNbChats = this.nbChats;
     // The reader marks what the model is given (P-N9/P-N10, `marks.ts`): a
@@ -1413,6 +1458,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   /** Planted (G-305): the reader's prompts are not kept as ego artifacts. */
   plantPromptsUnkept = false;
   promptStats = { kept: 0, last: null as any };
+  /** Planted (159 chat cells): a turn lives only in the prompts index, as before. */
+  plantChatOneNote = false;
+  chatCellStats = { turns: 0, last: null as any };
   unnestStats = { made: 0, last: null as any };
   async onUnnestFence(req: RunRequest): Promise<void> {
     if (req.path) await this.unnest(req.code, req.path, "cell " + (req.line + 1));

@@ -11974,6 +11974,86 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-366",
+      asks: "chat cells (PLUGIN_GOAL 159: 'chat cells in prompts and responses in their own cells, chained after one another with hard links'; 'whether or not we have context control correct'): two turns sent from a notebook's chat leave FOUR ego notes -- prompt 1, reply 1, prompt 2, reply 2 -- each reply in its own cell, prompt 2 'after [[reply 1]]', each reply 'answers [[its prompt]]', each prompt cell naming what it was sent (new to the chat / already in it); the craft draws the chain as link edges between those notes; the prompts note indexes the cells; planted (plantNoNoteLinks) the notes stand unlinked in the craft, (plantChatOneNote) a turn leaves no cell",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 300) await sleep(300); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const d = window.__domvecPlane, c = window.__domvecCraft, chats = window.__domvecNbChats;
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3), st = Date.now();
+          const one = ${JSON.stringify(planted)} === "onenote";
+          const nb = "domvec/graph/g366 nb " + (one ? "p" : "c") + " " + st + ".md";
+          const base = nb.split("/").pop().replace(/\\.md$/, "");
+          const cell = (n, k) => "domvec/graph/" + base + " chat " + String(n).padStart(3, "0") + " " + k + ".md";
+          const index = "domvec/graph/prompts " + base + ".md";
+          const read = async (p) => { const f = app.vault.getAbstractFileByPath(p); return f ? await app.vault.read(f) : null; };
+          plugin.plantChatOneNote = one;
+          const out = { planted: ${JSON.stringify(planted)} };
+          try {
+            await d.create("notebook", { path: nb, text: "# g366" + NL + NL + F + "python" + NL + "answer = 6 * 7" + NL + F + NL });
+            const view = d.panelOf(nb).leaf.view;
+            const lines = view.editor.getValue().split(NL);
+            view.editor.setCursor({ line: lines.indexOf("answer = 6 * 7"), ch: 0 });
+            const chat = chats.forView(view);
+            const t0 = performance.now();
+            const r1 = await chat.send("what does this cell compute? g366 " + st);
+            out.turn1_ms = Math.round(performance.now() - t0);
+            out.turn1 = !!r1;
+            if (one) {
+              out.cells = [cell(1, "prompt"), cell(1, "reply")].filter((p) => !!app.vault.getAbstractFileByPath(p)).length;
+              out.index = !!app.vault.getAbstractFileByPath(index);
+              return out;
+            }
+            const r2 = await chat.send("and why that number? g366b " + st);
+            out.turn2 = !!r2;
+            const P1 = await read(cell(1, "prompt")), R1 = await read(cell(1, "reply"));
+            const P2 = await read(cell(2, "prompt")), R2 = await read(cell(2, "reply"));
+            const nm = (n, k) => base + " chat " + String(n).padStart(3, "0") + " " + k;
+            out.cells = [P1, R1, P2, R2].filter((x) => x !== null).length;
+            out.p1_prompt = !!P1 && P1.includes("g366 " + st);
+            out.p1_first = !!P1 && P1.includes("first turn");
+            out.r1_answers = !!R1 && R1.includes("answers [[" + nm(1, "prompt") + "]]");
+            out.p2_after = !!P2 && P2.includes("after [[" + nm(1, "reply") + "]]");
+            out.r2_answers = !!R2 && R2.includes("answers [[" + nm(2, "prompt") + "]]");
+            out.r1_filled = !!R1 && !R1.includes("*(awaiting the reply)*") && R1.length > 60;
+            out.p1_sent = P1 ? (/sent: (\\d+) new to the chat, (\\d+) already in it/.exec((await read(cell(1, "prompt"))) || "") || []).slice(1).map(Number) : null;
+            out.p2_sent = (/sent: (\\d+) new to the chat, (\\d+) already in it/.exec((await read(cell(2, "prompt"))) || "") || []).slice(1).map(Number);
+            const I = await read(index);
+            out.index_links = !!I && I.includes("[[" + nm(1, "prompt") + "]] -> [[" + nm(1, "reply") + "]]") && I.includes("[[" + nm(2, "reply") + "]]");
+            // The craft: the four notes, and the chain between them as link edges.
+            const ids = [cell(1, "prompt"), cell(1, "reply"), cell(2, "prompt"), cell(2, "reply")].map((p) => "craft:" + p);
+            const linked = (a, b) => c.edges.some((e) => e.kind === "link" && ((e.a === a && e.b === b) || (e.a === b && e.b === a)));
+            const chain = () => linked(ids[0], ids[1]) && linked(ids[1], ids[2]) && linked(ids[2], ids[3]);
+            c.dirty();
+            out.craft_nodes = await until(() => ids.every((id) => c.nodes.some((n) => n.id === id)), 15000);
+            out.chain = await until(chain, 8000);
+            out.chain_edges = [linked(ids[0], ids[1]), linked(ids[1], ids[2]), linked(ids[2], ids[3])];
+            // Planted: the same notes, the links not drawn.
+            c.plantNoNoteLinks = true; const b0 = c.stats.builds; c.dirty();
+            await until(() => c.stats.builds > b0 && !c.building, 15000);
+            out.planted_nolinks = { builds: c.stats.builds - b0, chain: chain(), nodes: ids.every((id) => c.nodes.some((n) => n.id === id)) };
+            return out;
+          } finally {
+            plugin.plantChatOneNote = false; c.plantNoNoteLinks = false;
+            const gone = app.vault.getMarkdownFiles().filter((f) => f.path === nb || f.path === index || f.path.startsWith("domvec/graph/" + base + " chat "));
+            for (const f of gone) { try { await d.trash(f.path); } catch (e) { try { await app.vault.trash(f, true); } catch (z) {} } }
+            c.dirty();
+          }
+        })()`, { timeout: 400000 });
+        const clean = await arm("clean");
+        const one = await arm("onenote");
+        const ok = !!clean && !clean.error && clean.turn1 && clean.turn2 && clean.cells === 4 && clean.p1_prompt && clean.p1_first
+          && clean.r1_answers && clean.p2_after && clean.r2_answers && clean.r1_filled && clean.index_links
+          && Array.isArray(clean.p1_sent) && clean.p1_sent.length === 2 && Array.isArray(clean.p2_sent) && clean.p2_sent.length === 2
+          && clean.craft_nodes && clean.chain
+          && !!clean.planted_nolinks && clean.planted_nolinks.builds >= 1 && clean.planted_nolinks.nodes && !clean.planted_nolinks.chain
+          && !!one && !one.error && one.turn1 && one.index && one.cells === 0;
+        return { pass: ok, evidence: { clean, onenote: one } };
+      },
+    },
+    {
       id: "G-277",
       asks: "the slate grammar is the app's (G-277, mothership N.7-N.9): internalizing a `{ref}` to a slate reveals its rank-1 fields as the grammar reads them -- names that hold spaces kept whole (`duckduckgo url`, `scan for duckduckgo url`), the value after the tab -- through the sidecar's /ref (`refs.rank1` -> `slate.parse_slate`); planted (slate-space-split) a space-leaning parse breaks the names",
       async run() {
