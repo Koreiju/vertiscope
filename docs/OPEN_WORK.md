@@ -650,6 +650,16 @@ Open (not started this session):
     Still open:
     - the first search after a worker restart waits for `index_warm` (62.7 s
       seen, index_warm 104.6 s -- throttled; not re-measured since);
+      2026-11-15 (a9a5236): the embedding hydrate reads a saved matrix.
+      Live, two restarts of the working store: without the cache
+      `index_warm` 56.1 s (hydrate 19.2 s, build 36.8 s); with it 28.1 s
+      (hydrate 3.6 s, build 24.6 s). The background reconcile then checked
+      92,422 chunks against the store in 60.0 s: 0 changed, 0 forgotten.
+      Save: 86,244 rows, 264.9 MB, 343 ms. What is left is the index BUILD
+      (10.5-36.8 s across starts, contention-dependent): the first search
+      still waits for it. Next: persist the built index (PageRank and the
+      lexical side) the same way, or answer the first searches from a
+      lexical-only tier while it builds.
     - an edit's render is O(page) in its page-global passes: 62 ms at
       N=1,600, against 9-12 ms on 2026-08-29;
       re-measured 2026-11-15 15:10 (`--projection --sizes 400,1600,6400`):
