@@ -249,8 +249,12 @@ class Proof:
                 tail = [ln for ln in (self.root / "sidecar.log").read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()][-4:]
             except Exception:                           # noqa: BLE001
                 pass
+        crashes = []
+        if not up:
+            for f in (self.vault / ".domvec" / "workspaces" / "default").glob("crashes.log"):
+                crashes = [ln for ln in f.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()][-8:]
         return self.record("sidecar", up, t0, port=PORT, backend=(h or {}).get("backend"),
-                           exited=self.sidecar_proc.poll(), tail=tail)
+                           exited=self.sidecar_proc.poll(), tail=tail, crashes=crashes)
 
     def use(self) -> bool:
         """The README's *Use*: the graph, the browser cell, a page, a search."""
