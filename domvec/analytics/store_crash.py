@@ -93,9 +93,14 @@ def _child(store_path: str, seconds: float, arm: str, seed: int) -> None:
                 tick = counts["writes"]
                 rows = [{"aid": r[0], "akey": r[1] or "", "url": u, "xp": r[2] or "", "tag": r[3] or "",
                          "acc": r[4] or "", "val": ((r[5] or "") + " ~%d" % tick)[:400], "ch": r[6] or ""} for r in got]
-                gs._batch("UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) "
-                          "SET a.akey = r.akey, a.url = r.url, a.xpath = r.xp, a.tag = r.tag, "
-                          "a.accessor = r.acc, a.value = r.val, a.content_hash = r.ch", rows)
+                if arm.startswith("capture_value"):
+                    # Only the column that changed: does the growth follow the
+                    # number of string columns rewritten?
+                    gs._batch("UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) SET a.value = r.val", rows)
+                else:
+                    gs._batch("UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) "
+                              "SET a.akey = r.akey, a.url = r.url, a.xpath = r.xp, a.tag = r.tag, "
+                              "a.accessor = r.acc, a.value = r.val, a.content_hash = r.ch", rows)
                 counts["address_rows"] += len(rows)
         pick = rng.choice(len(cids), size=min(100, len(cids)), replace=False)
         rows = [{"cid": cids[i], "emb": rng.normal(size=EMBED_DIM).astype("float32").tolist()} for i in pick]

@@ -401,6 +401,7 @@ Done and confirmed live (each check carries a planted arm that fails):
 
 Measured, not fixed:
 - **The native store crash has a handle (2026-11-15 15:05): it follows the store GROWING, not one statement.** 115 access violations (0xC0000005) are logged, across ten statements; the anchor wipe that crashed three times today (12:51, 13:49, 14:44) is one of them, not the cause. Two logs line up. `store_growth.log`: 101 of 112 checkpoints grew the store by 0.5-2.0 GB while folding a WAL of ~8 MB (1,821 -> 3,985 MB four minutes after a compaction). `crashes.log`: crashes per hour, from 2026-11-08, are **1.00 while the store is grown** (after a >=500 MB checkpoint, before the next compaction; 17 in 17.1 h) against **0.01 while clean** (2 in 166 h). 10 of the 28 crashes since growth was logged came within 120 s of a growth checkpoint, a window covering 0.6% of the time. A restart does not clear it: the 15:02:32 crash came 156 s after a fresh start on a grown, uncompacted store. NOT yet causal: "grown" also means "writes happened", and the clean hours are mostly idle. Next: on a scratch COPY of a compacted store, run the same write mix with and without a growth checkpoint in between, and count crashes per write. If it holds, compact as soon as a checkpoint crosses the ratio, instead of waiting 600 s for a quiet that the reader rarely gives. That trades a ~60 s pause the reader sees for a crash that loses the WAL. Kuzu is 0.11.3, the last release, so there is no upgrade path.
+  **Growth reproduced offline (`store_crash`, 2026-11-15 16:00):** on a copy of the grown store, 15 min each arm. Embed-only writes (SET c.embedding on 100 scattered chunks a batch): the store grew 530 MB at the first checkpoint, then 0 for 24 more. Adding a re-capture's Address `MERGE ... SET` of all eight string columns (37,439 rows changed): 0.5-1.7 GB at EVERY checkpoint of an ~8 MB WAL, ~16 GB in 15 min -- the live signature. No crash in any arm yet (split, shared, capture: 0 in ~45 min against a live rate of 1/h in the grown state). Ingest already skips addresses whose value is unchanged (`needs_value`); a changed one SETs all eight columns. Next arm: SET only the column that changed.
 - **G-94 after the room floor (run 130):** the collapse is gone (store spread 2.82, room 3.26; the floor did not bind with no copy present). The judged bar still fails: 13 of 49 tree edges cross the billboard. The run also caught the online update moving Radix_tree's fit about 34 units, with the chunks re-streamed around the new place, while the drawn page stayed at the old one (`page_xyz` != `fit_xyz`, pinned). The worker then crashed (15:02, above), and the restart reloaded the saved fit, so the split could not be inspected afterwards.
 - **Third native store crash today** (0xC0000005, 12:51:03), on a capture's anchor reconcile: `UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid})-[e:Anchors]->(:Address) DELETE e`, n=3. Only that thread was in kuzu (faulthandler dump), so it is not a race between our threads. Earlier today: `SET c.snap` (07:53), `CHECKPOINT` (09:51). This one came ~1 min after G-113's fixture purges (DETACH DELETE of Address rows) -- a hypothesis to test offline (purge then re-ingest with changed anchors, in a scratch store), not a finding.
 - **G-122's stored unit is the whole table**: practice_rows is stored as 2 chunks; the clean outline is 1,249 px against a 760 px row, and the planted cell outline 663 px -- the check's premise ("one forum row is one card") no longer holds for this page's chunking. A chunk-granularity question, not an aiming one.
@@ -660,6 +661,15 @@ Open (not started this session):
       still waits for it. Next: persist the built index (PageRank and the
       lexical side) the same way, or answer the first searches from a
       lexical-only tier while it builds.
+      Then (6aff007 and the two before it): the index too is saved and loaded -- `index_warm`
+      6.8 s on a quiet start (index 0.15 s, 0 rows redone), 25.7 s on a
+      start where 8 rows had to be re-read behind the other start-up passes.
+      The FIRST SEARCHES are the measure that matters: 17.8 s, 3.4 s while
+      the reconcile and an immediate rebuild read the whole store; 4.0,
+      2.8, 1.8 s with the rebuild dropped and the reconcile yielding;
+      0.19-0.43 s once start-up is over. What still contends: the start-up
+      passes that read every chunk (lexical repair, containment warm, the
+      reconcile's list_contains batches, each a table scan).
     - an edit's render is O(page) in its page-global passes: 62 ms at
       N=1,600, against 9-12 ms on 2026-08-29;
       re-measured 2026-11-15 15:10 (`--projection --sizes 400,1600,6400`):
