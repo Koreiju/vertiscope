@@ -155,6 +155,11 @@ PLANT_LEXICAL_SAVE_LOCKED = [False]
 #: write (one ego note's save was enough).
 PLANT_FULL_CSR_REBUILD = [False]
 
+#: Planted (2026-11-15): tf-idf built with sparse `multiply` and a diagonal
+#: product, as before -- each allocating a new sparse matrix over every row;
+#: tier 1's lexical phase read 2.6-2.8 s after any write, 30 ms at rest.
+PLANT_TFIDF_SPARSE_OPS = [False]
+
 #: A keyword anchor is a word at most this share of chunks hold. Half let
 #: "the" and "edit" through on a mixed-language store (Radix tree's page,
 #: 2026-11-15), where "the" is in fewer than half the chunks.
@@ -448,6 +453,29 @@ class FreqMatrix:
         unseen term must not divide by zero.
         """
         if self._tfidf is not None:
+            return self._tfidf
+        if not PLANT_TFIDF_SPARSE_OPS[0]:
+            # On the data array directly: each stored count becomes
+            # (1 + log f) * idf[its column] / its row's norm -- the same
+            # weights, from a few passes over the nonzeros and no sparse
+            # product. The row norms are one `bincount` over the entries'
+            # rows. Held equal to the sparse-ops build by
+            # tests/test_csr_splice.py.
+            base = self._matrix()
+            n_rows = base.shape[0]
+            if not n_rows:
+                return base.copy()
+            n_docs = max(n_rows, 1)
+            df = self.document_frequency()
+            idf = (np.log((1.0 + n_docs) / (1.0 + df)).astype(np.float32) + 1.0)
+            w = (1.0 + np.log(base.data.astype(np.float32))) * idf[base.indices]
+            row_of = np.repeat(np.arange(n_rows, dtype=np.int64), np.diff(base.indptr))
+            norms = np.sqrt(np.bincount(row_of, weights=np.square(w, dtype=np.float64),
+                                        minlength=n_rows)).astype(np.float32)
+            norms[norms == 0] = 1.0
+            w = (w / norms[row_of]).astype(np.float32)
+            self._tfidf = sparse.csr_matrix((w, base.indices.copy(), base.indptr.copy()),
+                                            shape=base.shape)
             return self._tfidf
         csr = self._matrix().copy()
         if not csr.shape[0]:

@@ -110,3 +110,55 @@ def test_one_write_costs_a_splice_not_a_rebuild():
     whole = _one_write_then_read(True)
     print(f"read after one write, 20k rows: spliced {spliced:.1f} ms, whole {whole:.1f} ms")
     assert spliced * 3 < whole
+
+
+def _tfidf_pair(m):
+    m._tfidf = None
+    fast = m.tfidf().copy()
+    vectors.PLANT_TFIDF_SPARSE_OPS[0] = True
+    try:
+        m._tfidf = None
+        slow = m.tfidf().copy()
+    finally:
+        vectors.PLANT_TFIDF_SPARSE_OPS[0] = False
+        m._tfidf = None
+    return fast, slow
+
+
+def test_tfidf_on_the_data_array_equals_the_sparse_ops_build():
+    rng = random.Random(5)
+    m = FreqMatrix()
+    for i in range(500):
+        m.add(f"c{i}", _text(rng, rng.randrange(0, 30)))
+    for i in range(0, 500, 9):
+        m.remove(f"c{i}")                         # tombstones: empty rows
+    fast, slow = _tfidf_pair(m)
+    assert fast.shape == slow.shape
+    assert np.allclose(fast.toarray(), slow.toarray(), atol=1e-6)
+    q = m.query_vector("w3 w17 w250")
+    assert np.allclose(fast @ q, slow @ q, atol=1e-6)
+
+
+def test_tfidf_after_a_write_is_cheaper_than_sparse_ops():
+    rng = random.Random(13)
+    m = FreqMatrix()
+    for i in range(20000):
+        m.add(f"c{i}", _text(rng, 40))
+    m.tfidf()
+
+    def after_write(planted):
+        m.add("c5", _text(rng, 40))
+        vectors.PLANT_TFIDF_SPARSE_OPS[0] = planted
+        try:
+            m._matrix()                           # the splice, not timed here
+            t0 = time.perf_counter()
+            m.similarities("w1 w2 w3")
+            return (time.perf_counter() - t0) * 1000
+        finally:
+            vectors.PLANT_TFIDF_SPARSE_OPS[0] = False
+
+    fast, slow = after_write(False), after_write(True)
+    print(f"search after one write, 20k rows: data-array {fast:.1f} ms, sparse ops {slow:.1f} ms")
+    # Measured 1.3x at 20k rows, 1.6x at 90k (4.2M counts): the sparse
+    # products allocate; the data-array build does not.
+    assert fast < slow
