@@ -932,8 +932,35 @@ class Workspace:
             wire_bytes=len(text), document_bytes=len(text), report=report,
         )
 
+    @staticmethod
+    def prepare_source(text: str, rel_path: str, *, root: str = "repo") -> dict:
+        """The store-free half of `index_source`: the module parsed to
+        addressed tags, its trie, and its code property graph. Touches no
+        store, so a caller holding the work lock can do this BEFORE taking it
+        (2026-11-15: re-indexing an edited sidecar.py held the lock 214 s and
+        captures, notes and saves queued behind it)."""
+        import time as _time
+        from .source import source_url, tag_source
+        ms = {}
+        _t = _time.perf_counter()
+        url = source_url(root, rel_path)
+        tags = tag_source(text, root=root, rel_path=str(rel_path))
+        trie = AddressTrie.from_tags(tags, url)
+        ms["parse"] = round((_time.perf_counter() - _t) * 1000, 1)
+        _t = _time.perf_counter()
+        g = None
+        if str(rel_path).endswith(".py"):
+            try:
+                from .cpg import build_cpg
+                g = build_cpg(text, url, str(rel_path).replace("\\", "/"))
+            except SyntaxError:
+                g = "does not parse"
+        ms["cpg_build"] = round((_time.perf_counter() - _t) * 1000, 1)
+        return {"url": url, "trie": trie, "cpg": g, "ms": ms}
+
     def index_source(self, text: str, rel_path: str, *,
-                     root: str = "repo", title: str = "") -> ScanResult:
+                     root: str = "repo", title: str = "",
+                     prepared: Optional[dict] = None) -> ScanResult:
         """A source file into the trie — no browser, no DOM (`G-49`).
 
         The same three steps as `index_note`, with the first one swapped:
@@ -949,27 +976,28 @@ class Workspace:
         not here. The trie holds the code either way, and so does the chunk a
         reader opens.
         """
-        from .source import source_url, tag_source
-
-        url = source_url(root, rel_path)
-        tags = tag_source(text, root=root, rel_path=str(rel_path))
-        trie = AddressTrie.from_tags(tags, url)
+        import time as _time
+        prep = prepared if prepared is not None else self.prepare_source(text, rel_path, root=root)
+        url, trie, g = prep["url"], prep["trie"], prep["cpg"]
+        ms = dict(prep["ms"])
+        _t = _time.perf_counter()
         report = RenderReport()
         chunks, _counts = self.ingest(
             url, trie, report=report,
             title=title or PurePosixPath(
                 str(rel_path).replace("\\", "/")).name)
+        ms["ingest"] = round((_time.perf_counter() - _t) * 1000, 1)
         # `G-235`: the file's code property graph beside its chunks, by the
         # same addresses. A file that does not parse has no graph, and its
         # chunks are indexed regardless (`tag_source`'s rule).
         self.last_cpg = None
-        if str(rel_path).endswith(".py"):
-            try:
-                from .cpg import build_cpg
-                g = build_cpg(text, url, str(rel_path).replace("\\", "/"))
-                self.last_cpg = {**g["stats"], **self.store.upsert_cpg(g)}
-            except SyntaxError:
-                self.last_cpg = {"error": "does not parse"}
+        _t = _time.perf_counter()
+        if g == "does not parse":
+            self.last_cpg = {"error": "does not parse"}
+        elif g is not None:
+            self.last_cpg = {**g["stats"], **self.store.upsert_cpg(g)}
+        ms["cpg_store"] = round((_time.perf_counter() - _t) * 1000, 1)
+        self.last_source_ms = ms
         return ScanResult(
             url=url, addresses=len(trie), chunks=len(chunks),
             lines=sum(len(c.lines) for c in chunks), passes=1,

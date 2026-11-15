@@ -1197,6 +1197,11 @@ _CODE_SYNC_LOCK = threading.Lock()
 _CODE_SYNC_STATE = {"running": False, "done": 0, "total": 0, "current": "", "started": 0.0, "last": None}
 
 
+#: Planted (2026-11-15): a module's parse and code graph built while holding
+#: the work lock, as before.
+PLANT_CODE_SYNC_PREPARE_LOCKED = [False]
+
+
 def _sync_code(workspace, *, limit: Optional[int] = None, forget=()) -> Dict:
     """The codebase into the trie, as it is on disk NOW (PLUGIN_GOAL 159: "the
     completeness of results to be for all code artifacts in our db").
@@ -1261,8 +1266,17 @@ def _sync_code(workspace, *, limit: Optional[int] = None, forget=()) -> Dict:
             _CODE_SYNC_STATE["current"] = url
             tf = time.time()
             try:
-                with _WORK_LOCK:
-                    workspace.index_source(text, rel, root="repo")
+                # The parse, trie and code graph are built BEFORE the lock --
+                # they touch no store -- and only the store write holds it.
+                # Planted PLANT_CODE_SYNC_PREPARE_LOCKED: all of it held.
+                if PLANT_CODE_SYNC_PREPARE_LOCKED[0]:
+                    with _WORK_LOCK:
+                        workspace.index_source(text, rel, root="repo")
+                else:
+                    prep = workspace.prepare_source(text, rel, root="repo")
+                    with _WORK_LOCK:
+                        workspace.index_source(text, rel, root="repo", prepared=prep)
+                out.setdefault("file_phases", {})[url] = dict(getattr(workspace, "last_source_ms", {}) or {})
                 _project_page(workspace, url)
                 ledger[url] = h
                 out["indexed"] += 1
