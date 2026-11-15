@@ -7083,9 +7083,51 @@ export class GraphView extends ItemView {
   microscopeStats = { steps: 0, entered: 0, last: "", d: 0 };
   /** One wheel step into a craft node: the camera 30% nearer, aimed at it;
    *  inside a fifth of the craft's radius, its panel opens on the plane. */
+  /** A craft node's drawn radius on screen, in pixels. */
+  nodePx(n: any): number {
+    const g: any = this.graph, cam = g?.camera(), el = g?.renderer?.().domElement;
+    if (!cam || !el || !n?.mesh) return 0;
+    const geo = n.mesh.geometry; if (!geo.boundingSphere) geo.computeBoundingSphere();
+    const rad = (geo.boundingSphere?.radius || 1) * (n.mesh.scale?.x || 1);
+    const w = n.mesh.position.clone().setFromMatrixPosition(n.mesh.matrixWorld);
+    const dist = Math.max(1e-6, cam.position.distanceTo(w));
+    return rad / dist / Math.tan(((cam.fov || 50) * Math.PI) / 360) * (el.clientHeight / 2);
+  }
+  /** Planted (G-320): on the camera the step dollies the camera as before -- which carries the plane with it. */
+  plantMicroscopeDolly = false;
+  /** Drawn this large (px radius) the zoom passes through the node. */
+  microscopeEnterPx = 40;
   microscopeStep(n: any): boolean {
     const g: any = this.graph;
     if (!g || !this.craft) return false;
+    // The 2D plane is ON THE CAMERA (PLUGIN_GOAL 159), placed from it every
+    // frame: a camera step toward a node carries the node along, so the
+    // distance never fell (G-320 read 24, 36, 51 -- the same over 30 steps)
+    // and the zoom never passed through. On the camera, "nearer" is the
+    // plane scaled about that node -- 1/0.7 a step, the old 30% -- and
+    // shifted so the node comes 30% of the way to the centre; drawn
+    // `microscopeEnterPx` large, it opens. (My reading of "zoom to pass into
+    // the microscope of the ego" for a plane that lives on the lens.)
+    if (this.craft.onCamera() && !this.plantMicroscopeDolly) {
+      const cam = g.camera(), c: any = this.craft;
+      const w = n.mesh.position.clone().setFromMatrixPosition(n.mesh.matrixWorld).project(cam);
+      const s = c.planeShift, f = 1 / 0.7;
+      const scale0 = c.planeScale, scale1 = c.zoomPlane(f), k = scale1 / scale0;
+      // The node's offset from the plane's centre, in the same half-extents.
+      const o = { x: w.x - s.x, y: w.y - s.y };
+      s.x = Math.max(-4, Math.min(4, 0.7 * w.x - o.x * k));
+      s.y = Math.max(-4, Math.min(4, 0.7 * w.y - o.y * k));
+      c.key = "";
+      const px = this.nodePx(n) * k;
+      this.microscopeStats.steps++; this.microscopeStats.d = Math.round(px);
+      (this.microscopeStats as any).on_camera = ((this.microscopeStats as any).on_camera || 0) + 1;
+      if (px >= this.microscopeEnterPx || (k <= 1.0001 && scale1 >= 6)) {
+        this.craft.click(n);
+        this.microscopeStats.entered++; this.microscopeStats.last = n.id;
+        return true;
+      }
+      return false;
+    }
     const cam = g.camera(), ctl = g.controls(), q = n.mesh.position;
     const p = cam.position;
     p.set(q.x + (p.x - q.x) * 0.7, q.y + (p.y - q.y) * 0.7, q.z + (p.z - q.z) * 0.7);

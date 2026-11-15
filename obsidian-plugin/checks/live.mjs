@@ -9517,7 +9517,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-320",
-      asks: "zoom passes into the microscope of the ego (PLUGIN_GOAL 97): in the map view, wheel-in with the pointer over a craft node steps the camera toward that node -- each step nearer, the node the focus -- and close enough the zoom passes through: the node's panel opens on the plane; planted (plantNoMicroscope) the wheel zooms as anywhere else and no panel opens",
+      asks: "zoom passes into the microscope of the ego (PLUGIN_GOAL 97): in the map view, wheel-in with the pointer over a craft node steps the camera toward that node -- each step nearer, the node the focus -- and close enough the zoom passes through: the node's panel opens on the plane; planted (plantNoMicroscope) the wheel zooms as anywhere else and no panel opens; with the 2D plane on the camera (PLUGIN_GOAL 159) 'nearer' is the plane scaled about the node -- drawn larger, coming to the centre -- since a camera step carries the plane with it (planted plantMicroscopeDolly: the old dolly, which never arrives)",
       async run() {
         // 2026-11-01: "with 3d being a unique umap to its non holonomic origin
         // and similar more compact scaling that enables zoom to pass into the
@@ -9530,43 +9530,68 @@ export function makeChecks(env) {
           if (!d || !c || !g) return { error: "no craft" };
           const path = "domvec/graph/g320 micro " + Date.now() + ".md";
           const mode0 = g.agent.mode;
-          g.plantNoMicroscope = ${planted};
-          const out = { planted: ${planted} };
+          const planted = ${JSON.stringify(planted)};
+          g.plantNoMicroscope = planted === "none"; g.plantMicroscopeDolly = planted === "dolly";
+          const scale0 = c.planeScale, shift0 = { ...c.planeShift };
+          const out = { planted };
           try {
             await d.create("notebook", { path, text: "# micro" + String.fromCharCode(10) + String.fromCharCode(10) + "A note seen through the ego's microscope." + String.fromCharCode(10) });
             d.closePath(path);
             c.dirty();
-            await until(() => c.nodes.some((n) => n.id === "craft:" + path && n.mesh), 10000);
+            const drawn = await until(() => c.nodes.some((n) => n.id === "craft:" + path && n.mesh), 15000);
+            if (!drawn) return { planted, error: "the probe note never became a craft node",
+                                 craft: { nodes: c.nodes.length, building: c.building, stale: c.stale, ids: c.nodes.filter((n) => /g320/.test(n.id)).map((n) => n.id) } };
             g.agent.setMode("map"); await sleep(1400);
             const cam = g.graph.camera(), el = g.graph.renderer().domElement;
             const node = () => c.nodes.find((n) => n.id === "craft:" + path);
             const screen = () => { const r = el.getBoundingClientRect(), v = node().mesh.position.clone().project(cam); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; };
-            const d0 = cam.position.distanceTo(node().mesh.position);
-            let steps = 0;
+            const d0 = cam.position.distanceTo(node().mesh.position), px0 = g.nodePx(node());
+            out.on_camera = c.onCamera();
+            let steps = 0, pxLast = px0, dLast = d0;
             for (; steps < 30 && !d.panelOf(path); steps++) {
+              // Read before each step: once the zoom passes through, the open
+              // note's card rebuilds the craft and this node is gone.
+              const nd = node();
+              if (!nd || !nd.mesh) break;
+              pxLast = g.nodePx(nd); dLast = cam.position.distanceTo(nd.mesh.position);
               const at = screen();
+              const pp0 = c.insetStats.plane_places;
               el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -120, clientX: at.x, clientY: at.y }));
-              await sleep(120);
+              // As a pane the reader WATCHES: the plane re-placed on the camera
+              // before the next step. A background pane drew too rarely, and the
+              // old dolly converged on a node nothing had moved yet.
+              for (let w = 0; w < 30 && c.onCamera() && c.insetStats.plane_places <= pp0; w++) await sleep(50);
+              await sleep(60);
             }
             await sleep(600);
             out.steps = steps;
-            out.nearer = Math.round(cam.position.distanceTo(node().mesh.position)) < Math.round(d0);
+            // Nearer AS SEEN: drawn larger -- a camera dolly and a plane scaled
+            // on the lens both show it (the plane rides the camera, 159).
+            const nd1 = node();
+            const px1 = nd1 && nd1.mesh ? Math.max(pxLast, g.nodePx(nd1)) : pxLast;
+            out.px = [Math.round(px0 * 10) / 10, Math.round(px1 * 10) / 10];
+            out.nearer = px1 > px0 * 1.2 || Math.round(dLast) < Math.round(d0);
             out.opened = !!d.panelOf(path);
             out.stats = { ...g.microscopeStats };
             return out;
           } finally {
-            g.plantNoMicroscope = false;
+            g.plantNoMicroscope = false; g.plantMicroscopeDolly = false;
+            c.planeScale = scale0; c.planeShift.x = shift0.x; c.planeShift.y = shift0.y; c.key = "";
             g.agent.setMode(mode0);
             try { await d.trash(path); } catch (e) { /* gone */ }
             c.dirty();
           }
         })()`, { timeout: 90000 });
         const clean = await arm(false);
-        const planted = await arm(true);
+        const planted = await arm("none");
+        const dolly = await arm("dolly");
         const c = clean || {};
         return {
-          pass: c.opened && c.nearer && c.steps < 30 && !!planted && !planted.opened,
-          evidence: { clean, planted },
+          // A planted arm that never ran is not a caught defect: each must have stepped.
+          pass: c.opened && c.nearer && c.steps < 30
+                && !!planted && !planted.error && planted.steps > 0 && !planted.opened
+                && !!dolly && !dolly.error && dolly.steps > 0 && !dolly.opened,
+          evidence: { clean, planted, dolly },
         };
       },
     },
@@ -16844,6 +16869,59 @@ export function makeChecks(env) {
                    && c.anchored_resolved >= 1 && c.anchored_legs >= 1
                    && p.legs === 1,
                  evidence: got };
+      },
+    },
+    {
+      id: "G-365",
+      asks: "a note made while the ego is building joins it (found 2026-11-15 by G-320's third arm: a dirty() during a build was dropped -- its timer saw the build and skipped, and the build's end cleared `stale` -- so the note never became a craft node): a build is started, a note is created on the plane and the craft marked dirty WHILE it runs; within a few seconds the note is a craft node; planted (plantDropMidBuildDirty) it is not",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const c = window.__domvecCraft;
+          if (!c) return { error: "no craft" };
+          const NL = String.fromCharCode(10);
+          const base = "domvec/graph/g365 mid " + (${planted} ? "p" : "c") + Date.now() + " ";
+          c.plantDropMidBuildDirty = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            // STAGED: every dirty() of the note's arrival -- the vault's create,
+            // the metadata cache's changed, ours -- must land while the build
+            // runs; a cache event after it rescued the note and hid the defect.
+            // Retried until staged; whether it was is recorded.
+            const m0 = c.rebuildStats.mid_build_dirty;
+            let f = null, staged = false, tries = 0, path = "";
+            for (; tries < 8 && !staged; tries++) {
+              for (let i = 0; i < 100 && c.building; i++) await sleep(100);
+              path = base + tries + ".md";
+              const b = c.build();
+              f = await app.vault.create(path, "# mid build" + NL + NL + "Made while the ego was building." + NL);
+              for (let i = 0; i < 40 && c.building && !app.metadataCache.getFileCache(f); i++) await sleep(25);
+              c.dirty();
+              staged = c.building && !!app.metadataCache.getFileCache(f);
+              await b;
+              if (!staged) { try { await window.__domvecPlane.trash(f); } catch (e) {} f = null; await sleep(300); }
+            }
+            out.staged = staged; out.tries = tries;
+            const has = () => c.nodes.some((n) => n.id === "craft:" + path);
+            const t0 = Date.now();
+            for (let i = 0; i < 60 && !has(); i++) await sleep(100);
+            out.joined = has();
+            out.join_ms = out.joined ? Date.now() - t0 : null;
+            out.mid_build_dirty = c.rebuildStats.mid_build_dirty - m0;
+            return out;
+          } finally {
+            c.plantDropMidBuildDirty = false;
+            for (const ff of app.vault.getMarkdownFiles().filter((x) => x.path.startsWith(base))) { try { await window.__domvecPlane.trash(ff); } catch (e) { /* gone */ } }
+            c.dirty();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        return {
+          pass: !!clean && !clean.error && clean.staged && clean.joined && clean.mid_build_dirty >= 1
+                && !!planted && !planted.error && planted.staged && !planted.joined,
+          evidence: { clean, planted },
+        };
       },
     },
     {

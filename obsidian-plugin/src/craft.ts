@@ -270,7 +270,16 @@ export class Craft {
   constructor(private host: CraftHost) {}
 
   /** The vault changed (or a panel opened): rebuild on the next frame. */
+  /** Every dirty(): a build that began before the latest one is stale when it
+   *  ends. A dirty() during a build was LOST -- its timer saw `building` and
+   *  skipped, then the build's end set `stale` false -- so a note made while
+   *  the ego was building never joined it (G-320's third arm, 2026-11-15).
+   *  Planted `plantDropMidBuildDirty`: lost, as before. */
+  private dirtyGen = 0;
+  plantDropMidBuildDirty = false;
+  rebuildStats = { mid_build_dirty: 0 };
   dirty(): void {
+    this.dirtyGen++;
     this.stale = true; this.key = "";
     // Rebuilt whether or not the craft is on screen: the ego set (what
     // "similar" and the ego search rank over) came only from the draw loop, so
@@ -330,6 +339,7 @@ export class Craft {
   async build(): Promise<void> {
     if (this.building) return;
     this.building = true;
+    const gen0 = this.dirtyGen;
     try {
       const app = this.host.app;
       const nodes: CraftNode[] = [];
@@ -515,7 +525,9 @@ export class Craft {
       this.stats.refs = refs;
     } finally {
       this.building = false;
-      this.stale = false;
+      const again = this.dirtyGen !== gen0 && !this.plantDropMidBuildDirty;
+      this.stale = again;
+      if (again) { this.rebuildStats.mid_build_dirty++; this.dirty(); }
     }
   }
 
