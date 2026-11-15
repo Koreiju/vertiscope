@@ -937,6 +937,27 @@ export function makeChecks(env) {
   const tidyFixtures = async (origin) => {
     try {
       if (!origin) return -1;
+      // The cell's RESTORE memory first (2026-11-15, G-113 runs 86-90): the
+      // browser reopens the last http page it showed on every plugin reload
+      // -- each confirm run reloads -- and a parked cell on about:blank is
+      // never remembered, so the previous run's fixture came back as the
+      // reader's page and was captured again after its purge. Forgotten
+      // only where it names THIS origin; a reader's own page is kept.
+      try {
+        await evaluate(`(() => {
+          const O = ${JSON.stringify(origin + "/")}, hit = (u) => String(u || "").startsWith(O);
+          let n = 0;
+          for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
+            const v = l.view; if (v && hit(v.ownUrl)) { v.ownUrl = ""; n++; }
+          }
+          try { if (hit(app.loadLocalStorage("domvec-browser-last"))) { app.saveLocalStorage("domvec-browser-last", null); n++; } } catch (e) {}
+          try { const m = JSON.parse(localStorage.getItem("domvec-browser-tab-urls") || "{}");
+                for (const k of Object.keys(m)) if (hit(m[k])) { delete m[k]; n++; }
+                localStorage.setItem("domvec-browser-tab-urls", JSON.stringify(m)); } catch (e) {}
+          if (n) app.workspace.requestSaveLayout();
+          return n;
+        })()`);
+      } catch { /* the purge below still runs */ }
       const listed = await ask("/pages?contains=" + encodeURIComponent(origin + "/"));
       let removed = 0;
       for (const url of listed.urls || []) {
@@ -3108,6 +3129,10 @@ export function makeChecks(env) {
           try {
             b.plant.clear();
             try { b.setLive(true); } catch (e) {}
+            // The pointer OFF the page first: left resting where an earlier
+            // arm put it, the page loads under it and the sensor reports that
+            // spot as a hover (run 95: a #2 panel beside a #1 flight).
+            try { wc.sendInputEvent({ type: "mouseMove", x: -8, y: -8 }); wc.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 }); } catch (e) {}
             out.landed = await land(PAGE, 30000);
             // The page's chunks in the store and placeable (vectorised).
             let cids = [];
@@ -3134,17 +3159,24 @@ export function makeChecks(env) {
             if (!pick) return { ...out, error: "no hovered chunk resolves to a stored chunk", points: pts.length };
             out.pick = pick;
             v.plantNoFocus = ${planted};
-            const f0 = { ...v.focusStats }, n0 = v.billboardLog.length;
+            const f0 = { ...v.focusStats }, n0 = v.billboardLog.length, hs0 = { ...v.hoverStats };
+            out.open_before = [...v.billboards.keys()].map((k) => String(k).slice(-60));
             // What the hover handed the view: which cid, and whether a stored
             // chunk came with it (2026-11-15: the stored chunk was never placed).
             const calls = [], hc = v.highlightChunk;
             v.highlightChunk = function (cid, url, stored) { if (calls.length < 12) calls.push({ cid: String(cid || "").slice(-60), stored: stored || "", collapsed: url ? v.readerCollapsed(url) : null }); return hc.apply(this, arguments); };
-            wc.sendInputEvent({ type: "mouseMove", x: pick.x, y: pick.y });
+            // CSS px -> the pane's px (the cell is zoomed to fit): sent
+            // unscaled, (30,70) landed at CSS (105,245) at zoom 0.286 -- the
+            // "#1 named while the pointer was in #2" of run 61 was this.
+            const zf = (wc.getZoomFactor && wc.getZoomFactor()) || 1;
+            out.zoom = Math.round(zf * 1000) / 1000;
+            wc.sendInputEvent({ type: "mouseMove", x: Math.round(pick.x * zf), y: Math.round(pick.y * zf) });
             await sleep(40);
-            wc.sendInputEvent({ type: "mouseMove", x: pick.x + 2, y: pick.y + 1 });
+            wc.sendInputEvent({ type: "mouseMove", x: Math.round(pick.x * zf) + 1, y: Math.round(pick.y * zf) + 1 });
             await sleep(1600);
             const rect = b.pipebox.hover && b.pipebox.hover.rect;
             const vp = JSON.parse(await b.webview.executeJavaScript("JSON.stringify([innerWidth, innerHeight])"));
+            out.hover_in_page = await b.webview.executeJavaScript("(function(){var h=document.querySelectorAll(':hover');var e=h.length?h[h.length-1]:null;return e?(e.tagName+(e.id?'#'+e.id:'')+' '+(e.textContent||'').trim().slice(0,40)):null;})()").catch(() => "err");
             out.outline = rect || null;
             out.outline_frac = rect ? Math.round(rect.w * rect.h / (vp[0] * vp[1]) * 1000) / 1000 : null;
             v.highlightChunk = hc; out.calls = calls;
@@ -3197,6 +3229,8 @@ export function makeChecks(env) {
             out.panel = e ? { from_hover: !!e.fromHover, form: e.form, first_paint_ms: e.firstPaintMs ?? null,
                               text: textOf(e.el.querySelector(".domvec-bb-body")) } : null;
             out.log = v.billboardLog.slice(n0);
+            out.hover_stats_delta = Object.fromEntries(Object.entries(v.hoverStats).map(([k, x]) => [k, (x || 0) - (hs0[k] || 0)]).filter(([, d]) => d));
+            out.open_after = [...v.billboards.keys()].map((k) => String(k).slice(-60));
             // The pointer leaves the page the way a mouse does: moves past its
             // edge, then the window's leave.
             wc.sendInputEvent({ type: "mouseMove", x: -8, y: -8 });
@@ -3214,6 +3248,127 @@ export function makeChecks(env) {
         })()`, { timeout: 180000 });
         const clean = await arm(false);
         const planted = await arm(true, clean && clean.pick ? clean.pick : null);
+
+        // THE FOREIGN-LEAD ARM (PLUGIN_GOAL 162: "Fly to the copy on the page
+        // you are reading; the lead elsewhere is only a dedup detail"). The
+        // shadow fixture above held no foreign lead (run 81: 0), so the skip
+        // had no arm. Two fixture pages share one article byte for byte: A is
+        // stored first, so its chunk is the store-wide lead, and B's copy is
+        // aliased to it. Hovering that article on B must stay on B; planted
+        // `plantFlyToForeignLead` follows the lead to A.
+        const A = fixtures.origin + "/dedup_lead_a.html", B = fixtures.origin + "/dedup_copy_b.html";
+        const foreignArm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const A = ${JSON.stringify(A)}, B = ${JSON.stringify(B)};
+          const docOf = (u) => String(u || "").split("#")[0];
+          const out = { planted: ${planted} };
+          const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+          try {
+            b.plant.clear();
+            try { b.setLive(true); } catch (e) {}
+            for (const U of [A, B]) {
+              if (!(await land(U, 30000))) return { ...out, error: "did not land " + U };
+              let ok = false;
+              for (let i = 0; i < 80 && !ok; i++) {
+                const c = await v.sidecar.pageCids(U).catch(() => []);
+                // A must be PLACEABLE (its chunk is the lead, drawn with a
+                // vector); B only STORED -- its shared chunk is a copy, drawn
+                // through A's lead, and needs no vector of its own (run 87
+                // timed out waiting for one).
+                if (c.length && U === B) ok = true;
+                else if (c.length) { const got = await v.sidecar.place(c.slice(0, 4)); ok = !!(got && got.nodes && got.nodes.length); }
+                if (!ok) await sleep(750);
+              }
+              if (!ok) return { ...out, error: U + (U === B ? " never reached the store" : " never became placeable") };
+            }
+            await b.webview.executeJavaScript("document.getElementById('shared').scrollIntoView({block:'start'}); 1");
+            await sleep(600);
+            // Points over the SHARED article, each resolved to its stored chunk.
+            const PTS = "(function(){var h=window.__domvecSensor;var r=document.getElementById('shared').getBoundingClientRect();var a=[];for(var y=Math.max(10,r.top+12);y<Math.min(innerHeight-10,r.bottom-8);y+=24)for(var x=r.left+20;x<r.right-20;x+=70){var st=document.elementsFromPoint(x,y),bb=null,ba=Infinity;for(var i=0;i<st.length&&i<12;i++){var c=null;try{c=h.at(st[i]);}catch(e){}if(c&&c.box){var ar=c.box[2]*c.box[3];if(ar>0&&ar<ba){ba=ar;bb=c;}}}if(bb)a.push({x:Math.round(x),y:Math.round(y),id:bb.id});}return JSON.stringify(a);})()";
+            let pick = null; const seen = [];
+            for (let tries = 0; !pick && tries < 45; tries++) {
+              const pts = JSON.parse(await b.webview.executeJavaScript(PTS));
+              for (const p of pts) {
+                const st = b.storedCidFor("f:" + b.session + "#" + p.id, b.session);
+                if (!st || seen.some((x) => x.stored === st)) continue;
+                const got = await v.sidecar.place([st]).catch(() => null);
+                const lead = got && got.aliases && got.aliases[st];
+                const ln = lead && (got.nodes || []).find((n) => (n.cid ?? n.id) === lead);
+                seen.push({ stored: st, lead: lead || null, lead_url: ln ? ln.url : null });
+                if (lead && ln && docOf(ln.url) === A) { pick = { ...p, stored: st, lead }; break; }
+              }
+              if (!pick) await sleep(700);
+            }
+            out.candidates = seen.slice(0, 6);
+            if (!pick) return { ...out, error: "precondition: no chunk of B is aliased to a lead on A" };
+            out.pick = pick;
+            // As a reader arrives: nothing placed or aliased for this page yet.
+            v.hoverPlaced.clear(); v.hoverAliases.clear();
+            v.hoverStats.foreign_lead = 0; v.hoverStats.lead_page_unknown = 0;
+            v.plantFlyToForeignLead = ${planted};
+            const f0 = { ...v.focusStats };
+            const calls = [], hc = v.highlightChunk;
+            v.highlightChunk = function (cid, url, stored) { if (calls.length < 12) calls.push({ cid: String(cid || "").slice(-70), url: String(url || "").slice(-40), stored: stored || "", collapsed: url ? v.readerCollapsed(url) : null, placed_before: v.hoverPlaced.has(stored) }); return hc.apply(this, arguments); };
+            // The guest's webContents NOW, after two navigations, not the one
+            // taken before them (run 92: no hover reached the view at all).
+            const wc2 = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+            out.wc_same = wc2 === wc || (wc2 && wc && wc2.id === wc.id);
+            out.box_visible = !!(b.pipebox && b.pipebox.visible && b.pipebox.visible());
+            try {
+              b.webview.focus && b.webview.focus();
+              // CSS px -> the pane's px: the cell is zoomed to fit (0.286 on a
+              // 366 px pane showing a 1,280 px layout), and sendInputEvent
+              // takes the pane's (run 93: (300,284) hovered only <html>).
+              const z = (wc2.getZoomFactor && wc2.getZoomFactor()) || 1;
+              out.zoom = Math.round(z * 1000) / 1000;
+              pick.sx = Math.round(pick.x * z); pick.sy = Math.round(pick.y * z);
+              wc2.sendInputEvent({ type: "mouseMove", x: pick.sx, y: pick.sy });
+              await sleep(40);
+              wc2.sendInputEvent({ type: "mouseMove", x: pick.sx + 1, y: pick.sy + 1 });
+              await sleep(2500);
+            } finally { v.highlightChunk = hc; }
+            out.hover_in_page = await b.webview.executeJavaScript("(function(){var h=document.querySelectorAll(':hover');return h.length?h[h.length-1].tagName+'#'+(h[h.length-1].id||''):null;})()").catch(() => "err");
+            out.cross_page_refused = (b.hoverStats && b.hoverStats.cross_page_refused) || 0;
+            out.calls = calls;
+            out.hovered = b.lastHovered ? { cid: String(b.lastHovered.cid || "").slice(-70), stored: b.lastHovered.stored || "" } : null;
+            out.b_page_drawn = v.graph.graphData().nodes.some((n) => n.level === "page" && docOf(n.url) === B);
+            out.flown = v.focusStats.flown - f0.flown;
+            out.flew_to = v.focusStats.last;
+            const fnode = v.graph.graphData().nodes.find((n) => String(n.id).slice(0, 60) === out.flew_to);
+            const streamed = String(out.flew_to || "").startsWith("f:");
+            const doc = streamed ? docOf(String(out.flew_to).slice(2)) : docOf(fnode && fnode.url);
+            // The lead's absorbed node may carry no url (run 94: flew to A's
+            // lead, read ""): the flight to the lead itself is A's by definition.
+            out.flew_on = !out.flown ? null : out.flew_to === pick.lead ? "A" : doc === B ? "B" : doc === A ? "A" : String(doc).slice(0, 80);
+            out.foreign_leads = v.hoverStats.foreign_lead || 0;
+            out.lead_page_unknown = v.hoverStats.lead_page_unknown || 0;
+            out.alias_kept = v.hoverAliases.get(pick.stored) || null;
+            return out;
+          } finally {
+            v.plantFlyToForeignLead = false;
+            for (const [id, e] of [...v.billboards.entries()]) if (e.fromHover) v.closeBillboard(id);
+            // PARKED, or the purge is undone: B was the page on show, and the
+            // live loop wrote it back after every purge (runs 86-88: B on all
+            // three ports still stored, A and the shadow page gone).
+            try { b.setLive(false); } catch (e) {}
+            try { b.go("about:blank"); } catch (e) {}
+            await sleep(2000);
+          }
+        })()`, { timeout: 240000 });
+        const foreignClean = await foreignArm(false);
+        const foreignPlanted = await foreignArm(true);
+        const purged = await tidyFixtures(fixtures.origin);
+        await evaluate(`(() => { const b = app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view; try { b && b.setLive(true); } catch (e) {} return 1; })()`);
+        const staysHere = !!foreignClean && !foreignClean.error && foreignClean.flew_on === "B" && foreignClean.foreign_leads >= 1
+          && !foreignClean.alias_kept && !(foreignClean.calls || []).some((c) => c.stored === foreignClean.pick.lead);
+        // The plant is caught at the hover's DECISION: the lead re-handed and
+        // kept as the alias. Its FLIGHT reaches A only when B's streamed node
+        // is not drawn -- `highlightChunk` takes the hovered streamed node
+        // first, before any lead (run 94 flew to A; run 95, streamed node
+        // up, flew to B with the same decision). Reported, not judged.
+        const followsLead = !!foreignPlanted && !foreignPlanted.error && foreignPlanted.alias_kept === foreignPlanted.pick.lead
+          && (foreignPlanted.calls || []).some((c) => c.stored === foreignPlanted.pick.lead) && foreignPlanted.foreign_leads === 0;
         // The bar is THIS page's chunk (PLUGIN_GOAL 162), not the dedup lead:
         // the lead of this fixture's chunk is a copy on an earlier run's page
         // (a new port each run), which the flight must not leave the page for.
@@ -3224,8 +3379,9 @@ export function makeChecks(env) {
         // should persist, but disappear after a minute maybe"): the panel outlives the
         // hover, and G-125's check holds that. `closed_after_leave` stays as evidence.
         return {
-          pass: works(clean) && !planted.error && planted.flown === 0 && !planted.panel,
-          evidence: { clean, planted,
+          pass: works(clean) && !planted.error && planted.flown === 0 && !planted.panel && staysHere && followsLead,
+          evidence: { foreign: { clean: foreignClean, planted: foreignPlanted, stays_here: staysHere, planted_follows_lead: followsLead }, purged,
+                      clean, planted,
                       bar: "clean: the camera flew to this page's chunk -- its stored copy or its streamed chunk, never a lead on another page (PLUGIN_GOAL 162) -- its panel opened from the hover with text within 500 ms, the outline is smaller than the viewport (the panel then PERSISTS after leave, per G-125, which replaced close-on-leave); planted (plantNoFocus): no flight, no panel" },
         };
       },

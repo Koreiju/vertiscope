@@ -178,11 +178,23 @@ export class ForceTree {
       ? [...this.chunks.values()].flatMap((h) => (h.addrs || []).map((a) => ({ id: h.id, a: canonAddr(a) })))
       : [...best.values()];
     const all = rows.map((r) => r.a);
+    // The chunk holding the hovered element's OWN address (or lines under
+    // it): when the climb reaches a level other chunks share, that one is
+    // the unit's chunk, not the one with most lines there. Majority opened
+    // the result list's panel for a hover on the catalogue's one-line H1
+    // (2026-11-15, G-113 run 96) -- the flight went to #1, the panel to #2.
+    // Planted `plantMajorityUnit`: the majority, always.
+    const own0 = canonAddr(element);
+    const ownRows = rows.filter((r) => r.a === own0 || r.a.startsWith(own0 + "/"));
+    const owner = ownRows.length && !ForceTree.plantMajorityUnit
+      ? [...ownRows.reduce((m, r) => m.set(r.id, (m.get(r.id) || 0) + 1), new Map<string, number>()).entries()].sort((x, y) => y[1] - x[1])[0][0]
+      : "";
     let at = canonAddr(element);
     while (at && at.length > 1) {
       const under: { id: string; a: string }[] = rows.filter((r) => r.a === at || r.a.startsWith(at + "/"));
       if (under.length > max) return null;
       const pickChunk = () => {
+        if (owner && under.some((r) => r.id === owner)) return owner;
         const by = new Map<string, number>();
         for (const r of under) by.set(r.id, (by.get(r.id) || 0) + 1);
         return [...by.entries()].sort((x, y) => y[1] - x[1])[0][0];
@@ -346,6 +358,8 @@ export class ForceTree {
   /** Planted: the generation advances only on an in-place rewrite (a removed-then-reused id collides with its kept version). */
   static plantGenOnRewriteOnly = false;
   /** Planted: the unit's chunk is the one with the most lines there (stale runs win). */
+  /** Planted (G-113, 2026-11-15): the unit's chunk by majority, even over the element's own. */
+  static plantMajorityUnit = false;
   static plantMostLines = false;
   /** Planted: an item with no lines yet climbs past its list (opens the neighbours). */
   static plantClimbPastList = false;

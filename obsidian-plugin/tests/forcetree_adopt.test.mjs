@@ -176,3 +176,27 @@ test("a row's cover and its title resolve to the same unit: the row", () => {
   try { assert.notEqual(t.chunkForElement(title + "/p").at, a.at, "planted: the title block alone"); }
   finally { ForceTree.plantSubUnit = false; }
 });
+
+// 2026-11-15 (G-113, run 96): hovering the shadow catalogue's one-line H1 --
+// the sensor's chunk #1 -- flew the camera to #1 and opened #2's panel. The
+// H1 has fewer lines than a unit, the climb reached the shared ancestor, and
+// the unit's chunk was chosen by MAJORITY there: the result list, holding most
+// of the page. The chunk holding the hovered element's OWN address is its
+// chunk; the majority is for an element no chunk holds yet.
+function headerAndList() {
+  const t = new ForceTree(A);
+  t.apply({ v: 1, dict: DICT, chunks: [
+    multi(1, [["Shadow Catalogue", 1]]),
+    multi(2, [["card one", 2], ["card two", 3], ["card three", 4]]),
+  ], removed: [], stats: { dictSize: DICT.length } });
+  return t;
+}
+test("a short element's unit is in its OWN chunk, not the neighbour holding most of the page", () => {
+  const u = headerAndList().chunkForElement("/html/body/main/section/p", 3, 60, 1);
+  assert.equal(u && u.id, `f:${A}#1`);
+});
+test("planted (plantMajorityUnit): the neighbour holding most lines answers", () => {
+  ForceTree.plantMajorityUnit = true;
+  try { assert.equal(headerAndList().chunkForElement("/html/body/main/section/p", 3, 60, 1).id, `f:${A}#2`); }
+  finally { ForceTree.plantMajorityUnit = false; }
+});

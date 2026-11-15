@@ -3111,9 +3111,13 @@ export class GraphView extends ItemView {
         // (a merge group's lead) is this page's chunk and is still rung.
         // Planted `plantFlyToForeignLead`: any lead, wherever it is drawn.
         if (lead && lead !== stored && !this.plantFlyToForeignLead) {
-          const ln = (got.nodes || []).find((n: any) => n.id === lead);
+          // The lead's page: from the reply, else from the drawn graph -- a
+          // lead already drawn is not in the reply, and was followed unchecked.
+          const ln = (got.nodes || []).find((n: any) => (n.cid ?? n.id) === lead)   // the reply keys `cid`; `absorb` renames it
+            || ((this.graph?.graphData().nodes || []) as any[]).find((n: any) => n.id === lead);
           const docOf = (u: string) => String(u || "").split("#")[0];
           if (ln && ln.url && docOf(ln.url) !== urlKey) { this.hoverStats.foreign_lead = (this.hoverStats.foreign_lead || 0) + 1; lead = ""; }
+          else if (!ln || !ln.url) this.hoverStats.lead_page_unknown = (this.hoverStats.lead_page_unknown || 0) + 1;
         }
         if (lead && lead !== stored) {
           if (this.hoverAliases.size > 4000) this.hoverAliases.clear();
@@ -3240,7 +3244,7 @@ export class GraphView extends ItemView {
   hoverPanelCap = 1;
   /** Planted: the old close-on-hover-end behaviour. */
   plantCloseOnLeave = false;
-  hoverStats: { empty_skipped: number; units?: number; stale_stored?: number; moved_on?: number; foreign_lead?: number } = { empty_skipped: 0 };
+  hoverStats: { empty_skipped: number; units?: number; stale_stored?: number; moved_on?: number; foreign_lead?: number; lead_page_unknown?: number } = { empty_skipped: 0 };
   private hoverSweep = 0;
 
   private expireHoverPanels(): void {

@@ -166,3 +166,43 @@ def test_s4_a_one_chunk_delta_hashes_one_chunk_whatever_the_page(tmp_path):
             store.close()
     assert out[(300, False)][0] == 1 and out[(1500, False)][0] == 1
     assert out[(300, True)][0] == 300 + 125 + 1 and out[(1500, True)][0] == 1500 + 125 + 1
+
+
+# --- a purged page's chunks leave the content index ---------------------------
+#
+# 2026-11-15, G-113's foreign-lead arm: a fixture page B, purged after each
+# run, came back on the next run's B as the LEAD its copy was aliased to --
+# a chunk the store no longer held, so the copy could never be drawn and the
+# hover had no page to check the lead against.
+
+D = "https://example.org/d"
+E = "https://example.org/e"
+
+
+def _held(store):
+    return {cid for (cid,) in store._rows("MATCH (c:Chunk) RETURN c.cid")}
+
+
+def test_no_copy_points_at_a_purged_chunk_after_both_pages_go_and_come_back(tmp_path):
+    store = GraphStore(tmp_path / "s.kuzu")
+    _write(store, D, ["The keeper's ledger, shared", "Only on D"])
+    _write(store, E, ["The keeper's ledger, shared", "Only on E"])
+    store.purge_page(D)
+    store.purge_page(E)
+    d2 = _write(store, D + "?2", ["The keeper's ledger, shared", "Only on D"])
+    e2 = _write(store, E + "?2", ["The keeper's ledger, shared", "Only on E"])
+    v, held = _verdict(store), _held(store)
+    dangling = {cid: dup for cid, (_u, dup) in v.items() if dup and dup not in held}
+    assert not dangling, "copies aliased to chunks the store no longer holds: %r" % dangling
+    assert v[e2["The keeper's ledger, shared"]][1] == d2["The keeper's ledger, shared"]
+
+
+def test_no_copy_points_at_a_purged_chunk_when_the_copy_page_goes_first(tmp_path):
+    store = GraphStore(tmp_path / "s.kuzu")
+    _write(store, D, ["The keeper's ledger, shared", "Only on D"])
+    _write(store, E, ["The keeper's ledger, shared", "Only on E"])
+    store.purge_page(E)                      # the COPY's page first
+    e2 = _write(store, E + "?2", ["The keeper's ledger, shared", "Only on E"])
+    v, held = _verdict(store), _held(store)
+    dangling = {cid: dup for cid, (_u, dup) in v.items() if dup and dup not in held}
+    assert not dangling, dangling
