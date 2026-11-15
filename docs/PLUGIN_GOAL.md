@@ -5737,3 +5737,27 @@ ever drawn; "midpoint" is the size of the pictures between an ordinary one and
 the one being presented. Measured in the code before any change, every picture
 with any glow drew in the presented range (hover, its glowing neighbours, and
 each shown search result), and every limit drew at twice its number on screen.
+
+### 162. (2026-11-15) The reader's answers to four questions (AskUserQuestion)
+
+Asked by me, answered by choosing an option; the option text is the reader's
+choice verbatim, the question text is mine.
+
+- *G-113 hover fly-to: when you hover a chunk in the browser whose content is
+  a duplicate whose 'lead' copy lives on a DIFFERENT stored page, where should
+  the 3D camera fly?* -- **"This page's chunk (Recommended)"**: "Fly to the
+  copy on the page you are reading; the lead elsewhere is only a dedup
+  detail. The check's bar changes to the page's own chunk."
+- *Chat cells: each turn is a prompt note and a reply note chained by
+  `after [[...]]` wikilinks. Should editing that chain change what history
+  the local model sees?* -- **"Model keeps its session"**: "As now: the model
+  keeps its own running chat; the chain is a record only."
+- *G-94 nodes on top of each other: the map has zero overlaps in 3D; the
+  on-screen overlap is depth (nodes behind each other seen through the
+  cloud). The only levers are flattening depth or shrinking nodes, both
+  against your earlier 'Keep current layout'. What should happen?* --
+  **"Keep layout, retire check"**: "Accept depth overlap as what a 3D map
+  looks like; reword G-94 to world-space overlap, which passes."
+- *G-291 store purge: may I purge the stored pages that G-291's open work
+  identified (it deletes them from the store; the compacted backup stays)?*
+  -- **"Yes, purge"**: "Go ahead with the G-291 purge."
