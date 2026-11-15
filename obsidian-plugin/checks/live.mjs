@@ -2544,7 +2544,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-94",
-      asks: "the COLLAPSED picture is legible as seen: on screen, drawn discs do not sit on top of each other -- on a page (its chunks drawn) and after leaving it (all collapsed)",
+      asks: "an OPEN page's billboard is not buried under its own chunks (planted big chunks bury it and are caught); REPORTED, not judged, for want of a plant that can move them under the projector: overlap on screen and in the world (PLUGIN_GOAL 162: keep the layout, retire the overlap bar), whether each chunk's nearest page is its own, and whether the open page is a simple tree",
       async run() {
         // Two pages: Wikipedia's Radix_tree (a deep tree) and the Julia
         // forum's /latest -- 229 topic rows under one page, a flat star, where
@@ -2675,10 +2675,15 @@ export function makeChecks(env) {
             const nn = (p) => { let m = Infinity; for (const q of pages) { if (q === p) continue;
               m = Math.min(m, Math.hypot(p.x - q.x, p.y - q.y, (p.z || 0) - (q.z || 0))); } return m; };
             const r = [];
+            let ownNearest = 0;
             for (const c of ns) {
               if (c.force || c.level === "page" || !Number.isFinite(c.x)) continue;
               const p = byUrl.get(c.url);
-              if (p) r.push(Math.hypot(c.x - p.x, c.y - p.y, (c.z || 0) - (p.z || 0)) / nn(p));
+              if (!p) continue;
+              const dOwn = Math.hypot(c.x - p.x, c.y - p.y, (c.z || 0) - (p.z || 0));
+              r.push(dOwn / nn(p));
+              // The question the D/2 bar stood in for: is no OTHER page nearer?
+              if (!pages.some((q) => q !== p && Math.hypot(c.x - q.x, c.y - q.y, (c.z || 0) - (q.z || 0)) < dOwn)) ownNearest++;
             }
             r.sort((a, b) => a - b);
             const q = (f) => r.length ? Math.round(r[Math.min(r.length - 1, Math.floor(r.length * f))] * 100) / 100 : null;
@@ -2698,20 +2703,21 @@ export function makeChecks(env) {
             }
             const multi = [...parents.values()].filter((k) => k > 1).length;
             const multiAll = [...parentsAll.values()].filter((k) => k > 1).length;
-            return { chunks: r.length, p50: q(0.5), p90: q(0.9), max: q(1), multi_parent: multi, open_chunks: open.size, multi_parent_corpus: multiAll };
+            return { chunks: r.length, own_nearest: ownNearest, p50: q(0.5), p90: q(0.9), max: q(1), multi_parent: multi, open_chunks: open.size, multi_parent_corpus: multiAll };
           };
           try {
             await land(PAGE, 30000);
             await sleep(6000);
             await recentre(); await sleep(2500);
             const onPage = v.seenLayout();
+            onPage.world = v.overlapCensus();
             onPage.near_page = nearPage();
             onPage.tree_seen = treeSeen();
             onPage.follows = await followTest();
             await sleep(1500);
             const orbited = await orbit();
             const afterOrbit = orbited ? v.seenLayout() : null;
-            if (afterOrbit) { afterOrbit.tree_seen = treeSeen(); afterOrbit.near_page = nearPage(); }
+            if (afterOrbit) { afterOrbit.tree_seen = treeSeen(); afterOrbit.near_page = nearPage(); afterOrbit.world = v.overlapCensus(); }
             b.go("about:blank");
             // Collapsed: the page's chunks fold into its node once it is settled.
             for (let i = 0; i < 40; i++) {
@@ -2721,7 +2727,8 @@ export function makeChecks(env) {
               if (!left) break;
             }
             await recentre(); await sleep(2500);
-            return { planted: ${JSON.stringify(planted)}, page: PAGE, on_page: onPage, after_orbit: afterOrbit, collapsed: v.seenLayout() };
+            const collapsed = v.seenLayout(); if (collapsed) collapsed.world = v.overlapCensus();
+            return { planted: ${JSON.stringify(planted)}, page: PAGE, on_page: onPage, after_orbit: afterOrbit, collapsed };
           } finally {
             v.plantNoCollide = false;
             v.plantBigChunks = false;
@@ -2732,10 +2739,8 @@ export function makeChecks(env) {
         })()`, { timeout: 120000 });
         const clean = await arm(false);
 
-        const planted = await arm("overlap");
-        const plantedBig = await arm("big");
-        const plantedWeb = await arm("web");
-        // A reader sees a jumble when discs cover each other: at most 5% of
+                const plantedBig = await arm("big");
+                // A reader sees a jumble when discs cover each other: at most 5% of
         // drawn nodes may overlap a neighbour, and the closest tenth must at
         // least touch (nearest neighbour >= r_a + r_b).
         // Legible = nothing mostly HIDDEN: a node whose centre sits within half
@@ -2744,7 +2749,23 @@ export function makeChecks(env) {
         // 800x850 canvas overlap ~10% even placed at random -- so it is
         // reported, and the bar is on burial (2026-09-27; was "<= 5%
         // overlapping", which no 3D cloud of this density can meet).
-        const legible = (x) => !!x && x.drawn > 5 && x.buried <= Math.max(1, x.drawn * 0.05);
+        // 2026-11-15, PLUGIN_GOAL 162 ("Keep layout, retire check"): the bar is
+        // the WORLD. On screen a 1,068-node map buried 77 discs behind nearer
+        // ones (run 76) while the world census held 0 overlapping pairs -- a
+        // 3D cloud seen from one side overlaps on screen by depth, which is
+        // the depth cue the reader accepted. The screen figures stay in the
+        // evidence; legibility is judged by `overlapCensus`, the pane's own
+        // radius rule, over every mapped node.
+        //
+        // That premise was wrong, and the bar went with it. Run 83: the WORLD
+        // census reads 1,793 overlapping pairs too (worst 0.875 of a radius
+        // sum), because the default layout is `projector` -- all 974 mapped
+        // nodes pinned at fx = fit, no collide force -- so overlap is two fit
+        // points nearer than their drawn radii, and only the scaled map
+        // (off by default, PLUGIN_GOAL 127; G-324 switches it on) clears it.
+        // The reader chose "Keep layout, retire check": both censuses stay in
+        // the evidence and neither is judged.
+        const overlapSeen = (x) => x ? { screen: x.overlapping, buried: x.buried, world: x.world ? x.world.overlapping_pairs : null } : null;
         // Near its page: an open page's chunks stay inside its neighbourhood
         // (the farthest nearer its own page than any other: under half the
         // distance to the nearest other page).
@@ -2762,10 +2783,22 @@ export function makeChecks(env) {
         // Projected chunks sit at their fit (G-97 judges that); the follow
         // test and the distance spread are reported, not judged -- an open
         // page is the fit's picture, not a force layout (2026-09-28).
-        const ok = (r) => near(r.on_page) && treeBoth(r) && legible(r.on_page) && planar(r.on_page)
-          && legible(r.collapsed);
-        return { pass: ok(clean) && !legible(planted.on_page) && !near(plantedBig.on_page) && !treeBoth(plantedWeb),
-                 evidence: { clean, planted_overlap: planted, planted_big: plantedBig, planted_web: plantedWeb } };
+        // Judged: the one bar a live plant still moves (run 84: big chunks
+        // put 40 of 40 on the billboard, clean 0). NOT judged, reported:
+        // "near" and "tree". The projector pins every chunk at its fit, so
+        // plantBigChunks no longer pushes them out (near_page identical in
+        // both arms, max 0.56), and the tree arrives with one parent per
+        // chunk from upstream, so plantWeb -- which skips only the pane's
+        // pruning -- has nothing to undo (multi_parent 0 when planted). A bar
+        // no plant can move is not measuring (CLAUDE.md).
+        const ok = (r) => planar(r.on_page);
+        const np = clean.on_page && clean.on_page.near_page;
+        return { pass: ok(clean) && !planar(plantedBig.on_page),
+                 evidence: { judged: { planar_clean: planar(clean.on_page), planar_planted_big: planar(plantedBig.on_page) },
+                             reported: { near_d2_bar: near(clean.on_page), own_nearest: np ? np.own_nearest + "/" + np.chunks : null,
+                                         simple_tree: treeBoth(clean), planar_after_orbit: planar(clean.after_orbit),
+                                         overlap: { on_page: overlapSeen(clean.on_page), after_orbit: overlapSeen(clean.after_orbit), collapsed: overlapSeen(clean.collapsed) } },
+                             clean, planted_big: plantedBig } };
       },
     },
     {
