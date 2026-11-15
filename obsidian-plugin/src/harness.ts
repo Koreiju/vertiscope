@@ -485,14 +485,6 @@ export function installHarness(app: App, sidecarBase: () => string) {
        * on a timer after replying, because the reload ends the code that was
        * asked -- the reply has to leave first.
        */
-      case "reload": {
-        const id = "domvec-bridge";
-        const plugins = (app as any).plugins;
-        setTimeout(() => {
-          void plugins.disablePlugin(id).then(() => plugins.enablePlugin(id));
-        }, 200);
-        return { reloading: id };
-      }
       case "pipebox": {
         const l = await ready("domvec-browser-view");
         const pb: any = l?.view?.pipebox;
