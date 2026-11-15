@@ -106,6 +106,24 @@ def _mine(root: Path) -> List[int]:
     return pids
 
 
+def _sample(root: Path) -> List[Dict]:
+    """Each process of the proof's, as it stands: what a hung start looks like
+    from outside (the early-stall rule kills on CPU and size alone)."""
+    import psutil
+    out = []
+    for pid in _mine(root):
+        try:
+            p = psutil.Process(pid)
+            t = p.cpu_times()
+            cl = p.cmdline()
+            out.append({"pid": pid, "name": p.name(), "mb": round(p.memory_info().rss / 1e6, 1),
+                        "cpu": round(t.user + t.system, 2), "threads": p.num_threads(),
+                        "cmd": " ".join(a for a in cl[1:4])[-90:]})
+        except Exception:                               # noqa: BLE001
+            continue
+    return out
+
+
 def _kill_mine(root: Path) -> int:
     import psutil
     n = 0
@@ -235,8 +253,11 @@ class Proof:
                                              stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                              creationflags=flags)
         h = None
-        for _ in range(240):
+        samples = []
+        for k in range(240):
             time.sleep(1.0)
+            if k % 5 == 4 and len(samples) < 24:
+                samples.append({"t": k + 1, "procs": [x for x in _sample(self.root) if x["name"].lower().startswith("python")]})
             h = _health(PORT)
             if h and h.get("ok") and h.get("backend") in (None, "up"):
                 break
@@ -254,7 +275,8 @@ class Proof:
             for f in (self.vault / ".domvec" / "workspaces" / "default").glob("crashes.log"):
                 crashes = [ln for ln in f.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()][-8:]
         return self.record("sidecar", up, t0, port=PORT, backend=(h or {}).get("backend"),
-                           exited=self.sidecar_proc.poll(), tail=tail, crashes=crashes)
+                           exited=self.sidecar_proc.poll(), tail=tail, crashes=crashes,
+                           samples=samples if not up else samples[:2])
 
     def use(self) -> bool:
         """The README's *Use*: the graph, the browser cell, a page, a search."""
@@ -367,7 +389,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--both", action="store_true", help="the clean arm, then the planted one")
     ap.add_argument("--keep", action="store_true", help="keep the clone, venv and vault afterwards")
     ap.add_argument("--root", type=Path)
+    ap.add_argument("--resume", choices=["sidecar"], help="on a kept --root: run only this step again")
     a = ap.parse_args(argv)
+    if a.resume:
+        pr = Proof(a.root, None)
+        pr.app_proc = None
+        try:
+            pr.start_sidecar()
+        finally:
+            _kill_mine(a.root) if not a.keep else None
+        print(json.dumps(pr.steps, indent=2))
+        return 0 if pr.steps and pr.steps[-1]["ok"] else 1
     arms = [None, "base_install"] if a.both else [a.plant]
     results = [prove(p, a.root, a.keep) for p in arms]
     print(json.dumps(results, indent=2))
