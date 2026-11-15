@@ -570,6 +570,11 @@ def anchor_sig(chunk) -> str:
 #: Planted (G-186): stale anchors deleted by (chunk, address), any line.
 PLANT_STALE_BY_PAIR = [False]
 
+#: Planted (2026-11-15): every stale anchor deleted by its own statement, even
+#: when it is every anchor its chunk holds -- 984 statements, 14.0 s of a
+#: 31 s capture on a re-scanned Wikipedia article.
+PLANT_STALE_PER_ROW = [False]
+
 #: Planted (2026-10-12): one anchor per ADDRESS, the last line drawing it --
 #: a second line drawing the same address got no anchor.
 PLANT_ONE_ANCHOR_PER_ADDRESS = [False]
@@ -862,6 +867,7 @@ class GraphStore:
         # Placed after it the first time, where it faithfully reported zero
         # unchanged anchors on every page, because they had just been removed.
         stale_anchors = []
+        held_per_chunk = {}
         fresh_anchors = set()
         if chunks:
             before = {
@@ -888,6 +894,9 @@ class GraphStore:
             # twice (2026-10-12, G-186).
             stale_anchors = [{"cid": cid, "aid": aid, "ord": int(o)}
                              for cid, aid, o in (before - incoming)]
+            held_per_chunk: Dict[str, int] = {}
+            for cid, _aid, _o in before:
+                held_per_chunk[cid] = held_per_chunk.get(cid, 0) + 1
             fresh_anchors = incoming - before
             counts["anchors_before"] = len(before)
             counts["anchors_stale"] = len(stale_anchors)
@@ -953,7 +962,8 @@ class GraphStore:
         counts.update(self._reconcile(url, chunks, addresses,
                                       complete=complete,
                                       stale_anchors=stale_anchors,
-                                      removed=removed))
+                                      removed=removed,
+                                      held_per_chunk=held_per_chunk))
         counts["ms_reconcile"] = round((time.perf_counter() - _t) * 1000, 1)
         _t = time.perf_counter()
 
@@ -1199,6 +1209,7 @@ class GraphStore:
         complete: bool = True,
         stale_anchors: Optional[Sequence[dict]] = None,
         removed: Optional[Sequence[str]] = None,
+        held_per_chunk: Optional[Dict[str, int]] = None,
     ) -> Dict[str, int]:
         """Remove what this page used to have and no longer does.
 
@@ -1214,6 +1225,7 @@ class GraphStore:
         * **addresses** — nodes for elements that no longer exist.
         """
         removed = {"chunks_removed": 0, "addresses_removed": 0}
+        removed_wiped = 0
 
         keep_chunks = {c.cid for c in chunks}
         existing = [r[0] for r in self._rows(
@@ -1254,6 +1266,30 @@ class GraphStore:
         # deletes and 5,841 creates to arrive back where it started, and the
         # two together were most of a capture. `stale_anchors` is usually
         # empty; when it is not, it is small.
+        # A chunk whose EVERY held anchor is stale is wiped in one batched
+        # statement, forward from the chunk with no address in the pattern --
+        # so nothing has to be matched from the address side, which is what
+        # G-186 found empty. Re-scanning a page whose lines all moved made
+        # every anchor stale: 984 statements, 14.0 of a 31 s capture
+        # (2026-11-15, Suffix_tree). Checked after: a chunk that still holds an
+        # anchor falls back to the per-row delete below, so a planner that
+        # matches nothing cannot pass silently. Planted `PLANT_STALE_PER_ROW`.
+        removed_wiped = 0
+        if stale_anchors and held_per_chunk and not PLANT_STALE_PER_ROW[0] and not PLANT_STALE_BY_PAIR[0]:
+            per: Dict[str, int] = {}
+            for r in stale_anchors:
+                per[r["cid"]] = per.get(r["cid"], 0) + 1
+            whole = [cid for cid, k in per.items() if k == held_per_chunk.get(cid)]
+            if whole:
+                self._batch(
+                    "UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid})-[e:Anchors]->(:Address) DELETE e",
+                    [{"cid": cid} for cid in whole])
+                left = {r[0] for r in self._rows(
+                    "MATCH (c:Chunk)-[e:Anchors]->(:Address) WHERE list_contains($cids, c.cid) "
+                    "RETURN DISTINCT c.cid", {"cids": whole})}
+                done = set(whole) - left
+                removed_wiped = len(done)
+                stale_anchors = [r for r in stale_anchors if r["cid"] not in done]
         if stale_anchors:
             # FORWARD from the chunk, the address matched by a filter the
             # planner cannot turn into a key lookup (`+ ''`), ONE STATEMENT A
@@ -1308,6 +1344,8 @@ class GraphStore:
                 [{"aid": aid} for aid in stale],
             )
             removed["addresses_removed"] = len(stale)
+        removed["anchors_wiped_chunks"] = removed_wiped
+        removed["anchors_stale_by_row"] = len(stale_anchors or ())
         return removed
 
     def _link_containment(self, chunks: Sequence[MarkdownChunk]) -> int:
