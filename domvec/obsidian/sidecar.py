@@ -6058,6 +6058,7 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
     # a search never runs it inline (`Workspace.embed_inline`).
     if workspace is not None and hasattr(workspace, "embed_inline"):
         workspace.embed_inline = False
+        workspace.background_yield = _yield_to_foreground
 
         def _warm_index():
             try:

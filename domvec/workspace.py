@@ -1643,6 +1643,10 @@ class Workspace:
             self._schedule_embed_reconcile()
         return counts
 
+    #: Called by background passes before each step; the sidecar sets it to
+    #: wait while foreground work (a search, a capture) is in flight.
+    background_yield: Callable[[], float] = staticmethod(lambda: 0.0)
+
     #: Planted: no saved matrix; every vector is read from the store at start.
     PLANT_NO_EMBED_CACHE = [os.environ.get("DOMVEC_PLANT_NO_EMBED_CACHE") == "1"]
     #: Planted: the background check against the store never runs, so a stale
@@ -1672,7 +1676,7 @@ class Workspace:
         self._embed_reconciler = t
         t.start()
 
-    def _reconcile_embeddings(self, batch: int = 4000) -> Dict[str, int]:
+    def _reconcile_embeddings(self, batch: int = 2000) -> Dict[str, int]:
         """The saved matrix against the store, off the request path: every
         vector the store holds that the matrix holds differently is set, and
         every cached row whose chunk is gone is forgotten; both reach the
@@ -1684,6 +1688,9 @@ class Workspace:
             live = set(cids)
             changed: List[str] = []
             for lo in range(0, len(cids), batch):
+                # Behind the reader: a search waiting is served first
+                # (`background_yield`, the sidecar's `_yield_to_foreground`).
+                stats["yielded_s"] = round(stats.get("yielded_s", 0.0) + float(self.background_yield() or 0.0), 2)
                 part = cids[lo:lo + batch]
                 for cid, vec in self.store._rows(
                         "MATCH (c:Chunk) WHERE list_contains($cids, c.cid) "
@@ -1770,8 +1777,11 @@ class Workspace:
                     if redo:
                         saved.apply_delta(redo)
                     self._index = saved
-                    self._index_written_at = 0.0
-                    self._schedule_index_rebuild()
+                    # No rebuild NOW: its store-wide read holds the read lock
+                    # for its whole drain, and the reader's first searches
+                    # queued behind it (`select` 4.7 s against 52-120 ms,
+                    # the first search 17.8 s, 2026-11-15). The next write's
+                    # quiet rebuild replaces the saved build as before.
                 else:
                     self._index = ThreeFormIndex(
                         self.store, self.freq, self.embeddings,
