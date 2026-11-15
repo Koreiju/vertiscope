@@ -437,4 +437,7 @@ Open (not started this session):
     `backend: dead`), tested with planted arms; the RUNNING supervisor is
     the old code until it restarts.
 - Scanning and streaming to the 3D graph: still slow.
-- Lag between node form and panel form.
+- Lag between node form and panel form: BUILT (7ceb38c) as the node
+  following its card every frame of a drag (it moved only on release);
+  G-356 written, not run -- every craft check needs the graph, which
+  needs the sidecar.
