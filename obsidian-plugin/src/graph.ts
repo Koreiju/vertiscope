@@ -622,10 +622,16 @@ export class GraphView extends ItemView {
         const now = performance.now();
         if (this.craftClickAt && now - this.craftClickAt < 320 && this.craftClickId === cn.id) {
           window.clearTimeout(this.craftClickTimer); this.craftClickAt = 0;
-          this.craftClicks.double++; this.craft!.click(cn); return;
+          this.craftClicks.double++;
+          // 159: a node that brings in links to world nodes FLIES the plane
+          // to them; one with none opens / closes its panel, as before.
+          if (this.flyThroughPlane(cn)) return;
+          if (cn.kind !== "web") this.craft!.click(cn);
+          return;
         }
-        // A tagged web chunk has no halo (no note): ONE click opens its panel.
-        if (cn.kind === "web" && !this.plantWebNodeNoOpen) { this.craft!.select(cn.id); this.craft!.click(cn); return; }
+        // A tagged web chunk has no halo (no note): ONE click opens its panel
+        // -- and a second inside the window is a double-click (159's fly).
+        if (cn.kind === "web" && !this.plantWebNodeNoOpen) { this.craft!.select(cn.id); this.craft!.click(cn); this.craftClickAt = now; this.craftClickId = cn.id; return; }
         this.craftClickAt = now; this.craftClickId = cn.id;
         // Selected at once, and SEEN selected (158: "I also can't select the
         // nodes"): a ring on it; the halo still opens after the double-click window.
@@ -2169,6 +2175,66 @@ export class GraphView extends ItemView {
     return true;
   }
   intoCraftStats = { flown: 0 };
+  /**
+   * THE PLANE FLIES TO WHAT A NODE LINKS (PLUGIN_GOAL 159: "double-clicking on
+   * nodes that bring in links to other nodes should be such that the ego in
+   * the 2D camera plane flies to the linked node in 3D at the same level where
+   * the ego camera plane intersects with the selected linked node (or a
+   * centroid for the case of MIMO nodes local to rank-1) and at the event of
+   * the intersection, the node becomes a part of the 2D computation graph
+   * plane").
+   *
+   * The plane rides on the camera (`Craft.inset`), so the camera is carried
+   * by exactly the vector from the plane's centre to the target: orientation
+   * and the plane's depth are kept, and on arrival the plane passes through
+   * the linked node -- the centroid of the rank-1 links (`Craft.linkedWorld`)
+   * for a node with several. At that moment each linked CHUNK not yet in the
+   * ego is tagged in (`ego/tag`), which is what puts a world node on the
+   * plane. Reads the trie's addresses (cids, `page:` urls); writes the camera
+   * and the ego's tags. Planted `plantDblNoFly`: the panel opens, as before.
+   */
+  plantDblNoFly = false;
+  flyStats: { asked: number; flown: number; arrived: number; tagged: number; tag_failed: number; already: number; last: any } =
+    { asked: 0, flown: 0, arrived: 0, tagged: 0, tag_failed: 0, already: 0, last: null };
+  private flyRaf = 0;
+  flyThroughPlane(cn: any): boolean {
+    const C: any = this.craft, g: any = this.graph;
+    this.flyStats.asked++;
+    if (this.plantDblNoFly || !C || !g) return false;
+    const link = C.linkedWorld(cn);
+    if (!link) return false;
+    if (this.agent.mode !== "map") this.agent.setMode("map");
+    if (!C.flatView) { C.flatView = true; C.key = ""; }
+    const ins = C.inset();
+    if (!ins) return false;
+    const cam = g.camera(), ctl = g.controls();
+    const d = { x: link.at.x - ins.at.x, y: link.at.y - ins.at.y, z: link.at.z - ins.at.z };
+    const p0 = cam.position.clone(), t0 = ctl.target.clone(), started = performance.now(), dur = 700;
+    this.flyStats.flown++;
+    this.flyStats.last = { node: cn.id, links: link.ids.length, chunks: link.cids.length, travel: Math.round(Math.hypot(d.x, d.y, d.z)), arrived: false };
+    window.cancelAnimationFrame(this.flyRaf);
+    const step = () => {
+      const k = Math.min(1, (performance.now() - started) / dur);
+      const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      cam.position.set(p0.x + d.x * e, p0.y + d.y * e, p0.z + d.z * e);
+      ctl.target.set(t0.x + d.x * e, t0.y + d.y * e, t0.z + d.z * e);
+      ctl.update?.();
+      if (k < 1) { this.flyRaf = window.requestAnimationFrame(step); return; }
+      // THE INTERSECTION: where the plane's centre is now, against the target.
+      const now = C.inset()?.at;
+      const miss = now ? Math.hypot(now.x - link.at.x, now.y - link.at.y, now.z - link.at.z) : null;
+      this.flyStats.arrived++;
+      this.flyStats.last = { ...this.flyStats.last, arrived: true, miss: miss === null ? null : Math.round(miss * 100) / 100 };
+      void (async () => {
+        for (const cid of link.cids) {
+          if (this.egoTags.has(cid)) { this.flyStats.already++; continue; }
+          if (await this.tagEgo(cid, true)) this.flyStats.tagged++; else this.flyStats.tag_failed++;
+        }
+      })();
+    };
+    this.flyRaf = window.requestAnimationFrame(step);
+    return true;
+  }
   tetherStats = { drawn: 0, under_panel: 0 };
   /** Planted (159): a tether drawn to a node hidden behind a panel, over the panel. */
   plantTetherOverPanels = false;

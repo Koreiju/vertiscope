@@ -1235,6 +1235,37 @@ export class Craft {
   }
   dragStats = { started: 0, moved: 0 };
 
+  /**
+   * The WORLD nodes a craft node links to at rank 1 (PLUGIN_GOAL 159: "nodes
+   * that bring in links to other nodes ... flies to the linked node in 3D ...
+   * or a centroid for the case of MIMO nodes local to rank-1"). The same
+   * links the craft already draws as its I/O lines: a tagged chunk's own
+   * world node; a note's (a readout's, a cell's) recorded inputs -- each
+   * input's chunk, else its page. `cids` are the ones that are chunks, the
+   * ones the ego can take in; `at` is their centroid. Null when none is drawn.
+   */
+  linkedWorld(n: CraftNode): { ids: string[]; cids: string[]; at: V3 } | null {
+    const seen = new Set<string>(), cids: string[] = [], pts: V3[] = [];
+    const take = (id: string, isChunk: boolean) => {
+      if (!id || seen.has(id)) return;
+      const w = this.host.worldNode(id);
+      if (!w || !Number.isFinite(w.x)) return;
+      seen.add(id); pts.push({ x: w.x, y: w.y, z: w.z || 0 });
+      if (isChunk) cids.push(id);
+    };
+    if (n.kind === "web") take(n.id.slice("craft:web:".length), true);
+    else if (n.path && (n.kind === "note" || n.kind === "readout" || n.kind === "cell")) {
+      for (const s of this.host.signalEdges()) {
+        if (s.note !== n.path) continue;
+        if (this.host.worldNode(s.cid)) take(s.cid, true);
+        else if (s.url) take("page:" + s.url, false);
+      }
+    }
+    if (!pts.length) return null;
+    const at = pts.reduce((a, p) => ({ x: a.x + p.x / pts.length, y: a.y + p.y / pts.length, z: a.z + p.z / pts.length }), { x: 0, y: 0, z: 0 });
+    return { ids: [...seen], cids, at };
+  }
+
   /** A click on a craft node: its panel on the plane, or closed back into it. */
   click(n: CraftNode): "opened" | "closed" {
     if (n.kind === "web") {

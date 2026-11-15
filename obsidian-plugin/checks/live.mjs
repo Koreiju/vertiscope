@@ -10355,8 +10355,7 @@ export function makeChecks(env) {
             g.agent.setMode(mode0); c.dirty();
           }
         })()`, { timeout: 60000 });
-        const clean = await arm(null), label = await arm("label"), open = await arm("open"), missing = await arm("missing");
-        const c = clean || {};
+        const clean = await arm(null), label = await arm("label"), open = await arm("open"), missing = await arm("missing");        const c = clean || {};
         return {
           pass: !c.error && c.label_is_cid === false && c.opened_this === true && c.drawn_missing === 0
                 && !!missing && (missing.missing === 0 || missing.drawn_missing > 0)
@@ -10677,6 +10676,68 @@ export function makeChecks(env) {
         const all = (x, f) => !!x && !x.error && x.mats.length === 2 && x.mats.every(f);
         return {
           pass: all(clean, (m) => m.min === 64 && m.shown_max === 140 && m.others_max === 28) && all(planted, (m) => m.min === 22 && m.shown_max === 28 && m.others_max === 28),
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-355",
+      asks: "a double-click flies the plane to what a node links (PLUGIN_GOAL 159: 'double-clicking on nodes that bring in links to other nodes should be such that the ego in the 2D camera plane flies to the linked node in 3D at the same level where the ego camera plane intersects with the selected linked node (or a centroid for the case of MIMO nodes local to rank-1)'): a double-click on a tagged chunk's ego node, through the pane's own pointer handlers, carries the camera until the 2D plane's centre lies ON that chunk's world node (miss under 1% of the travel), keeping the camera's orientation; the linked chunk is then in the ego (tagged, or already); planted (plantDblNoFly) the camera does not move",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const c = window.__domvecCraft;
+          if (!g || !c || !g.graph) return { error: "no graph or craft" };
+          const mode0 = g.agent.mode, flat0 = c.flatView;
+          const cam = g.graph.camera(), ctl = g.graph.controls();
+          const save = { p: cam.position.clone(), t: ctl.target.clone(), q: cam.quaternion.clone() };
+          let tagged = null;
+          try {
+            g.plantDblNoFly = ${planted};
+            c.flatView = true; g.agent.setMode("map"); await sleep(800);
+            await c.fresh();
+            for (let i = 0; i < 4 && !c.nodes.some((n) => n.kind === "web" && n.mesh); i++) { await sleep(2000); await c.fresh(); }
+            let web = c.nodes.find((n) => n.kind === "web" && n.mesh && c.linkedWorld(n));
+            if (!web) {
+              const ch = g.graph.graphData().nodes.find((n) => n.cid && Number.isFinite(n.x));
+              if (!ch) return { error: "no web node and no chunk to tag" };
+              await g.tagEgo(ch.cid, true); tagged = ch.cid; await c.fresh();
+              web = c.nodes.find((n) => n.kind === "web" && n.mesh && n.id === "craft:web:" + ch.cid);
+            }
+            if (!web) return { error: "no web node (sidecar down?)" };
+            const link = c.linkedWorld(web);
+            // Look away from the target first, so the flight has a distance to cover.
+            for (let i = 0; i < 4; i++) await frame();
+            const el = g.graph.renderer().domElement, r = el.getBoundingClientRect();
+            c.group.updateMatrixWorld(true);
+            const p = web.mesh.position.clone().project(cam);
+            const x = r.left + (p.x + 1) / 2 * r.width, y = r.top + (1 - p.y) / 2 * r.height;
+            const pe = (t) => el.dispatchEvent(new PointerEvent(t, { clientX: x, clientY: y, bubbles: true, button: 0, buttons: t === "pointerdown" ? 1 : 0, pointerId: 1, pointerType: "mouse" }));
+            const s0 = { ...g.flyStats }, p0 = cam.position.clone(), q0 = cam.quaternion.clone();
+            pe("pointerdown"); await sleep(30); pe("pointerup"); await sleep(80); pe("pointerdown"); await sleep(30); pe("pointerup");
+            await sleep(1400);
+            for (const k of [...g.billboards.keys()]) { try { g.closeBillboard(k); } catch (e) {} }
+            const moved = cam.position.distanceTo(p0), turned = 1 - Math.abs(cam.quaternion.dot(q0));
+            const last = g.flyStats.last || {};
+            return { planted: ${planted}, node: web.id, links: link && link.ids.length, flown: g.flyStats.flown - s0.flown,
+                     arrived: g.flyStats.arrived - s0.arrived, travel: last.travel, miss: last.miss, moved: Math.round(moved),
+                     turned: Math.round(turned * 1e6) / 1e6, already: g.flyStats.already - s0.already, tagged: g.flyStats.tagged - s0.tagged,
+                     tag_failed: g.flyStats.tag_failed - s0.tag_failed };
+          } finally {
+            g.plantDblNoFly = false; c.flatView = flat0;
+            if (tagged) { try { await g.tagEgo(tagged, false); } catch (e) {} }
+            cam.position.copy(save.p); ctl.target.copy(save.t); cam.quaternion.copy(save.q); ctl.update?.();
+            g.agent.setMode(mode0); c.dirty();
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.flown === 1 && c.arrived === 1 && c.travel > 0 && c.miss !== null && c.miss <= Math.max(0.05, c.travel * 0.01)
+                && Math.abs(c.moved - c.travel) <= Math.max(1, c.travel * 0.02) && c.turned < 1e-4 && (c.already + c.tagged) >= 1
+                && !p.error && p.flown === 0 && p.moved === 0,
           evidence: { clean, planted },
         };
       },

@@ -110,6 +110,13 @@ def _handler(state: _State):
                 return
             n = int(self.headers.get("Content-Length") or 0)
             data = self.rfile.read(n) if n else None
+            # A worker the supervisor saw die: refused at once, not proxied into
+            # a socket the kernel still accepts on and nothing answers (a
+            # verification run's /cypher waited out this proxy's 900 s).
+            if health_body(state).get("backend") == "dead":
+                state.stats["refused"] += 1
+                self._json(503, {"error": "sidecar worker died", "backend": "dead"})
+                return
             headers = {k: v for k, v in self.headers.items() if k.lower() not in _HOP and k.lower() != "host"}
             try:
                 c = http.client.HTTPConnection("127.0.0.1", state.backend_port, timeout=900)

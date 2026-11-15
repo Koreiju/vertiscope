@@ -255,7 +255,9 @@ export class Verifier {
     const base = this.sidecarUrl().trim().replace(/\/+$/, "");
     try {
       const res = await fetch(base + "/cypher", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ query: "MATCH (p:Page) WHERE p.url CONTAINS '?' RETURN p.url" }) });
+        body: JSON.stringify({ query: "MATCH (p:Page) WHERE p.url CONTAINS '?' RETURN p.url" }),
+        // Bounded: a dead worker behind the front held run 39 open with no check in it.
+        signal: AbortSignal.timeout(20000) });
       const rows: string[][] = (await res.json()).rows || [];
       const stamped = (u: string) => {
         let q: URLSearchParams;
@@ -272,7 +274,7 @@ export class Verifier {
       for (const [u] of rows) {
         if (!u || !stamped(u)) continue;
         const r = await fetch(base + "/purge", { method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ url: u }) });
+          body: JSON.stringify({ url: u }), signal: AbortSignal.timeout(20000) });
         if (r.ok) n++;
       }
       return n;
