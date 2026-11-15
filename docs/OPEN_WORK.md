@@ -556,7 +556,18 @@ Open (not started this session):
     morning, throttled. By phase: anchors 0.7-1.4 s, render 0.25-0.81 s,
     reconcile 0.13-0.63 s, place 0.34-0.60 s, prequery 0.17-0.20 s, contains
     0.01-0.26 s. Tier 1's lexical phase right after a capture: 0.78-0.94 s
-    (the tf-idf rebuild over the store), 20 ms at rest.
+    (the tf-idf rebuild over the store), 20 ms at rest. Since ed39b88 the
+    rebuild runs in the background once the matrix is quiet (0.2-1.0 s,
+    `lexical_warm`); the next search's lexical phase read 15.1 ms. A
+    restart's `index_warm`: 39.2 s (throttled: 104.6 s).
+  - Ego and 2D-plane regression set at full speed (run 76): 22 of 22 --
+    G-275, G-277, G-278, G-280, G-282, G-299, G-303, G-307, G-311, G-319,
+    G-333, G-338, G-339, G-340, G-342, G-344, G-345, G-352, G-355, G-364,
+    G-366, G-367. G-5 passes with both arms (run 75, 31f94b3: on the scaled
+    map the spread stimulus is the scale, which the map does not undo).
+  - Cold minute after a worker restart: G-91 failed once (run 77, Radix_tree
+    drawn as 63 force nodes, 0 projected) and passed a minute later (run
+    78). The projector's state is not ready until `index_warm` ends.
   - Retrieval: G-210's first tier-1 answer took 12.8 s, and 22.8 s on a
     freshly restarted worker (cold). **Re-measured 2026-11-15 after
     3365015, 7707854, 79c5948**: tiered first answer 235-1,414 ms over six
