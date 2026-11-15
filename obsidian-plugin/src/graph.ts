@@ -2526,6 +2526,22 @@ export class GraphView extends ItemView {
   plantNoLateFit = false;
   private lateFitAt = 0;
   lateFitStats = { asked: 0, loaded: 0 };
+  /** A page's fit as the projector sent it (`pullDelta`); the harness calls it too. */
+  applyPageFit(node: any, pos: number[]): void {
+    node.fitX = pos[0]; node.fitY = pos[1]; node.fitZ = pos[2] * DEPTH;
+    node.anchorPos = [pos[0], pos[1], pos[2] * DEPTH];
+    // The fit the projector just sent IS this page's home. A page the
+    // parting pass had nudged kept its PREVIOUS fit in `homeFit`, and the
+    // next pass restored it over this one: an online update moved
+    // Radix_tree's fit ~34 units, its chunks followed, the page went
+    // back (G-94 run 130, page_xyz != fit_xyz, pinned). Planted
+    // `plantStaleHomeFit`: the old home kept.
+    if (!this.plantStaleHomeFit) { node.homeFit = undefined; node.homeAnchor = undefined; }
+    else if (node.homeFit) this.pageDeltaStats.stale_home++;
+    this.pageDeltaStats.applied++;
+    this.glide(node, [node.fitX, node.fitY, node.fitZ]);
+  }
+
   private async pullDelta(reload: () => Promise<void>): Promise<void> {
     // STRICT UMAP on every node (PLUGIN_GOAL 143: "We need strict UMAP fits on
     // all things"): a pane that loaded before the sidecar answered (or before
@@ -2605,9 +2621,7 @@ export class GraphView extends ItemView {
         if (!got?.pos) continue;
         const node = byId.get("page:" + url);
         if (node) {
-          node.fitX = got.pos[0]; node.fitY = got.pos[1]; node.fitZ = got.pos[2] * DEPTH;
-          node.anchorPos = [got.pos[0], got.pos[1], got.pos[2] * DEPTH];
-          this.glide(node, [node.fitX, node.fitY, node.fitZ]);
+          this.applyPageFit(node, got.pos);
         } else {
           const members = got.projected ?? 1;
           const built = this.nodeFrom({ cid: "page:" + url, url, title: url,
@@ -5696,6 +5710,9 @@ export class GraphView extends ItemView {
 
   /** Planted (2026-10-11): url nodes the fit put on each other stay there. */
   plantPagesTogether = false;
+  /** Planted (G-94 run 130): a page's delta-sent fit leaves its parting-pass home in place. */
+  plantStaleHomeFit = false;
+  pageDeltaStats = { applied: 0, stale_home: 0 };
   private telescope(page: any, chunks: any[], bound: number, relSize: number, media: boolean): void {
     // T-17 (PLUGIN_GOAL 145): the per-url telescope was a second layout rule
     // fighting the first -- its radial targets were what the landing rule

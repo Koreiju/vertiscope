@@ -11022,6 +11022,51 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-368",
+      asks: "a page's fit sent by the projector is where the page is drawn, even if an earlier parting pass had moved it aside (G-94 run 130: an online update moved Radix_tree's fit ~34 units, its chunks followed, the page went back to the old fit); planted (plantStaleHomeFit): the parting pass's old home restored over the new fit",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const d = v.graph.graphData();
+          const page = d.nodes.find((n) => n.level === "page" && !n.force && Number.isFinite(n.fitX) && !n.homeFit);
+          if (!page) return { planted: ${planted}, error: "no mapped page", level: v.level };
+          v.plantStaleHomeFit = ${planted};
+          const was = { fit: [page.fitX, page.fitY, page.fitZ], anchor: page.anchorPos };
+          try {
+            // As the parting pass leaves a page: its fit at the time kept as home.
+            const old = [page.fitX + 40, page.fitY, page.fitZ];
+            page.homeFit = old.slice(); page.homeAnchor = old.slice();
+            // The projector sends the new fit (z is scaled by DEPTH inside).
+            const sent = [was.fit[0], was.fit[1] + 25, was.fit[2]];
+            const zRaw = sent[2] / 0.4;   // DEPTH, graph.ts
+            v.applyPageFit(page, [sent[0], sent[1], Number.isFinite(zRaw) ? zRaw : 0]);
+            const afterApply = [page.fitX, page.fitY, page.fitZ].map((x) => Math.round(x * 10) / 10);
+            // The pass that restores homes (skipped in the chunk view).
+            const levelWas = v.level;
+            if (v.level === "chunk") v.plantFitInChunkView = true;
+            try { v.fitChunkSizes(d); } finally { v.plantFitInChunkView = false; }
+            const fit = [page.fitX, page.fitY, page.fitZ];
+            const off = Math.hypot(fit[0] - afterApply[0], fit[1] - afterApply[1]);
+            return { planted: ${planted}, page: String(page.id).slice(0, 70), level: levelWas, sent_y: Math.round(sent[1] * 10) / 10,
+                     after_apply: afterApply, after_pass: fit.map((x) => Math.round(x * 10) / 10),
+                     moved_back: Math.round(off * 10) / 10, stats: { ...v.pageDeltaStats } };
+          } finally {
+            v.plantStaleHomeFit = false;
+            // Back where it was, drawn place included (applyPageFit glides it).
+            v.applyPageFit(page, [was.fit[0], was.fit[1], was.fit[2] / 0.4]);
+            if (was.anchor) page.anchorPos = was.anchor;
+            page.homeFit = undefined; page.homeAnchor = undefined;
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const kept = (x) => !!x && !x.error && x.moved_back < 0.5;
+        return { pass: kept(clean) && !!planted && !planted.error && !kept(planted),
+                 evidence: { clean, planted, bar: "clean: the sent fit survives the restoring pass (< 0.5 units); planted: put back to the old home" } };
+      },
+    },
+    {
       id: "G-367",
       asks: "the world's panel opens AT the ego node on the 2D plane (PLUGIN_GOAL 159: 'keep consistent ... the 3D world's nodes and their panel representations as the authority of how we extend on the representations and their interactions at the precise level in the 2D computation graph plane'): a click on a tagged chunk's ego node, through the pane's own pointer handlers, opens THAT chunk's world panel (the same billboard the world draws, its tether to the world node) beside the ego node -- the node within 40 px of the panel's rectangle -- and wholly inside the pane; planted (plantPanelAtWorld) it opens where the world node projects (measured 2026-11-15: 290 px off and clipped by the pane's bottom edge)",
       async run() {
