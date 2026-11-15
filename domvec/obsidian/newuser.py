@@ -94,12 +94,23 @@ def _mine(root: Path) -> List[int]:
     nothing of the reader's is ever touched."""
     import psutil
     needle = str(root).lower().replace("\\", "/")
+    # Never the proof itself or what started it: `--root <dir>` puts the root
+    # in this process's own command line, and the first --keep run killed
+    # itself at its cleanup with nothing printed (2026-11-15).
+    me = psutil.Process(os.getpid())
+    spare = {me.pid} | {p.pid for p in me.parents()}
     pids = []
-    for p in psutil.process_iter(["pid", "cmdline", "exe"]):
+    # Only the kinds of process the proof starts. A shell's command line holds
+    # the root too, and MSYS shells are missing from psutil's parent chain:
+    # the bash running `--resume` was killed with it (exit 15).
+    kinds = ("python", "obsidian", "node")
+    for p in psutil.process_iter(["pid", "cmdline", "exe", "name"]):
         try:
+            if not str(p.info["name"] or "").lower().startswith(kinds):
+                continue
             cl = " ".join(p.info["cmdline"] or []).lower().replace("\\", "/")
             exe = str(p.info["exe"] or "").lower().replace("\\", "/")
-            if needle in cl or needle in exe:
+            if (needle in cl or needle in exe) and p.info["pid"] not in spare:
                 pids.append(p.info["pid"])
         except Exception:                               # noqa: BLE001
             continue
@@ -116,9 +127,22 @@ def _sample(root: Path) -> List[Dict]:
             p = psutil.Process(pid)
             t = p.cpu_times()
             cl = p.cmdline()
-            out.append({"pid": pid, "name": p.name(), "mb": round(p.memory_info().rss / 1e6, 1),
-                        "cpu": round(t.user + t.system, 2), "threads": p.num_threads(),
-                        "cmd": " ".join(a for a in cl[1:4])[-90:]})
+            row = {"pid": pid, "name": p.name(), "mb": round(p.memory_info().rss / 1e6, 1),
+                   "cpu": round(t.user + t.system, 2), "threads": p.num_threads(),
+                   "cmd": " ".join(a for a in cl[1:4])[-90:]}
+            # What it is loading: the DLLs mapped so far (the newest few) and
+            # the files it holds open -- names the file a stalled start is on.
+            try:
+                maps = [m.path for m in p.memory_maps(grouped=True) if m.path.lower().endswith((".dll", ".pyd"))]
+                row["dlls"] = len(maps)
+                row["last_dlls"] = [Path(x).name for x in maps[-3:]]
+            except Exception as exc:                    # noqa: BLE001
+                row["dlls_error"] = str(exc)[:60]
+            try:
+                row["open"] = [Path(f.path).name for f in p.open_files()][-4:]
+            except Exception:                           # noqa: BLE001
+                pass
+            out.append(row)
         except Exception:                               # noqa: BLE001
             continue
     return out
