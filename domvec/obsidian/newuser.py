@@ -303,49 +303,57 @@ class Proof:
                            samples=samples if not up else samples[:2])
 
     def use(self) -> bool:
-        """The README's *Use*: the graph, the browser cell, a page, a search."""
+        """The README's *Use*: the graph, the browser cell, a page, a search.
+
+        Short calls polled from here: one call waiting minutes inside the app
+        outlived the CDP socket's timeout and read as a failure (2026-11-15)."""
         t0 = time.time()
-        page = (self.clone / FIXTURE)
-        url = page.as_uri()
-        got = self.eval("""(async () => {
+        url = (self.clone / FIXTURE).as_uri()
+        opened = self.eval("""(async () => {
             const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
             const p = app.plugins.plugins["domvec-bridge"];
             const health = await p.sidecar.health().catch((e) => ({ error: String(e) }));
             app.commands.executeCommandById("domvec-bridge:domvec-open-graph");
-            let g = null;
-            for (let i = 0; i < 60 && !(g && g.graph); i++) { await sleep(500); g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view; }
             app.commands.executeCommandById("domvec-bridge:domvec-open-browser");
             let b = null;
-            for (let i = 0; i < 60 && !b; i++) { await sleep(500); b = app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view; }
-            if (!b) return { health_ok: !!health.ok, graph: !!g, browser: false };
-            b.go(%s);
-            return { health_ok: !!health.ok, graph: !!(g && g.graph), browser: true };
+            for (let i = 0; i < 40 && !b; i++) { await sleep(250); b = app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view; }
+            if (b) b.go(%s);
+            return { health_ok: !!(health && health.ok), browser: !!b,
+                     graph_leaf: app.workspace.getLeavesOfType("domvec-graph-view").length };
         })()""" % json.dumps(url))
-        if not isinstance(got, dict) or not got.get("browser"):
-            return self.record("use", False, t0, got=got)
-        pages = 0
-        for _ in range(180):
+        if not isinstance(opened, dict) or not opened.get("browser"):
+            return self.record("use", False, t0, opened=opened)
+        pages, t_page = 0, None
+        for k in range(180):
             time.sleep(1.0)
             pages = (_health(PORT) or {}).get("pages", 0)
             if pages >= 1:
+                t_page = k + 1
                 break
-        # A word the page holds, its own and not a common one.
-        word = "spectrographs"
-        found = self.eval("""(async () => {
-            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-            const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
-            let nodes = 0;
-            for (let i = 0; i < 120 && !(nodes > 0); i++) { await sleep(500); nodes = g && g.graph ? g.graph.graphData().nodes.length : 0; }
-            const f = g && g.searchField;
-            if (!f) return { nodes, search: false };
-            let hits = 0;
-            for (let i = 0; i < 20 && !hits; i++) { f.input.value = %s; await f.run(); hits = f.hits.length; if (!hits) await sleep(3000); }
-            return { nodes, search: true, hits, top_url: f.hits[0] ? String(f.hits[0].url).slice(-40) : "",
-                     panel: f.el.classList.contains("is-panel"), title: (f.el.querySelector(".domvec-search3d-title") || {}).textContent || "" };
-        })()""" % json.dumps(word))
-        found = found if isinstance(found, dict) else {"got": found}
-        ok = got.get("health_ok") and got.get("graph") and pages >= 1 and found.get("nodes", 0) > 0 and found.get("hits", 0) >= 1
-        return self.record("use", ok, t0, page=FIXTURE, pages=pages, word=word, **got, **found)
+        GRAPH = """(() => { const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+            return { view: !!g, graph: !!(g && g.graph), nodes: g && g.graph ? g.graph.graphData().nodes.length : 0,
+                     level: g ? g.level : null, search: !!(g && g.searchField) }; })()"""
+        g, t_graph = {}, None
+        for k in range(90):
+            g = self.eval(GRAPH)
+            if isinstance(g, dict) and g.get("nodes", 0) > 0 and g.get("search"):
+                t_graph = 2 * k
+                break
+            time.sleep(2.0)
+        word, hits, top = "spectrographs", 0, ""
+        for _ in range(20):
+            got = self.eval("""(async () => { const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+                const f = g && g.searchField; if (!f) return { hits: 0 };
+                f.input.value = %s; await f.run();
+                return { hits: f.hits.length, top: f.hits[0] ? String(f.hits[0].url).slice(-40) : "",
+                         panel: f.el.classList.contains("is-panel") }; })()""" % json.dumps(word))
+            if isinstance(got, dict) and got.get("hits"):
+                hits, top = got["hits"], got.get("top", "")
+                break
+            time.sleep(3.0)
+        ok = opened.get("health_ok") and pages >= 1 and (g or {}).get("nodes", 0) > 0 and hits >= 1
+        return self.record("use", ok, t0, page=FIXTURE, pages=pages, page_after_s=t_page, graph=g,
+                           graph_after_s=t_graph, word=word, hits=hits, top=top, **opened)
 
     # -- the whole thing ------------------------------------------------------
 
