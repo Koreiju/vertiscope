@@ -320,14 +320,31 @@ class Proof:
                 "s": round(time.time() - t0, 1), "root": str(self.root), "killed": killed, "steps": self.steps}
 
 
+def _rmtree(root: Path) -> None:
+    """Delete the proof's own root. git's object files are read-only on Windows,
+    and an `ignore_errors` delete left the clone behind, so the next run's
+    `git clone` refused the folder (2026-11-15). The bit is cleared and the
+    delete retried; anything still there is an error, said out loud."""
+    import stat
+
+    def clear(func, path, *_):
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    for _ in range(3):
+        if not root.exists():
+            return
+        _kill_mine(root)
+        shutil.rmtree(root, onexc=clear) if sys.version_info >= (3, 12) else shutil.rmtree(root, onerror=clear)
+    if root.exists():
+        raise RuntimeError("could not delete the proof root %s" % root)
+
+
 def prove(plant: Optional[str] = None, root: Optional[Path] = None, keep: bool = False) -> Dict:
     root = Path(root) if root else Path(tempfile.gettempdir()) / "domvec-readme-proof" / (plant or "clean")
-    if root.exists():
-        _kill_mine(root)
-        shutil.rmtree(root, ignore_errors=True)
+    _rmtree(root)
     out = Proof(root, plant).run()
     if not keep:
-        shutil.rmtree(root, ignore_errors=True)
+        _rmtree(root)
         out["kept"] = False
     return out
 
