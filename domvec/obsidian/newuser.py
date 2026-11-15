@@ -311,8 +311,10 @@ class Proof:
         # A web page, as the README's reader browses one: the fixture served
         # over HTTP from here (the plugin's own checks do the same).
         import functools, http.server, threading
-        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str((self.clone / FIXTURE).parent))
-        handler.log_message = lambda *a, **k: None
+        class Quiet(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *a, **k):              # noqa: D401 -- the report is the proof's stdout
+                pass
+        handler = functools.partial(Quiet, directory=str((self.clone / FIXTURE).parent))
         srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         self._srv = srv
