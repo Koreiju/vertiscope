@@ -371,6 +371,7 @@ Done and confirmed live (each check carries a planted arm that fails):
 | Hoverable gesture guides: 2D, 3D, README tools | G-348 | 27f070f |
 | (screenshot) code:// link raised the OS "Open external link?" | G-349 (window.open + anchor; the live-preview click itself not driven) | edb1aea |
 | Node shrinking from further away, less at the end | G-350 -- PARAMETER check only; not measured on screen | 28e30b4 |
+| Hover headers, not raw markdown (the okapi tooltip); tooltip text escaped | G-351 | (this commit) |
 
 Measured, not fixed:
 - **G-113 fails** (passed 2026-10-07): hovering a chunk on the fixture
@@ -399,8 +400,9 @@ Open (not started this session):
   it in at the intersection (MIMO: the rank-1 centroid).
 - World nodes' panels as the authority for every 2D representation;
   "rendering issues with representations" not yet itemised.
-- Hover previews with text headers / semantic anchors (raw markdown names
-  such as "[[Only include res..." are still the world nodes' names).
+- Semantic keyword anchors beside hover pictures (the tooltip header is
+  done, G-351; the world nodes' stored names are still their raw first
+  line).
 - The search bar as a draggable retrieval cell panel; search over all
   code artifacts; the empty-cell hyperlink chain.
 - Cell hierarchies / black-box unfolding for code, markdown and notebook

@@ -43,6 +43,7 @@ import type { ActRecord, ActResult } from "./panelact";
 import { PANEL_VIEW, PanelView } from "./panelview";
 import { SearchField, brightness, fade, holdStep, type FieldHit, type FieldAnswer } from "./searchfield";
 import { edgeResizable } from "./edgeresize";
+import { mdTitle, escapeHtml } from "./titles";
 import { helpButton, GESTURES_2D, GESTURES_3D_MOUSE, readmeTools } from "./help";
 import { CAPS } from "./useragent";
 
@@ -9874,7 +9875,13 @@ export class GraphView extends ItemView {
         // reader comparing the two counts has no way to account for the
         // difference.
         const parts = n.members > 1 ? ` · ${n.members} chunks merged` : "";
-        return `${n.name}${parts}<br><small>${n.url}</small>`;
+        // A HEADER, not the raw first line (159: the tooltip read
+        // "[[Only include results for this site](?q=okapi..."), and escaped:
+        // this is HTML and the name is the page's text. Planted
+        // `__domvecPlantRawLabels`: the raw name, unescaped, as before.
+        if ((window as any).__domvecPlantRawLabels) return `${n.name}${parts}<br><small>${n.url}</small>`;
+        const head = mdTitle(String(n.name || "")) || String(n.name || "");
+        return `${escapeHtml(head)}${parts}<br><small>${escapeHtml(String(n.url || ""))}</small>`;
       })
       // A hovered node is ringed white and keeps its own colour
       // underneath (`G-38`): the colour is a measurement, not a slot

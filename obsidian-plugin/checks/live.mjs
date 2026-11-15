@@ -10580,6 +10580,35 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-351",
+      asks: "a hovered node's tooltip is a header, not raw markdown, and is escaped (PLUGIN_GOAL 159 screenshot: '[[Only include results for this site](?q=okapi%20giraffe...'; 'A simple text preview or header would work best'): through the graph's OWN label accessor, a node named with a search-result link reads 'Only include results for this site' with no '](' and no query; a name holding markup has its tags taken off and the rest escaped, never parsed as HTML; a name with no words keeps its own text; planted (__domvecPlantRawLabels) the raw name, markup and all",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!g || !g.graph) return { error: "no graph" };
+          const label = g.graph.nodeLabel();
+          window.__domvecPlantRawLabels = ${planted};
+          try {
+            const L = (name) => String(label({ name, url: "https://duckduckgo.com/?q=okapi", members: 1 }));
+            return { planted: ${planted},
+              link: L("[[Only include results for this site]](?q=okapi%20giraffe%20relative%20habitat)"),
+              markup: L("<img src=x onerror=1> Sher Lee"),
+              plain: L("Sher Lee"), wordless: L("| --- |") };
+          } finally { window.__domvecPlantRawLabels = false; }
+        })()`, { timeout: 15000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        const head = (s) => String(s || "").split("<br>")[0];
+        return {
+          pass: !c.error && head(c.link) === "Only include results for this site" && !head(c.link).includes("](")
+                && head(c.markup).includes("&lt;") === false && head(c.markup) === "Sher Lee" && !String(c.markup).includes("<img")
+                && head(c.plain) === "Sher Lee" && head(c.wordless).includes("|")
+                && !p.error && head(p.link).includes("](") && String(p.markup).includes("<img"),
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-340",
       asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) scales the 2D ego plane and leaves the camera's distance alone; a pinch (wheel + ctrl) does NOT touch the plane (159: 'remove the pinch gesture ... stick to shift scroll'); a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
       async run() {
