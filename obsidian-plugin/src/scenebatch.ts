@@ -37,10 +37,11 @@ attribute vec4 iUv;
 uniform float uZoom;
 uniform float uNear;
 uniform float uNearMin;
+uniform float uNearPow;
 uniform float uPxView;
 uniform float uMaxPicPx;
 uniform float uMinPicPx;
-float nearK(float z, float size) { return uNear > 0.0 ? clamp(-z / (uNear * max(size, 1e-3)), uNearMin, 1.0) : 1.0; }
+float nearK(float z, float size) { return uNear > 0.0 ? clamp(pow(max(-z / (uNear * max(size, 1e-3)), 0.0), uNearPow), uNearMin, 1.0) : 1.0; }
 varying vec2 vCorner;
 varying vec4 vColor;
 varying vec4 vUv;
@@ -114,7 +115,8 @@ attribute vec4 iColor;
 uniform float uZoom;
 uniform float uNear;
 uniform float uNearMin;
-float nearK(float z, float size) { return uNear > 0.0 ? clamp(-z / (uNear * max(size, 1e-3)), uNearMin, 1.0) : 1.0; }
+uniform float uNearPow;
+float nearK(float z, float size) { return uNear > 0.0 ? clamp(pow(max(-z / (uNear * max(size, 1e-3)), 0.0), uNearPow), uNearMin, 1.0) : 1.0; }
 varying vec2 vCorner;
 varying vec3 vCenterW;
 varying float vR;
@@ -203,7 +205,8 @@ uniform float uZoom;
 uniform float uHaloK;
 uniform float uNear;
 uniform float uNearMin;
-float nearK(float z, float size) { return uNear > 0.0 ? clamp(-z / (uNear * max(size, 1e-3)), uNearMin, 1.0) : 1.0; }
+uniform float uNearPow;
+float nearK(float z, float size) { return uNear > 0.0 ? clamp(pow(max(-z / (uNear * max(size, 1e-3)), 0.0), uNearPow), uNearMin, 1.0) : 1.0; }
 uniform float uMinPx;
 uniform float uPxView;
 varying vec2 vCorner;
@@ -350,7 +353,7 @@ export class SceneBatch {
   private makeHalo(): THREE.Mesh {
     const mat = new THREE.ShaderMaterial({
       vertexShader: HALO_VERT, fragmentShader: HALO_FRAG,
-      uniforms: { uNear: { value: 0 }, uNearMin: { value: this.nearMin }, uZoom: { value: this.zoom }, uHaloK: { value: this.haloK }, uMinPx: { value: this.haloMinPx },
+      uniforms: { uNear: { value: 0 }, uNearMin: { value: this.nearMin }, uNearPow: { value: this.nearPow }, uZoom: { value: this.zoom }, uHaloK: { value: this.haloK }, uMinPx: { value: this.haloMinPx },
                   uPxView: { value: 0.002 }, uHue: { value: 0 }, uHaloI: { value: this.haloI }, uCore: { value: this.haloCore } },
       transparent: true, depthWrite: false, depthTest: true,
       // Colour ADDED, alpha left alone. The canvas is transparent over the
@@ -407,11 +410,17 @@ export class SceneBatch {
   /** PLUGIN_GOAL 152: nearer than `d` world units to the camera, a node or
    *  picture is drawn at (distance / d) of its size, never under `nearMin`.
    *  0 turns it off. Set every frame from the camera's focus distance. */
-  nearMin = 0.25;
+  nearMin = 0.4;
+  /** The curve: (distance / d) ^ nearPow. 0.5 (PLUGIN_GOAL 159: "node
+   *  shrinking should respond a lot more farther away since we'd appreciate
+   *  less occlusion of our nodes at closer proximities"; "a little too much
+   *  shrinkage") starts from further out and shrinks gently, with a higher
+   *  floor; 1 with nearMin 0.25 was 152's straight line. */
+  nearPow = 0.5;
   nearD = 0;
   setNear(d: number): void {
     this.nearD = d;
-    const set = (m: any) => { const u = m?.material?.uniforms; if (u?.uNear) { u.uNear.value = d; u.uNearMin.value = this.nearMin; } };
+    const set = (m: any) => { const u = m?.material?.uniforms; if (u?.uNear) { u.uNear.value = d; u.uNearMin.value = this.nearMin; if (u.uNearPow) u.uNearPow.value = this.nearPow; } };
     set(this.halo);
     for (const m of [this.opaque, this.clear, this.glass] as any[]) if (m) set(m.mesh);
   }
@@ -439,14 +448,14 @@ export class SceneBatch {
           uHue: { value: 0 },
           uBright: { value: this.nodeBright },
           uZoom: { value: this.zoom },
-          uNear: { value: 0 }, uNearMin: { value: this.nearMin },
+          uNear: { value: 0 }, uNearMin: { value: this.nearMin }, uNearPow: { value: this.nearPow },
         },
         transparent: true, depthWrite: false,
       });
     }
     return new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
-      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 }, uZoom: { value: this.zoom }, uNear: { value: 0 }, uNearMin: { value: this.nearMin }, uPxView: { value: 0.002 }, uMaxPicPx: { value: 28.0 }, uMinPicPx: { value: 22.0 } },
+      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 }, uZoom: { value: this.zoom }, uNear: { value: 0 }, uNearMin: { value: this.nearMin }, uNearPow: { value: this.nearPow }, uPxView: { value: 0.002 }, uMaxPicPx: { value: 28.0 }, uMinPicPx: { value: 22.0 } },
       transparent: translucent, depthWrite: !translucent,
     });
   }

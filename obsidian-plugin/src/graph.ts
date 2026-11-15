@@ -8865,7 +8865,9 @@ export class GraphView extends ItemView {
   plantNoHalo = false;
   plantCanvasHaloArea = false;
   plantNoNearShrink = false;
-  nearShrinkAt = 12;
+  nearShrinkAt = 40;
+  /** Planted (159): 152's near shrink -- from 12 radii, linear, floor 0.25. */
+  plantNearOld = false;
   private cloudAreaAt = 0;
   private cloudArea = 0;
   private cloudHaloPx = 0;
@@ -8917,7 +8919,10 @@ export class GraphView extends ItemView {
     // close-up clumping opened locally. Relative to the focus distance it shrank
     // the whole cloud after "recentre" and the graph vanished (2026-11-08).
     // Planted `plantNoNearShrink`.
-    this.batch.setNear(this.plantNoNearShrink ? 0 : this.nearShrinkAt);
+    // 159: from 40 radii out, on a square-root curve, never under 0.4.
+    const bb: any = this.batch;
+    if (this.plantNearOld) { bb.nearMin = 0.25; bb.nearPow = 1; } else { bb.nearMin = 0.4; bb.nearPow = 0.5; }
+    this.batch.setNear(this.plantNoNearShrink ? 0 : (this.plantNearOld ? 12 : this.nearShrinkAt));
     let f = 1;
     if (!this.plantNoZoomScale && this.fullViewDist > 0) {
       const cam = g.camera(), t = g.controls()?.target;

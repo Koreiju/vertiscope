@@ -10551,6 +10551,29 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-350",
+      asks: "nodes shrink from further out and less at the end (PLUGIN_GOAL 159: 'node shrinking should respond a lot more farther away since we'd appreciate less occlusion of our nodes at closer proximities'; 'a little too much shrinkage'): every batch material (orbs, glass, glow) is drawn with the near shrink starting at 40 radii, on a square-root curve, never under 0.4 -- a PARAMETER check on the uniforms the shaders read, not a pixel measurement (a rendered-width probe read 3-5 px at every distance: it caught a line, not the disc; and pictures are clamped to 22-28 px by uMinPicPx/uMaxPicPx, which this does not touch); planted (plantNearOld) 152's 12 radii, linear, floor 0.25",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!g || !g.batch) return { error: "no batch" };
+          g.plantNearOld = ${planted};
+          try {
+            for (let i = 0; i < 4; i++) await frame();
+            const b = g.batch, mats = [b.halo, b.opaque && b.opaque.mesh, b.clear && b.clear.mesh, b.glass && b.glass.mesh].filter(Boolean);
+            return { planted: ${planted}, mats: mats.map((m) => { const u = m.material && m.material.uniforms; return u ? { near: u.uNear && u.uNear.value, pow: u.uNearPow && u.uNearPow.value, min: u.uNearMin && u.uNearMin.value } : null; }).filter(Boolean) };
+          } finally { g.plantNearOld = false; }
+        })()`, { timeout: 30000 });
+        const clean = await arm(false), planted = await arm(true);
+        const all = (x, f) => !!x && !x.error && x.mats.length >= 3 && x.mats.every(f);
+        return {
+          pass: all(clean, (m) => m.near === 40 && m.pow === 0.5 && m.min === 0.4) && all(planted, (m) => m.near === 12 && m.pow === 1 && m.min === 0.25),
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-340",
       asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) scales the 2D ego plane and leaves the camera's distance alone; a pinch (wheel + ctrl) does NOT touch the plane (159: 'remove the pinch gesture ... stick to shift scroll'); a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
       async run() {
