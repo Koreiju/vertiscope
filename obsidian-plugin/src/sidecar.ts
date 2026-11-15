@@ -272,6 +272,15 @@ export class Sidecar {
     return this.get("/page_status?url=" + encodeURIComponent(url));
   }
 
+  /** Each chunk's keyword anchors (PLUGIN_GOAL 159): its own distinctive
+   *  words, from the store's frequency checkpoint. */
+  async keywords(cids: string[], k = 4, raw = false, urls: string[] = []): Promise<Record<string, string[]>> {
+    const q = new URLSearchParams({ cid: cids.join(","), k: String(k), ...(raw ? { plant: "raw" } : {}) });
+    for (const u of urls) q.append("url", u);
+    const got: any = await this.get(`/keywords?${q.toString()}`);
+    return (got && got.keywords) || {};
+  }
+
   /** Every chunk id the store holds for a page. */
   async pageCids(url: string): Promise<string[]> {
     const got: any = await this.get(

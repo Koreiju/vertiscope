@@ -10894,6 +10894,50 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-363",
+      asks: "a hovered chunk's tooltip carries keyword anchors under its header (PLUGIN_GOAL 159: 'add at least some headers or local semantic keyword anchors that go along with the image previews on hovered nodes'): through the graph's OWN label accessor, the first hover asks the store for the chunk's own distinctive words, and the tooltip on screen is rewritten with them when they arrive -- at least 2 words, none of them a word most chunks hold; planted (__domvecPlantNoKeywords) no anchors",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(800);
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!g || !g.graph) return { error: "no graph" };
+          const label = g.graph.nodeLabel();
+          // A web node as the view draws it: a chunk (a bare cid) in the chunk
+          // view, a page in the url view -- its anchors span its chunks.
+          const nodes = g.graph.graphData().nodes.filter((n) => (/^[0-9a-f]{16}$/.test(String(n.id)) && n.level !== "page")
+            || (n.level === "page" && /^https?:/.test(String(n.url || "")) && (n.members || 2) > 1));
+          if (!nodes.length) return { error: "no web node drawn", level: g.level };
+          const n = nodes[Math.floor(nodes.length / 2)];
+          window.__domvecPlantNoKeywords = ${planted};
+          const st0 = { ...g.kwStats };
+          try {
+            // The tooltip force-graph shows on a hover: its own element, filled by the accessor.
+            let tip = g.containerEl.querySelector(".scene-tooltip");
+            const made = !tip;
+            if (!tip) { tip = document.createElement("div"); tip.className = "scene-tooltip"; g.containerEl.appendChild(tip); }
+            const first = label(n);
+            tip.innerHTML = first;
+            for (let i = 0; i < 60 && !(tip.querySelector(".domvec-kw")) && g.kwStats.answered === st0.answered; i++) await sleep(100);
+            await sleep(150);
+            const kwEl = tip.querySelector(".domvec-kw");
+            const words = kwEl ? kwEl.textContent.split("·").map((w) => w.trim()).filter(Boolean) : [];
+            const out = { planted: ${planted}, cid: String(n.id).slice(0, 70), level: n.level, first_had: first.includes("domvec-kw"), words,
+                          refreshed: g.kwStats.refreshed - st0.refreshed, asked: g.kwStats.asked - st0.asked };
+            if (made) tip.remove(); else tip.innerHTML = "";
+            return out;
+          } finally { window.__domvecPlantNoKeywords = false; }
+        })()`, { timeout: 30000 });
+        const c = (await arm(false)) || {}, p = (await arm(true)) || {};
+        const common = new Set(["the", "and", "for", "with", "this", "that", "from", "are", "was"]);
+        return {
+          pass: !c.error && c.words.length >= 2 && c.words.every((w) => !common.has(w)) && (c.first_had || c.refreshed >= 1)
+            && !p.error && p.words.length === 0,
+          evidence: { clean: c, planted: p },
+        };
+      },
+    },
+    {
       id: "G-361",
       asks: "the tiered search streams pages in and its top result can change while the query is the same: the flight and its panel follow the top the strip ends up leading with, and the superseded flight's panel is closed (found 2026-11-15: flown to the first page's top, the panel on a result no longer first); planted (plantFirstTopOnly): the first top is the one flown to, whatever leads after",
       async run() {

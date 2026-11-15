@@ -417,9 +417,15 @@ Open (not started this session):
   carried by target - plane centre; linked chunks tagged at arrival);
 - World nodes' panels as the authority for every 2D representation;
   "rendering issues with representations" not yet itemised.
-- Semantic keyword anchors beside hover pictures (the tooltip header is
-  done, G-351; the world nodes' stored names are still their raw first
-  line).
+- Semantic keyword anchors beside hover pictures: LIVE-CONFIRMED (G-363,
+  run 15). A hovered node's tooltip has a line of its own distinctive words
+  under the header, from the store's frequency checkpoint (`/keywords`,
+  `FreqMatrix.keywords`). They are tf-idf, minus words 5% of chunks hold and
+  minus URL words. A page's anchors span its chunks. Examples: "protocol ·
+  specification · defined · section", "adaptive · patricia · radix · tree",
+  books.toscrape "catalogue · basket · stock · products". The check drives
+  the label accessor and the tooltip element; it has not been seen under a
+  real pointer hover in a screenshot yet.
 - Search over all code artifacts: LIVE-CONFIRMED (G-357, run 47). 18 of
   145 modules (chat.py, models.py, front.py, slate.py ...) had no chunk:
   code entered the store only when saved through the plugin. A hash-ledger

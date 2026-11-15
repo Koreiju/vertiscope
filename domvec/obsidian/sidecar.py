@@ -4612,6 +4612,41 @@ class _Handler(BaseHTTPRequestHandler):
         # search-based probes reported nothing wrong.
         # The sidecar's half of the pipeline profile, from its own clock.
         # `?reset=1` empties the rings so a run measures only itself.
+        if segments[0] == "keywords":
+            # A chunk's keyword anchors (PLUGIN_GOAL 159), read from the
+            # frequency checkpoint: `?cid=a,b,c&k=5` -> {cid: [terms]}.
+            # Read-only; `plant=raw` ranks by raw count (the planted arm).
+            params = parse_qs(parts.query)
+            cids = [c for c in ",".join(params.get("cid") or []).split(",") if c][:64]
+            try:
+                k = max(1, min(int((params.get("k") or ["5"])[0]), 20))
+            except ValueError:
+                k = 5
+            raw = (params.get("plant") or [""])[0] == "raw"
+            freq = getattr(self.workspace, "freq", None)
+            # Not anchors: the words of a URL. A page's links carry its host's
+            # words into its text ("wikipedia", "wiki", "org" led Radix tree's
+            # anchors), and the tooltip already shows the url.
+            def skip_for(url: str) -> set:
+                host = urlsplit(url).netloc if "://" in url else ""
+                return _URL_NOISE | {w for w in re.split(r"[^a-z0-9]+", host.lower()) if w}
+            out = {}
+            for c in cids:
+                curl = ""
+                if freq is not None:
+                    try:
+                        r0 = self.workspace.store._rows("MATCH (c:Chunk {cid: $c}) RETURN c.url", {"c": c})
+                        curl = (r0[0][0] if r0 and r0[0] else "") or ""
+                    except Exception:                       # noqa: BLE001
+                        curl = ""
+                out[c] = freq.keywords(c, k, plant_raw_tf=raw, skip=skip_for(curl)) if freq is not None else []
+            # `?url=` (repeatable): a page's anchors, over all its chunks.
+            for url in (params.get("url") or [])[:16]:
+                rows = self.workspace.store._rows("MATCH (c:Chunk {url: $u}) RETURN c.cid", {"u": url})
+                out[url] = freq.keywords([r[0] for r in rows if r and r[0]], k, plant_raw_tf=raw, skip=skip_for(url)) if freq is not None else []
+            self._send(200, {"keywords": out})
+            return
+
         if segments[0] == "search_pages":
             # Tier 1 of a tiered search (G-210): the url nodes nearest the
             # query; tier 2 is `/search?url=` per page, asked by the plugin.
@@ -5683,6 +5718,11 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         self._send(404, {"error": "no such route", "path": parts.path})
+
+
+#: Words a URL is made of, never a page's subject (the keyword anchors).
+_URL_NOISE = {"http", "https", "www", "com", "org", "net", "html", "htm", "php", "wiki", "index",
+              "amp", "utm", "ref", "src", "url", "href", "edu", "gov", "io"}
 
 
 def _search_pages(index, query: str, k: int, params) -> tuple:

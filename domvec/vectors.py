@@ -143,6 +143,12 @@ PLANT_REEMBED_ALL = [False]
 #: Planted: the matrix unlocked, as before (the shapes race).
 _PLANT_NO_LOCK = [False]
 
+#: A keyword anchor is a word at most this share of chunks hold. Half let
+#: "the" and "edit" through on a mixed-language store (Radix tree's page,
+#: 2026-11-15), where "the" is in fewer than half the chunks.
+KEYWORD_MAX_DF = 0.05
+
+
 @dataclass
 class FreqMatrix:
     """Sparse tf-idf over chunk markdown, indexed by integer row.
@@ -371,6 +377,56 @@ class FreqMatrix:
         inv = sparse.diags((1.0 / norms).astype(np.float32))
         self._tfidf = (inv @ csr).tocsr()
         return self._tfidf
+
+    @_locked
+    def keywords(self, cid, k: int = 5, *, plant_raw_tf: bool = False, skip: Iterable[str] = ()) -> List[str]:
+        """The chunk's own terms, most distinctive first (PLUGIN_GOAL 159:
+        "local semantic keyword anchors that go along with the image previews
+        on hovered nodes").
+
+        Ranked by the row's tf-idf weight: a term this chunk holds and the
+        corpus rarely does. Words only -- a bigram whose words are already
+        listed adds nothing, and numbers and one- or two-letter tokens are not
+        anchors a reader can read. Planted `plant_raw_tf`: by raw count, so the
+        words every chunk holds lead, as a word cloud would.
+        """
+        skip_set = {w.lower() for w in skip}
+        # One chunk, or several (a page: its chunks' rows summed).
+        cids = [cid] if isinstance(cid, str) else list(cid)
+        rows = [r for r in (self._row_of.get(c) for c in cids) if r is not None and r < len(self._counts) and self._counts[r]]
+        if not rows:
+            return []
+        if getattr(self, "_terms_n", -1) != len(self.vocab):
+            terms = [""] * len(self.vocab)
+            for t, i in self.vocab.items():
+                terms[i] = t
+            self._terms, self._terms_n = terms, len(self.vocab)
+        if plant_raw_tf:
+            tot: Dict[int, int] = {}
+            for row in rows:
+                for i, f in self._counts[row].items():
+                    tot[i] = tot.get(i, 0) + f
+            ranked = sorted(tot.items(), key=lambda kv: -kv[1])
+        else:
+            m = self.tfidf()
+            r = sparse.csr_matrix(m[rows].sum(axis=0))
+            # A word 5% of the chunks hold anchors nothing: sublinear
+            # tf let "the" (12 times, in every chunk) outrank a chunk's own
+            # "spectrograph" (twice), since idf only reaches 1 at the floor.
+            df, n = self.document_frequency(), max(1, self.live_rows)
+            ranked = sorted(((i, w) for i, w in zip(r.indices.tolist(), r.data.tolist())
+                             if i >= len(df) or df[i] <= max(2.0, KEYWORD_MAX_DF * n)), key=lambda kv: -kv[1])
+        out: List[str] = []
+        for i, _w in ranked:
+            t = self._terms[i] if i < len(self._terms) else ""
+            if not t or " " in t or len(t) < 3 or t.isdigit() or not any(c.isalpha() for c in t):
+                continue
+            if t in out or t in skip_set:
+                continue
+            out.append(t)
+            if len(out) >= k:
+                break
+        return out
 
     @_locked
     def query_vector(self, query: str) -> np.ndarray:

@@ -1421,3 +1421,6 @@ body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) 
 .domvec-search3d.is-panel .domvec-search3d-strip { order: 3; display: block; flex: 1; min-height: 0;
   white-space: normal; overflow-x: hidden; overflow-y: auto; }
 .domvec-search3d.is-panel .domvec-search3d-item { max-width: 100%; margin: 0 6px 6px 0; }
+
+/* Keyword anchors under a hovered chunk's header (PLUGIN_GOAL 159). */
+.domvec-kw { font-size: 0.85em; opacity: 0.85; letter-spacing: 0.02em; color: #bcd6ff; }

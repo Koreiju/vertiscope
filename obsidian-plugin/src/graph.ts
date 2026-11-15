@@ -6594,6 +6594,52 @@ export class GraphView extends ItemView {
       this.flyToScrollFront(soft);
     }
   }
+  // ---- keyword anchors (PLUGIN_GOAL 159) ---------------------------------
+  //
+  // "add at least some headers or local semantic keyword anchors that go along
+  // with the image previews on hovered nodes ... some nodes don't display
+  // enough semantic relevance". Under the header, a hovered chunk's own
+  // distinctive words, read from the store's frequency checkpoint (tf-idf,
+  // words more than half the chunks hold left out). Asked on the first hover
+  // and cached; the tooltip is rewritten when they arrive if it still shows
+  // that node. Planted `__domvecPlantNoKeywords`: no anchors.
+  private kwCache = new Map<string, string[]>();
+  private kwPending = new Set<string>();
+  private kwLabelFor = "";
+  kwStats = { asked: 0, answered: 0, shown: 0, refreshed: 0 };
+  keywordLine(n: any): string {
+    if ((window as any).__domvecPlantNoKeywords || !n || n.level === "path") return "";
+    // A page's anchors span its chunks; a chunk's are its own.
+    const page = n.level === "page" && n.url;
+    const cid = page ? "url:" + String(n.url) : String(n.id || "").split("|")[0];
+    if (!cid || (!page && cid.includes(":"))) return "";     // craft: and code-net ids: not chunks
+    this.kwLabelFor = cid;
+    const got = this.kwCache.get(cid);
+    if (got) {
+      if (!got.length) return "";
+      this.kwStats.shown++;
+      return `<br><span class="domvec-kw">${got.map((t) => escapeHtml(t)).join(" · ")}</span>`;
+    }
+    if (!this.kwPending.has(cid)) {
+      this.kwPending.add(cid);
+      this.kwStats.asked++;
+      const ask = page ? this.sidecar.keywords([], 4, false, [String(n.url)]) : this.sidecar.keywords([cid], 4);
+      void ask.then((m) => {
+        this.kwPending.delete(cid);
+        if (this.kwCache.size > 5000) this.kwCache.clear();
+        this.kwCache.set(cid, (page ? m[String(n.url)] : m[cid]) || []);
+        this.kwStats.answered++;
+        // Still the node the tooltip shows: rewrite it with the anchors.
+        if (this.kwLabelFor === cid && this.graph) {
+          const tip = this.containerEl.querySelector(".scene-tooltip") as HTMLElement | null;
+          const label = (this.graph as any).nodeLabel();
+          if (tip && typeof label === "function" && tip.innerHTML) { tip.innerHTML = label(n); this.kwStats.refreshed++; }
+        }
+      }).catch(() => { this.kwPending.delete(cid); });
+    }
+    return "";
+  }
+
   private flownFor = "";
   /** The top result this query was last flown to, and the panel that flight opened (if it opened one). */
   private flownTop = "";
@@ -10002,7 +10048,7 @@ export class GraphView extends ItemView {
         // `__domvecPlantRawLabels`: the raw name, unescaped, as before.
         if ((window as any).__domvecPlantRawLabels) return `${n.name}${parts}<br><small>${n.url}</small>`;
         const head = mdTitle(String(n.name || "")) || String(n.name || "");
-        return `${escapeHtml(head)}${parts}<br><small>${escapeHtml(String(n.url || ""))}</small>`;
+        return `${escapeHtml(head)}${parts}${this.keywordLine(n)}<br><small>${escapeHtml(String(n.url || ""))}</small>`;
       })
       // A hovered node is ringed white and keeps its own colour
       // underneath (`G-38`): the colour is a measurement, not a slot
