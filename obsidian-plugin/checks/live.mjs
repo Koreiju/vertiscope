@@ -10136,6 +10136,61 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-356",
+      asks: "the node form follows the panel form DURING a drag, not on release (PLUGIN_GOAL 159: 'There is also lag with the node form and the panel form'): dragging a card on the plane by its header (the real mouse gesture), its node in the ego's flat layout moves with each frame of the drag -- halfway through, before the button is released, the node has covered at least a third of the way it ends up moving; planted (__domvecPlantNodeOnDrop) the node does not move until the release",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          await window.__domvec.act("open", "graph"); await sleep(1200);
+          const c = window.__domvecCraft, desk = window.__domvecPlane;
+          if (!c || !desk) return { error: "no craft or plane" };
+          const NL = String.fromCharCode(10);
+          const path = "domvec-checks/g356 " + (${planted} ? "p" : "c") + Date.now() + ".md";
+          const flat0 = c.flatView;
+          try {
+            c.flatView = true; window.__domvecPlantNodeOnDrop = ${planted};
+            await desk.create("slate", { path, text: ["---", "domvec: slate", "---", "g356", ""].join(NL) });
+            let card = null;
+            for (let i = 0; i < 30 && !card; i++) { await sleep(200); card = desk.panelOf(path)?.card || null; }
+            if (!card) return { error: "no card" };
+            const home = card.offsetParent;
+            card.style.right = "auto"; card.style.left = Math.round(home.clientWidth * 0.12) + "px"; card.style.top = Math.round(home.clientHeight * 0.4) + "px";
+            await c.fresh();
+            const node = () => c.nodes.find((n) => n.path === path && n.kind === "note");
+            const x = () => node()?.flat ? node().flat.x : null;
+            const a = x();
+            const h = card.querySelector(".domvec-var-title, .domvec-slate-circle, .domvec-slate-circle-dot, .domvec-plane-head-node, .domvec-slate-graph");
+            if (!h || a === null) return { error: "no handle or node", a };
+            const hr = h.getBoundingClientRect(), x0 = hr.left + Math.min(8, hr.width / 2), y0 = hr.top + hr.height / 2;
+            const dx = Math.round(home.clientWidth * 0.6);
+            const me = (t, px, py, tg) => (tg || window).dispatchEvent(new MouseEvent(t, { clientX: px, clientY: py, button: 0, buttons: t === "mouseup" ? 0 : 1, bubbles: true, cancelable: true }));
+            me("mousedown", x0, y0, h);
+            const during = [];
+            for (let i = 1; i <= 6; i++) { me("mousemove", x0 + dx * i / 6, y0); await frame(); await frame(); during.push(x()); }
+            me("mouseup", x0 + dx, y0);
+            await sleep(80);
+            const b = x();
+            const total = b - a, half = during[2] - a;
+            return { planted: ${planted}, a, b, during: during.map((v) => Math.round(v * 100) / 100), total: Math.round(total * 100) / 100,
+                     half_share: total ? Math.round(half / total * 100) / 100 : null };
+          } finally {
+            c.flatView = flat0; window.__domvecPlantNodeOnDrop = false;
+            try { desk.panelOf(path)?.leaf.detach(); } catch (e) {}
+            const f = app.vault.getAbstractFileByPath(path); if (f) await app.vault.trash(f, true);
+            try { localStorage.removeItem("domvec-plane-card:" + path); } catch (e) {}
+            await c.fresh();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.total > 0 && c.half_share >= 0.33 && !p.error && p.total > 0 && Math.abs(p.half_share) < 0.05,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-342",
       asks: "the 2D plane editor IS the ego's 2D plane (PLUGIN_GOAL 158: 'The 2D editor's graph is 2D truly ... be able to convert to our 2D plane more strictly'): a note with a card on the plane takes the card's place in the ego's flat layout, in the PLANE's frame -- a card in the plane's left half puts its node left of the ego, and DRAGGING the card (the real header gesture) to the right half moves the node right of the ego at once, by the replane, with no rebuild; planted (plantNoReplane) the node stays where it was until the next rebuild",
       async run() {

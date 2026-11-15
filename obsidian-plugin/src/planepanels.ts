@@ -329,7 +329,7 @@ export class PlaneDesk {
       const undrag = makeDraggable(card, plane, "domvec-plane-card:" + file.path, this.place,
         () => { if (performance.now() - this.altAt < 800) return; this.host.headerClick?.(fpath); },
         (x, y) => this.wireDrop(fpath, x, y),
-        () => this.host.moved?.(fpath));
+        () => this.host.moved?.(fpath), () => this.host.moved?.(fpath));
       clampToPlane(card, plane);
       // Any edge or corner resizes it, found by hovering (159); a resize is the
       // READER sizing it, as the corner's was (G-326).

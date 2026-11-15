@@ -2689,6 +2689,12 @@ export class GraphView extends ItemView {
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.stopBatch();
+    // The global the checks read goes with it (2026-11-14): after a plugin
+    // reload with no graph (the sidecar down) it still named the UNLOADED
+    // instance's craft, and G-356 dragged a card in the new code while
+    // reading nodes from the old -- "a probe scores the instrument that is
+    // LOADED". Unset, a check reads "no craft" instead of a stale answer.
+    if ((window as any).__domvecCraft === this.craft) (window as any).__domvecCraft = null;
     this.craft?.unload(); this.craft = null;
     // Every timer this view started that the plugin did not register: left
     // running, a closed view's code kept firing after a plugin RELOAD -- the

@@ -1274,6 +1274,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   marks!: NoteMarks;
 
   onunload() {
+    // The craft global names THIS instance's craft or a dead one's: either
+    // way it ends here (G-356 read a craft two reloads old while the new
+    // view, with no graph, had none).
+    (window as any).__domvecCraft = null;
     this.nbChats?.destroy();
     this.cockpit?.unload();
     this.desk?.unload();

@@ -92,7 +92,14 @@ export function moveToPane(card: HTMLElement, from: HTMLElement, to: HTMLElement
 
 export function makeDraggable(card: HTMLElement, home: HTMLElement, key: string, stats: PlaceStats,
                               onClick?: () => void, onDrop?: (x: number, y: number) => boolean,
-                              onMoved?: () => void): () => void {
+                              onMoved?: () => void,
+                              /** Called while the card moves, at most once a frame: the
+                               *  card's node follows it DURING the drag (PLUGIN_GOAL 159:
+                               *  "there is also lag with the node form and the panel
+                               *  form" -- the node moved only on release). Planted
+                               *  `window.__domvecPlantNodeOnDrop`: on release only. */
+                              onMoving?: () => void): () => void {
+  let movingRaf = 0;
   // The pane the card is on NOW: the 3D view's plane, or another pane it was
   // carried to (PLUGIN_GOAL 133: "move the computational graph editor
   // nodes/panels *across* panes like the 3D world viewer and the browser").
@@ -122,6 +129,9 @@ export function makeDraggable(card: HTMLElement, home: HTMLElement, key: string,
     card.style.left = `${start.left + e.clientX - start.x}px`;
     card.style.top = `${start.top + e.clientY - start.y}px`;
     if (clampToPlane(card, plane)) stats.clamped++;
+    if (onMoving && !movingRaf && !(window as any).__domvecPlantNodeOnDrop) {
+      movingRaf = window.requestAnimationFrame(() => { movingRaf = 0; onMoving(); });
+    }
   };
   const up = (e?: MouseEvent) => {
     window.removeEventListener("mousemove", move, true);
