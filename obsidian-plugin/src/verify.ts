@@ -286,6 +286,15 @@ export class Verifier {
   /** Asked to stop: the run ends before its next check. */
   private stopWhy = "";
   stop(why = "asked to stop"): void { this.stopWhy = why; }
+  /**
+   * The longest one check may run before it is failed and the run goes on.
+   * Run 69 (2026-11-15) sat on G-101 for 44+ minutes; a stop asked meanwhile
+   * could never land, because a stop is read only BETWEEN checks. A check
+   * past this is a fail with `hung_ms` in its evidence. Planted
+   * `plantNoCheckCeiling`: a hung check holds the run for ever, as before.
+   */
+  checkCeilingMs = 20 * 60 * 1000;
+  plantNoCheckCeiling = false;
 
   private async runChecks(chosen: any[], wakeProjector: () => Promise<any>): Promise<void> {
     this.state.total = chosen.length;
@@ -327,7 +336,13 @@ export class Verifier {
         const t0 = performance.now();
         let got: any;
         try {
-          got = await check.run();
+          if (this.plantNoCheckCeiling) got = await check.run();
+          else {
+            let timer = 0;
+            const ceiling = this.checkCeilingMs;
+            const hung = new Promise((r) => { timer = window.setTimeout(() => r({ pass: false, evidence: { hung_ms: ceiling, why: "the check did not return within the run's per-check ceiling" } }), ceiling); });
+            try { got = await Promise.race([check.run(), hung]); } finally { window.clearTimeout(timer); }
+          }
         } catch (err: any) {
           got = { pass: false, evidence: { threw: String(err?.message || err).slice(0, 300) } };
         }

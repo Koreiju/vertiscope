@@ -1399,13 +1399,37 @@ def _save_lexical_due(workspace, every: float = 30.0) -> None:
     if now - _LEXICAL_SAVED_AT[0] < every:
         return
     _LEXICAL_SAVED_AT[0] = now
+    # Only the SNAPSHOT holds a lock; the 25.7 MB npz and 53.9 MB of JSON are
+    # written outside both `_WORK_LOCK` and the matrix's own lock, which every
+    # search's `similarities` takes. Held across the write, a save stalled
+    # concurrent search-field calls for 7-16 s (2026-11-15: `lexical_save`
+    # 16.3, 11.2 and 10.0 s in exactly the window of the stalls). Planted
+    # `vectors.PLANT_LEXICAL_SAVE_LOCKED`: the write under both, as before.
+    from domvec import vectors as _vectors
     try:
         started = time.perf_counter()
+        planted = _vectors.PLANT_LEXICAL_SAVE_LOCKED[0]
+        wrote = False
+        # `ms` used to start BEFORE the lock was taken, so it mixed the wait
+        # with the work: one read 151.5 s (2026-11-15), most of it queued
+        # behind other holders. Wait, hold and write are now three numbers.
         with _WORK_LOCK:
-            wrote = workspace.save_lexical()
+            got = time.perf_counter()
+            snap = workspace.lexical_snapshot()
+            if planted and snap is not None:
+                with workspace.freq._lock:
+                    wrote = workspace.write_lexical(snap)
+            held = time.perf_counter() - got
+        w0 = time.perf_counter()
+        if not planted and snap is not None:
+            wrote = workspace.write_lexical(snap)
         if wrote:
             _profile("lexical_save", {
-                "ms": round((time.perf_counter() - started) * 1000, 1)})
+                "ms": round((time.perf_counter() - started) * 1000, 1),
+                "ms_wait": round((got - started) * 1000, 1),
+                "ms_locked": round(held * 1000, 1),
+                "ms_write_unlocked": round((time.perf_counter() - w0) * 1000, 1),
+                "planted": planted})
     except Exception:                               # noqa: BLE001
         pass
 
@@ -4671,11 +4695,19 @@ class _Handler(BaseHTTPRequestHandler):
             matching = None
             pages = []
             counts = {}
+            _LAST_TIER1_MS[0] = {}
             with _foreground():
                 pages, matching, counts = _search_pages(index, query, k, params)
+            ms = round((time.perf_counter() - t0) * 1000, 1)
+            phases = dict(_LAST_TIER1_MS[0])
+            _profile("search_pages", {"ms": ms, "pages": len(pages), "matching": matching,
+                                      **{"ms_" + str(k2): v for k2, v in phases.items() if isinstance(v, (int, float))},
+                                      # Who held the work lock when tier 1 answered: a search
+                                      # takes no store lock, so a holder here names the
+                                      # background work it competed with for the interpreter.
+                                      "work_lock_site": (str(_WORK_LOCK.holder[1])[:80] if _WORK_LOCK.holder else "")})
             self._send(200, {"query": query, "pages": [{"url": u, "score": round(sc, 5), "n": counts.get(u)} for u, sc in pages],
-                             "matching": matching,
-                             "ms": round((time.perf_counter() - t0) * 1000, 1)})
+                             "matching": matching, "phases": phases, "ms": ms})
             return
 
         if segments[0] == "vectors":
@@ -5741,6 +5773,9 @@ _URL_NOISE = {"http", "https", "www", "com", "org", "net", "html", "htm", "php",
               "amp", "utm", "ref", "src", "url", "href", "edu", "gov", "io"}
 
 
+_LAST_TIER1_MS = [{}]
+
+
 def _search_pages(index, query: str, k: int, params) -> tuple:
     """Tier 1: (pages, corpus match count, each page's count). `centroid=1`
     (planted): the semantic centroids, which chose pages holding nothing
@@ -5752,6 +5787,10 @@ def _search_pages(index, query: str, k: int, params) -> tuple:
         from ..search import SearchDiagnostics
         diag = SearchDiagnostics()
         pages = index.search_pages_matching(query, k, diagnostics=diag)
+        # Where tier 1's time went, per phase -- kept for the handler's reply
+        # and the profile ring (2026-11-15: tier 1 took 0.2 s for one query
+        # and 8.2 s for the next; nothing said which part).
+        _LAST_TIER1_MS[0] = dict(diag.ms or {})
         return pages, int(diag.survivors), dict(getattr(index, "last_page_counts", {}) or {})
     if hasattr(index, "search_pages"):
         return index.search_pages(query, k), None, {}

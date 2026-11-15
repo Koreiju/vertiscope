@@ -189,7 +189,7 @@ export class SearchField {
   plantShareByUrl = false;
   /** When the reader last scrolled the results (re-ranks wait for it to rest). */
   lastScrollAt = 0;
-  tierStats = { runs: 0, pages: 0, pages_done: 0, first_ms: 0, last_ms: 0, single_ms: 0, reserve: 0 };
+  tierStats = { runs: 0, pages: 0, pages_done: 0, first_ms: 0, last_ms: 0, single_ms: 0, reserve: 0, pages_ms: 0, page_ms: [] as number[] };
 
   /**
    * **Tiered retrieval** (2026-10-17, PLUGIN_GOAL 137/142: "retrieval new URL
@@ -210,6 +210,9 @@ export class SearchField {
     // Planted `plantFixedPages`: a page count from n alone, as before.
     const asked = this.plantFixedPages ? Math.max(6, Math.min(40, Math.ceil(this.total / 6))) : 200;
     let pages = await tiers.pages(q, asked);
+    // Tier 1's own time, apart from the per-page answers after it: the first
+    // answer read 18.5 s where one untiered search took 2.5 s (2026-11-15).
+    this.tierStats.pages_ms = Math.round(performance.now() - t0); this.tierStats.page_ms = [];
     if (seq !== this.seq || q !== this.input.value.trim()) return null;
     if (!pages || !pages.length) return null;
     // Each page counted (and asked) for at most a SIXTH of n: pages holding
@@ -269,7 +272,9 @@ export class SearchField {
     const worker = async () => {
       while (next < pages!.length) {
         const p = pages![next++];
+        const tp = performance.now();
         const got = await tiers.page(q, p.url, perOf(p));
+        if (this.tierStats.page_ms.length < 40) this.tierStats.page_ms.push(Math.round(performance.now() - tp));
         if (seq !== this.seq) return;
         for (const h of got?.hits || []) {
           const was = byCid.get(h.cid);

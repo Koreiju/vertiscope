@@ -302,14 +302,26 @@ class Workspace:
         back from a restart with a vetoed lexical factor: a page captured live
         that afternoon answered nothing to any query, its own name included.
         """
+        snap = self.lexical_snapshot()
+        return snap is not None and self.write_lexical(snap)
+
+    def lexical_snapshot(self):
+        """The matrix's state to save, or None when there is nothing new.
+        Cheap: taken under the matrix's lock, which searches share."""
         if self.read_only:
-            return False             # a reader never writes (see `close`)
+            return None              # a reader never writes (see `close`)
         version = getattr(self.freq, "version", 0)
         if version == getattr(self, "_lexical_saved", None):
-            return False
-        self.freq.save(self.path / "freq")
-        self._lexical_saved = version
-        return True
+            return None
+        return self.freq.snapshot()
+
+    def write_lexical(self, snap) -> bool:
+        """Write a snapshot from `lexical_snapshot`. Holds no lock a search
+        takes: compression and the disk write are the 10-16 s."""
+        wrote = self.freq.write_snapshot(self.path / "freq", snap)
+        if wrote:
+            self._lexical_saved = snap["version"]
+        return wrote
 
     # -- writing ----------------------------------------------------------
     @property

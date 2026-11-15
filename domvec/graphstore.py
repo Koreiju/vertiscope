@@ -1196,6 +1196,15 @@ class GraphStore:
         counts["ms_contains"] = round((time.perf_counter() - _t) * 1000, 1)
         # Its parts (2026-10-24: 32 s on one capture, after the bulk path).
         counts["contains_parts"] = dict(self.last_contains)
+        # Flat, under ms_, because the capture profile keeps only those: the
+        # dict above never reached `/profile`, and a 12.4 s contains phase on
+        # B-tree (2026-11-15) could not say which part it was.
+        _lc = self.last_contains or {}
+        for _k in ("pairs", "new", "ms_read", "ms_write"):
+            if isinstance(_lc.get(_k), (int, float)):
+                counts["ms_contains_" + _k.replace("ms_", "")] = _lc[_k]
+        if _lc.get("by"):
+            counts["ms_contains_bycopy"] = 1 if _lc["by"] == "copy" else 0
         _t = time.perf_counter()
         counts["links"] = self._link_hyperlinks(url, addresses, chunks)
         counts["ms_links"] = round((time.perf_counter() - _t) * 1000, 1)

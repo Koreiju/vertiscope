@@ -143,6 +143,12 @@ PLANT_REEMBED_ALL = [False]
 #: Planted: the matrix unlocked, as before (the shapes race).
 _PLANT_NO_LOCK = [False]
 
+#: Planted (2026-11-15): the whole save -- compression, JSON, fsync -- held
+#: under the matrix's lock, as before. Every search's `similarities` waits on
+#: that lock, and on the live store (25.7 MB npz, 53.9 MB meta) a save held it
+#: 10.0-16.3 s; concurrent search-field calls stalled together for 7-16 s.
+PLANT_LEXICAL_SAVE_LOCKED = [False]
+
 #: A keyword anchor is a word at most this share of chunks hold. Half let
 #: "the" and "edit" through on a mixed-language store (Radix tree's page,
 #: 2026-11-15), where "the" is in fewer than half the chunks.
@@ -184,6 +190,13 @@ class FreqMatrix:
     #: and the document frequencies came from two moments: "inconsistent
     #: shapes", the search answered with a closed connection (2026-10-18).
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
+    #: Serialises WRITES of the files, and nothing else: a write no longer
+    #: holds `_lock`, so two savers (the sidecar's periodic one and a close)
+    #: must not interleave on the same `.tmp` names.
+    _save_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+    #: The version last written to disk, so an older snapshot never lands
+    #: over a newer one.
+    _written_version: int = field(default=-1, repr=False, compare=False)
 
     # -- build -------------------------------------------------------------
     @_locked
@@ -477,11 +490,50 @@ class FreqMatrix:
 
     # -- persistence -------------------------------------------------------
     @_locked
-    def save(self, directory) -> None:
-        """CSR triple as raw numpy arrays, vocabulary and rows as JSON."""
-        path = Path(directory)
-        path.mkdir(parents=True, exist_ok=True)
+    def snapshot(self) -> dict:
+        """What a save writes, taken under the lock -- and nothing else is.
+
+        The CSR arrays are held by reference: `_csr` is only ever REPLACED
+        (`_invalidate` drops it, `_matrix` builds a new one; `tfidf` copies
+        before it touches `data`), so the arrays a snapshot holds do not
+        change under it. The vocabulary, rows and free list are mutated in
+        place and are copied. Measured on the live store: the copy is tens
+        of milliseconds where the write it replaces under the lock took
+        10-16 s.
+        """
         csr = self._matrix()
+        return {"data": csr.data, "indices": csr.indices, "indptr": csr.indptr,
+                "shape": tuple(csr.shape), "vocab": dict(self.vocab),
+                "rows": list(self.rows), "free": list(self._free),
+                "version": getattr(self, "version", 0)}
+
+    def write_snapshot(self, directory, snap: dict) -> bool:
+        """Write a snapshot, holding only the save lock. False when a newer
+        version is already on disk (an older snapshot never lands over it)."""
+        with self._save_lock:
+            if snap["version"] < self._written_version:
+                return False
+            self._write(Path(directory), snap)
+            self._written_version = snap["version"]
+            return True
+
+    def save(self, directory) -> None:
+        """CSR triple as raw numpy arrays, vocabulary and rows as JSON.
+
+        Only the snapshot is taken under the matrix's lock; compression and
+        the disk write happen outside it, so a search is not held for the
+        length of a save. Planted `PLANT_LEXICAL_SAVE_LOCKED`: all of it
+        under the lock, as before.
+        """
+        if PLANT_LEXICAL_SAVE_LOCKED[0] and not _PLANT_NO_LOCK[0]:
+            with self._lock:
+                self.write_snapshot(directory, self.snapshot())
+            return
+        self.write_snapshot(directory, self.snapshot())
+
+    @staticmethod
+    def _write(path: Path, snap: dict) -> None:
+        path.mkdir(parents=True, exist_ok=True)
         # ATOMIC: written beside, then renamed over (2026-10-07: the sidecar
         # crashed natively mid-save and left `freq.npz` at 0 bytes; every
         # restart then died on "No data left in file" and the store would not
@@ -491,17 +543,17 @@ class FreqMatrix:
         with open(tmp_npz, "wb") as fh:
             np.savez_compressed(
                 fh,
-                data=csr.data.astype(np.float32),
-                indices=csr.indices.astype(np.int32),
-                indptr=csr.indptr.astype(np.int64),
-                shape=np.asarray(csr.shape, dtype=np.int64),
+                data=snap["data"].astype(np.float32),
+                indices=snap["indices"].astype(np.int32),
+                indptr=snap["indptr"].astype(np.int64),
+                shape=np.asarray(snap["shape"], dtype=np.int64),
             )
             fh.flush()
             _os.fsync(fh.fileno())
         tmp_meta = path / "freq_meta.json.tmp"
         tmp_meta.write_text(
-            json.dumps({"vocab": self.vocab, "rows": self.rows,
-                        "free": self._free}),
+            json.dumps({"vocab": snap["vocab"], "rows": snap["rows"],
+                        "free": snap["free"]}),
             encoding="utf-8",
         )
         # Both are complete on disk before either is swapped in.
