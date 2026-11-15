@@ -4412,7 +4412,10 @@ class _Handler(BaseHTTPRequestHandler):
                              "launch": {"python": sys.executable, "argv": list(sys.argv[1:]),
                                         "cwd": os.getcwd(),
                                         "workspace": str(getattr(self.workspace, "path", "") or ""),
-                                        "supervised": os.environ.get("DOMVEC_SUPERVISED") == "1"}}
+                                        "supervised": os.environ.get("DOMVEC_SUPERVISED") == "1"},
+                             # Opted out of Windows power throttling, as the OS
+                             # reports it back (`domvec.qos`).
+                             "qos": {**_qos_state(), "os": _qos_read()}}
             # **The counts never run inside the request** (2026-11-08, PLUGIN_GOAL
             # 143 "fix the way the sidecar is run"): with the lock free they
             # still took 20 s on the 32 GB store, so a reload waiting on
@@ -5790,6 +5793,16 @@ _URL_NOISE = {"http", "https", "www", "com", "org", "net", "html", "htm", "php",
 _LAST_TIER1_MS = [{}]
 
 
+def _qos_state() -> dict:
+    from .. import qos as _qos
+    return dict(_qos.STATE)
+
+
+def _qos_read():
+    from .. import qos as _qos
+    return _qos.throttling_state()
+
+
 def _search_pages(index, query: str, k: int, params) -> tuple:
     """Tier 1: (pages, corpus match count, each page's count). `centroid=1`
     (planted): the semantic centroids, which chose pages holding nothing
@@ -5826,6 +5839,11 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
     here, and it is a SEPARATE flag from ``enact`` because a reader who wanted a
     notebook did not thereby ask for a vault that can drive the web.
     """
+    # Full speed first (`domvec.qos`): a long-lived background process is
+    # moved to the efficiency cores after ~3 s of work, and every phase this
+    # process times ran at about a third of the machine's speed (2026-11-15).
+    from .. import qos as _qos
+    _qos.full_speed()
     # Background training steps aside for searches (PLUGIN_GOAL 152).
     # Planted: DOMVEC_PLANT_NO_TRAIN_YIELD=1.
     if os.environ.get("DOMVEC_PLANT_NO_TRAIN_YIELD") != "1":

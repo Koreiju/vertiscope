@@ -212,6 +212,11 @@ def _seg_key(seg: str) -> Tuple[str, int]:
 # --- nodes ------------------------------------------------------------------
 
 
+#: Planted (2026-11-15): the recursive generator walk, as before --
+#: O(nodes x depth) calls.
+PLANT_RECURSIVE_WALK = [False]
+
+
 @dataclass
 class TrieNode:
     """One node. Internal nodes carry structure; leaves carry an address."""
@@ -320,10 +325,29 @@ class TrieNode:
         return list(kids)
 
     def walk(self) -> Iterator["TrieNode"]:
-        """Pre-order traversal in document order — self, then each subtree."""
-        yield self
-        for child in self.ordered_children():
-            yield from child.walk()
+        """Pre-order traversal in document order — self, then each subtree.
+
+        An explicit stack, not `yield from` recursion: a recursive generator
+        hands every node up through every generator above it, so one walk of
+        a 67k-node page made 739,509 calls (O(nodes x depth)) and two such
+        walks were most of an edit's render (2026-11-15). Same order: a
+        node's children are pushed reversed, so the first is popped first.
+        Planted `PLANT_RECURSIVE_WALK`.
+        """
+        if PLANT_RECURSIVE_WALK[0]:
+            yield self
+            for child in self.ordered_children():
+                yield from child.walk()
+            return
+        stack = [self]
+        pop, extend = stack.pop, stack.extend
+        while stack:
+            node = pop()
+            yield node
+            kids = node.ordered_children() if node.children else None
+            if kids:
+                kids.reverse()
+                extend(kids)
 
     def leaves(self) -> Iterator["TrieNode"]:
         for node in self.walk():

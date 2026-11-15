@@ -2234,7 +2234,7 @@ def _memo_key(node: TrieNode, url: str, kind: str, window: int) -> Optional[tupl
 
 
 def _absorbed_by_element(trie: AddressTrie,
-                         url: str) -> Dict[str, List[ContentAddress]]:
+                         url: str, leaves=None) -> Dict[str, List[ContentAddress]]:
     """element -> the spellings the collapse drops there.
 
     Computed from the trie, not from render-time drops, and that distinction
@@ -2256,7 +2256,7 @@ def _absorbed_by_element(trie: AddressTrie,
     must not depend on the descent belongs outside it.
     """
     units: List[Tuple[ContentAddress, str, str]] = []
-    for node in trie.leaves():
+    for node in (trie.leaves() if leaves is None else leaves):
         address = node.address
         if address is None or not (node.value or "").strip():
             continue
@@ -2266,7 +2266,7 @@ def _absorbed_by_element(trie: AddressTrie,
     return out
 
 
-def _suppressed_controls(trie: AddressTrie) -> Dict[str, ContentAddress]:
+def _suppressed_controls(trie: AddressTrie, leaves=None) -> Dict[str, ContentAddress]:
     """element -> an affordance address the render might not draw there.
 
     Every control, not only the suppressed tags. Suppression is one way an
@@ -2303,7 +2303,7 @@ def _suppressed_controls(trie: AddressTrie) -> Dict[str, ContentAddress]:
     moves with the context window. This does not.
     """
     out: Dict[str, ContentAddress] = {}
-    for node in trie.leaves():
+    for node in (trie.leaves() if leaves is None else leaves):
         address = node.address
         if address is None or not (node.value or "").strip():
             continue
@@ -2481,8 +2481,12 @@ def render_trie(
 
     # Named after the fold, so a line that merged links still reports what
     # its element collapsed. Both are post-passes for the same reason.
+    # The trie's leaves, read ONCE for the three page-global passes below:
+    # each walked the whole trie on its own (2026-11-15: three walks of 22k
+    # nodes were most of an edit's render).
+    page_leaves = list(trie.leaves())
     for url in trie.urls():
-        _name_the_collapse(chunks, _absorbed_by_element(trie, url))
+        _name_the_collapse(chunks, _absorbed_by_element(trie, url, page_leaves))
         break
 
     # Last, so it sees the lines the fold and the collapse-naming settled on:
@@ -2490,14 +2494,14 @@ def render_trie(
     # entered those passes, and the affordance belongs on the line a reader
     # actually sees. It only ever appends to `inline`; the address slot is
     # what the store persists and the crawl reads back.
-    _carry_affordance(chunks, _suppressed_controls(trie))
+    _carry_affordance(chunks, _suppressed_controls(trie, page_leaves))
 
     # Tables as tables (`D-5`, `M-3`): after the affordances are carried, so a
     # row line holds every cell's addresses, and before the depths are levelled.
     if not PLANT_NO_TABLES:
         # Each table's header row, from wherever on the page it was drawn --
         # read before any chunk is rewritten (`D-9`).
-        layouts = _table_layouts(chunks, {} if PLANT_NO_SPANS else _cell_spans(trie))
+        layouts = _table_layouts(chunks, {} if PLANT_NO_SPANS else _cell_spans(trie, page_leaves))
         for chunk in chunks:
             chunk.lines = _tabulate(chunk.lines, layouts)
     # The page repeating itself, drawn once (`D-4`, `M-8`).
@@ -2588,10 +2592,10 @@ def _ordinal(step: str) -> int:
     return int(m.group(1)) if m else 1
 
 
-def _cell_spans(trie: AddressTrie) -> Dict[str, Tuple[int, int]]:
+def _cell_spans(trie: AddressTrie, leaves=None) -> Dict[str, Tuple[int, int]]:
     """Every spanned cell's (rowspan, colspan), by its element's xpath."""
     out: Dict[str, Tuple[int, int]] = {}
-    for leaf in trie.leaves():
+    for leaf in (trie.leaves() if leaves is None else leaves):
         a = leaf.address
         if a is None or not _is_span(a):
             continue

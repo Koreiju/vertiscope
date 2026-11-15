@@ -13,6 +13,10 @@ from .run import (DEFAULT_ARTIFACT_DIR, measure_page, qualify,
 
 
 def main(argv=None) -> int:
+    # A measurement must not change speed half-way: Windows throttles a
+    # sustained background process ~3.5x after a few seconds (`domvec.qos`).
+    from ..qos import full_speed
+    full_speed()
     parser = argparse.ArgumentParser(
         prog="domvec-analytics",
         description="Score the affine map from page to REPL rendering.")
