@@ -7750,7 +7750,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-275",
-      asks: "a flight plan is DRAWN in 3D -- a path through its targets in order, the leg being flown brighter -- and planned per mode with the throttle: in the map view the plan is drawn and holds (the camera does not move), in the ego view it flies leg by leg and the drawn leg follows, a throttle of 0 holds it where it is; planted (plantNoPlanDraw) the plan is flown but not drawn",
+      asks: "a flight plan is DRAWN in 3D -- a path through its targets in order, the leg being flown brighter -- and planned per mode with the throttle: in the map view the plan is drawn and holds (the camera does not move), in the ego view it flies leg by leg and the drawn leg follows, a throttle of 0 holds it where it is; planted (plantNoPlanDraw) the plan is flown but not drawn; a play is a new navigation, so its first leg zooms in and the rest keep that zoom (PLUGIN_GOAL: 'fly-to-node should zoom initially, but preserve user zoom') -- planted (plantPlanKeepsZoom) every leg keeps the world's framing and the craft only turns",
       async run() {
         // PLUGIN_GOAL items 8-9: "we can also draw flight plans for various
         // searches and anchored nodes within different modes. We will have a
@@ -7772,12 +7772,21 @@ export function makeChecks(env) {
             a.setPlan(nodes); a.play(true);
             let p0 = at(); await sleep(2500);
             out.map = { points: v.planDrawn.points, visible: !!v.planGroup && v.planGroup.visible, plan_at: a.planAt, moved: moved(p0) };
-            a.play(false); a.setMode("ego"); a.play(true);
+            a.play(false); a.setMode("ego");
+            // Why a leg moves or not: the flight stops at the reader's zoom
+            // (camera -> focus), so a target already nearer than that is
+            // "arrived" by turning alone.
+            const ctl = v.graph.controls(), c0 = cam();
+            const s0 = { ...a.stats };
+            out.flight_start = { cam_focus: Math.round(c0.distanceTo(ctl.target)), legs_d: nodes.map((n) => Math.round(Math.hypot(n.x - c0.x, n.y - c0.y, (n.z || 0) - c0.z))) };
+            a.play(true);
             p0 = at();
             for (let i = 0; i < 80 && a.planAt < 1; i++) await sleep(250);
             await sleep(400);
             out.ego = { plan_at: a.planAt, drawn_leg: v.planDrawn.current, leg_visible: v.planGroup.children[1].visible, moved: moved(p0),
                         legs: a.planStats.legs };
+            out.flight_stats = { standoff: a.stats.standoff, at_floor: (a.stats.at_floor || 0) - (s0.at_floor || 0), frames: (a.stats.frames || 0) - (s0.frames || 0),
+                                 arrivals: (a.stats.arrivals || 0) - (s0.arrivals || 0), view: a.view };
             // Throttle 0: the craft brakes from its carried velocity (motion is
             // stateful, item 21), then holds -- measured once at rest.
             a.setThrottle(0);
@@ -7787,9 +7796,19 @@ export function makeChecks(env) {
             v.plantNoPlanDraw = true;
             await sleep(400);
             out.planted = { points: v.planDrawn.points, visible: !!v.planGroup && v.planGroup.visible, still_planned: a.plan.length };
+            v.plantNoPlanDraw = false;
+            // Planted: every leg keeps the reader's zoom -- from the world's
+            // framing the plan's nodes sit inside it and the craft only turns.
+            a.plantPlanKeepsZoom = true;
+            a.play(false); a.setThrottle(1); a.setMode("map"); await sleep(2500);
+            a.setPlan(nodes); a.setMode("ego"); a.play(true);
+            const pz = at();
+            for (let i = 0; i < 40 && a.planAt < 1; i++) await sleep(250);
+            await sleep(400);
+            out.planted_zoom = { plan_at: a.planAt, moved: moved(pz) };
             return out;
           } finally {
-            v.plantNoPlanDraw = false;
+            v.plantNoPlanDraw = false; a.plantPlanKeepsZoom = false;
             a.play(false); a.setPlan([]); a.setThrottle(thr0); a.setMode(mode0);
           }
         `);
@@ -7797,7 +7816,8 @@ export function makeChecks(env) {
           pass: !got.error && got.map.points === 4 && got.map.visible && got.map.plan_at === -1 && got.map.moved < 0.5
                 && got.ego.plan_at >= 1 && got.ego.drawn_leg === got.ego.plan_at && got.ego.leg_visible && got.ego.moved > 1
                 && got.throttle_zero.plan_at_after === got.throttle_zero.plan_at_before && got.throttle_zero.moved < 1
-                && got.planted.points === 0 && !got.planted.visible && got.planted.still_planned === 4,
+                && got.planted.points === 0 && !got.planted.visible && got.planted.still_planned === 4
+                && !!got.planted_zoom && got.planted_zoom.moved < 1,
           evidence: got,
         };
       },
@@ -16774,8 +16794,14 @@ export function makeChecks(env) {
             const targets = (g.searchState?.targets || []).filter(Boolean);
             setVal("play", "true"); await sleep(400);
             const out = { planted, targets: targets.length, playing_at_start: a.playing };
-            for (let i = 0; i < 80 && a.playing; i++) await sleep(500);
+            // Each leg now FLIES (a play's first leg zooms in, G-275): ~3.6 s a
+            // leg at full throttle, 15 legs ~55 s. Its old 40 s passed only
+            // because every leg "arrived" by turning from the world's framing.
+            const tp = Date.now();
+            for (let i = 0; i < 180 && a.playing; i++) await sleep(500);
             out.legs = a.planStats.legs - s0.legs;
+            out.play_s = Math.round((Date.now() - tp) / 100) / 10;
+            out.s_per_leg = out.legs ? Math.round(out.play_s / out.legs * 10) / 10 : null;
             out.plan_at = a.planAt;
             // Where the craft ended: on the last leg's node (its look point).
             const last = a.plan[a.planAt];
@@ -16810,7 +16836,7 @@ export function makeChecks(env) {
             a.setThrottle(thr0); g.searchField.input.value = ""; await g.searchField.run();
             cam.position.copy(savedCam.p); ctl.target.copy(savedCam.t); ctl.update?.();
           }
-        })()`, { timeout: 120000 });
+        })()`, { timeout: 240000 });
         if (!got || got.error) return { pass: false, evidence: got };
         const c = got.clean, p = got.planted;
         return { pass: c.targets >= 3 && c.playing_at_start && c.legs >= 2 && c.on_last_leg !== null && c.on_last_leg <= Math.max(2, c.arrival_tolerance)

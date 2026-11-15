@@ -102,7 +102,7 @@ export class UserAgent {
   private rezoom = false;
   /** The craft's velocity, world units a second: the state a new hover bends. */
   vel = v3();
-  stats = { flights: 0, frames: 0, at_floor: 0, keys: 0, mode_switches: 0, last_d: 0, speed: 0, bends: 0, rolls: 0, orbits: 0,
+  stats = { zoomed_in: 0, flights: 0, frames: 0, at_floor: 0, keys: 0, mode_switches: 0, last_d: 0, speed: 0, bends: 0, rolls: 0, orbits: 0,
            arrivals: 0, releases: 0, idle_ticks: 0, standoff: 0 };
   /** Planted: the old 0.4 s tween to wherever `zoomFor` said, no floor. */
   plantFastFlight = false;
@@ -126,15 +126,26 @@ export class UserAgent {
   play(on: boolean): void {
     if (on === this.playing) return;
     this.playing = on && this.plan.length > 0;
-    if (this.playing) { this.planStats.plays++; this.planAt = -1; this.target = null; }
+    if (this.playing) { this.planStats.plays++; this.planAt = -1; this.target = null; this.navFresh = true; }
   }
+  /** A play is a NEW navigation: its first leg zooms in, the rest keep that
+   *  zoom ("fly-to-node should zoom initially, but preserve user zoom while
+   *  still tracking during fly-throughs"; read as 39: "the first flight of a
+   *  navigation zooms; later flights keep the reader's zoom"). Kept at the
+   *  reader's zoom from the world's framing, every node of a plan sat inside
+   *  the standoff (736 of 807) and each leg "arrived" by turning alone -- the
+   *  craft never moved (G-275, 2026-11-15). Planted `plantPlanKeepsZoom`. */
+  private navFresh = false;
+  plantPlanKeepsZoom = false;
   private advance(): void {
     if (this.planAt >= 0 && this.plantNoAdvance) { this.playing = false; return; }
     const next = this.planAt + 1;
     if (next >= this.plan.length) { this.playing = false; this.planStats.finished++; return; }
     this.planAt = next;
     this.planStats.legs++;
-    this.fly(this.plan[next]);
+    const fresh = this.navFresh && !this.plantPlanKeepsZoom;
+    this.navFresh = false;
+    this.fly(this.plan[next], fresh);
   }
   /** Planted (item 46): every flight closes to the floor, the reader's zoom-out lost. */
   plantIgnoreZoom = false;
@@ -161,7 +172,7 @@ export class UserAgent {
   }
 
   /** A hover asked to go to `n`. True when the agent took the flight. */
-  fly(n: any): boolean {
+  fly(n: any, zoomIn = false): boolean {
     if (this.plantFastFlight) return false;
     if (this.mode === "map") { this.target = null; return true; }   // a hover moves nothing
     const bend = !!this.target && this.target !== n;
@@ -184,7 +195,8 @@ export class UserAgent {
       }
       const sf = this.stopFloor(n);
       const floorHere = Number.isFinite(dNode) && dNode < sf ? Math.max(1.5, dNode) : sf;
-      this.standoff = this.plantIgnoreZoom ? this.floor : Math.max(floorHere, Number.isFinite(anchorD) ? anchorD : 0);
+      this.standoff = this.plantIgnoreZoom ? this.floor : zoomIn ? floorHere : Math.max(floorHere, Number.isFinite(anchorD) ? anchorD : 0);
+      if (zoomIn) this.stats.zoomed_in = (this.stats.zoomed_in || 0) + 1;
       this.stats.standoff = Math.round(this.standoff * 10) / 10;
     }
     this.target = n;
