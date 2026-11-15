@@ -551,7 +551,34 @@ Open (not started this session):
     - /place: 1.7 s;
     - prequery: 1.7 s.
   - Retrieval: G-210's first tier-1 answer took 12.8 s, and 22.8 s on a
-    freshly restarted worker (cold).
+    freshly restarted worker (cold). **Re-measured 2026-11-15 after
+    3365015, 7707854, 79c5948**: tiered first answer 235-1,414 ms over six
+    fresh queries in alternating order (no plugin reload between them);
+    tier 1 on the server 17-1,307 ms, its lexical phase ~30 ms at rest.
+    What it was:
+    - the periodic lexical save held `_WORK_LOCK` and the matrix's own lock
+      (which every search takes) across a 25.7 MB npz and 53.9 MB of JSON;
+      now only a snapshot is locked: 48-915 ms, the write 8-12.6 s outside;
+    - every write dropped the term matrix and the next search rebuilt it in
+      a Python loop over every row; now the changed rows are spliced in
+      (54 ms against 490 ms at 20k rows, identical output);
+    - tf-idf by sparse products; now on the data array (1.3-1.6x).
+    Still open:
+    - the first search after a worker restart waits for `index_warm` (62.7 s
+      seen, index_warm 104.6 s);
+    - G-210's clean arm runs right after the confirm's plugin reload and
+      still reads 18.5 s; its planted arm, second, 1.6 s;
+    - tier 1's lexical phase reads 2.6-2.8 s in windows full of capture,
+      projector and chunk-route work. At most ~0.4 s of that is the rebuild
+      after a write (synthetic, 90k rows, 4.2M counts); the rest is
+      contention, not yet attributed.
+  - Harness (3365015): run 69 sat on G-101 for 44+ minutes and a stop could
+    never land. A check now fails with `hung_ms` past a 20-minute ceiling.
+    Probed: a 3 s ceiling recorded the hung check and the run returned in
+    5.1 s; planted, still running at 6 s. Why G-101 hung is not known.
+  - Also measured: `code_sync` re-indexing an edited sidecar.py held the
+    work lock for 214 s, and `drawn` and a lexical save queued behind it
+    (107 s, 146 s). Editing the repo stalls the running sidecar.
   - World panels as the authority for 2D views (e00f495, G-367 live). A
     click on an ego web node opens the world's own panel at the ego node,
     inside the pane: 14 px from it, against 276 px and clipped, as measured
