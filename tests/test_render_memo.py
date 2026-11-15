@@ -180,8 +180,29 @@ def test_memo_actually_hits():
     """A cache that never hits would pass every equivalence test above."""
     html = _page(_items(60))
     _passes, memo = _run([html, html, html])
-    assert memo.hits > 0
+    # An unchanged page is answered whole by the page memo (2026-11-15);
+    # either memo serving it is a hit.
+    assert memo.hits + memo.page_hits > 0
     assert memo.reused_lines > 0
+
+
+def test_an_unchanged_page_is_one_comparison():
+    """The page memo: the second and third renders of an unchanged page are
+    served whole, identical to an unmemoised render; planted
+    `PLANT_NO_PAGE_MEMO`, never."""
+    from domvec import markdown as md
+    html = _page(_items(60))
+    _passes, memo = _run([html, html, html])
+    assert memo.page_hits == 2
+    md.PLANT_NO_PAGE_MEMO = True
+    try:
+        _p2, planted = _run([html, html, html])
+    finally:
+        md.PLANT_NO_PAGE_MEMO = False
+    assert planted.page_hits == 0 and planted.hits > 0
+    # Each pass: the memoised render equals the unmemoised one, both arms.
+    assert all(cached == fresh for cached, fresh in _passes)
+    assert _passes == _p2
 
 
 def test_reuse_covers_most_of_an_edited_page():

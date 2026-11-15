@@ -2130,7 +2130,7 @@ class RenderMemo:
     """
 
     __slots__ = ("_prev", "_cur", "hits", "misses", "reused_lines",
-                 "peeks", "skipped_fit_tests")
+                 "peeks", "skipped_fit_tests", "page_key", "page_out", "page_hits")
 
     def __init__(self) -> None:
         self._prev: Dict[tuple, object] = {}
@@ -2142,6 +2142,14 @@ class RenderMemo:
         # Ancestors whose own render was never needed, because a child was
         # already known to be too big. See `_overflows_by_a_child`.
         self.skipped_fit_tests = 0
+        # The WHOLE render, keyed on every page root's `exact_hash` and the
+        # render's parameters: `render_trie`'s page-global passes walk the
+        # trie on every call, so a render of an unchanged page cost 56.8 ms
+        # at N=1,600 where it cost 3.8 ms before those passes existed
+        # (projection harness, 2026-08-29 -> 2026-11-15).
+        self.page_key = None
+        self.page_out = None
+        self.page_hits = 0
 
     def get(self, key: tuple):
         entry = self._cur.get(key)
@@ -2430,6 +2438,29 @@ def render_trie(
     """
     chunks: List[MarkdownChunk] = []
 
+    # An unchanged trie draws what it drew last time: one comparison of the
+    # roots' strict Merkle (`exact_hash`, CLAUDE.md 5b -- never
+    # `subtree_hash`) and of every parameter and plant the passes below
+    # read. The generations are not rotated on a hit, so the subtree memo is
+    # intact for the next real change. Planted `PLANT_NO_PAGE_MEMO`.
+    page_key = None
+    if memo is not None and not PLANT_NO_PAGE_MEMO:
+        urls = trie.urls()
+        page_key = (
+            trie.root.exact_hash,
+            tuple((u, getattr(trie.node_at(url_steps(u)), "exact_hash", None)) for u in urls),
+            context_window, md_level, MD_LEVEL,
+            # Every plant this module reads, whichever pass reads it.
+            tuple((k, repr(v)) for k, v in sorted(globals().items()) if k.startswith("PLANT_")),
+        )
+        if memo.page_key == page_key and memo.page_out is not None:
+            memo.page_hits += 1
+            out = [_clone_chunk(c) for c in memo.page_out]
+            memo.reused_lines += sum(len(c.lines) for c in out)
+            if report is not None:
+                _fill_report(trie, out, report)
+            return out
+
     for url in trie.urls():
         steps = url_steps(url)
         page = trie.node_at(steps)
@@ -2500,6 +2531,9 @@ def render_trie(
                            for l in chunk.lines]
     if memo is not None:
         memo.rotate()
+        if page_key is not None:
+            memo.page_key = page_key
+            memo.page_out = [_clone_chunk(c) for c in chunks]
 
     if report is not None:
         # Computed after the fact rather than accumulated during the descent:
@@ -2513,6 +2547,11 @@ def render_trie(
 
 #: Planted (`D-5`): a table drawn one cell per line, as before.
 PLANT_NO_TABLES = False
+
+#: Planted (2026-11-15): no whole-render memo -- an unchanged page runs every
+#: page-global pass again, as before (56.8 ms at N=1,600, against 3.8 ms when
+#: the subtree memo was the only work).
+PLANT_NO_PAGE_MEMO = False
 
 # The row key keeps its section: `thead/tr` and `tbody/tr` are different rows
 # (one key merged a header with the first data row, 2026-10-11).
