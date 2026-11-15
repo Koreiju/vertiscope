@@ -412,8 +412,14 @@ Open (not started this session):
 - Semantic keyword anchors beside hover pictures (the tooltip header is
   done, G-351; the world nodes' stored names are still their raw first
   line).
-- The search bar as a draggable retrieval cell panel; search over all
-  code artifacts; the empty-cell hyperlink chain.
+- Search over all code artifacts: LIVE-CONFIRMED (G-357, run 47). 18 of
+  145 modules (chat.py, models.py, front.py, slate.py ...) had no chunk:
+  code entered the store only when saved through the plugin. A hash-ledger
+  sync now indexes the delta every 5 min (steady state: 145 unchanged in
+  97 ms); 144/144 modules with text are in the store. Cost noted: one
+  re-index of sidecar.py (~6k lines + its CPG) is ~36 s.
+- The search bar as a draggable retrieval cell panel; the empty-cell
+  hyperlink chain (needs the reader's screenshots to know which link).
 - Cell hierarchies / black-box unfolding for code, markdown and notebook
   cells as ego states (persisted alongside the game state).
 - Chat cells: prompt/response cells hard-linked in sequence; context

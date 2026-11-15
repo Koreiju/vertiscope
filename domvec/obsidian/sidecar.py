@@ -1197,7 +1197,7 @@ _CODE_SYNC_LOCK = threading.Lock()
 _CODE_SYNC_STATE = {"running": False, "done": 0, "total": 0, "current": "", "started": 0.0, "last": None}
 
 
-def _sync_code(workspace, *, limit: Optional[int] = None) -> Dict:
+def _sync_code(workspace, *, limit: Optional[int] = None, forget=()) -> Dict:
     """The codebase into the trie, as it is on disk NOW (PLUGIN_GOAL 159: "the
     completeness of results to be for all code artifacts in our db").
 
@@ -1231,6 +1231,11 @@ def _sync_code(workspace, *, limit: Optional[int] = None) -> Dict:
             ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
         except Exception:                           # noqa: BLE001
             ledger = {}
+        # `forget`: these modules' LEDGER entries only (never their chunks), so
+        # the pass treats them as changed -- the check's way to ask for a
+        # known delta on a store that is already in sync.
+        for u in forget or ():
+            ledger.pop(str(u), None)
         seen = set()
         done_now: List[str] = []
         file_ms: List[float] = []
@@ -2932,13 +2937,14 @@ class _Handler(BaseHTTPRequestHandler):
                 if _CODE_SYNC_STATE.get("running"):
                     self._send(200, {"started": False, "busy": True, "sync": dict(_CODE_SYNC_STATE)})
                     return
-                threading.Thread(target=_sync_code, args=(self.workspace,), name="domvec-code-sync-now", daemon=True).start()
+                threading.Thread(target=_sync_code, args=(self.workspace,), kwargs={"forget": list(body.get("forget") or [])},
+                                 name="domvec-code-sync-now", daemon=True).start()
                 self._send(200, {"started": True})
                 return
             was = PLANT_NO_CODE_SYNC[0]
             PLANT_NO_CODE_SYNC[0] = bool(body.get("plant"))
             try:
-                self._send(200, _sync_code(self.workspace, limit=body.get("limit")))
+                self._send(200, _sync_code(self.workspace, limit=body.get("limit"), forget=list(body.get("forget") or [])))
             finally:
                 PLANT_NO_CODE_SYNC[0] = was
             return
@@ -4716,7 +4722,17 @@ class _Handler(BaseHTTPRequestHandler):
             # disk does not reimplement what it measures. Read-only.
             from ..source import iter_sources, source_url
             base = Path(__file__).resolve().parents[1]
-            self._send(200, {"urls": [source_url("repo", rel) for _p, rel in iter_sources(base)],
+            pairs = list(iter_sources(base))
+            empty = []
+            for _p, rel in pairs:
+                try:
+                    if not _p.read_text(encoding="utf-8").strip():
+                        empty.append(source_url("repo", rel))
+                except (OSError, UnicodeDecodeError):
+                    pass
+            # `empty`: modules with no text at all -- nothing to chunk, so not
+            # part of what search can be asked to find.
+            self._send(200, {"urls": [source_url("repo", rel) for _p, rel in pairs], "empty": empty,
                              "sync": dict(_CODE_SYNC_STATE)})
             return
 
