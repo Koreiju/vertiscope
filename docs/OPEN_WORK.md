@@ -387,8 +387,14 @@ Measured, not fixed:
   page's place. Two defects under it: (1) a freshly scanned page's chunks
   are unreachable by hover until embedded -- the same latency as "scanning
   and streaming to the 3D graph from the browser is also still quite
-  slow"; (2) the stand-in panel opened with 0 characters: the fixture's
-  text is inside shadow DOM and the streaming payload carried none of it.
+  slow"; (2) CORRECTED 2026-11-14: the stand-in panel was NOT empty --
+  its log read `text 0` (the outer body) and `frame 420` (420 characters
+  inside the page-form iframe), and the first reading looked at `text` only.
+  Tracing it found a real defect beside it, now fixed and confirmed live
+  (G-358): a chunk whose addresses cross several shadow roots was
+  snapshotted as its FIRST shadow tree only (the root walk climbed
+  parentElement); the fixture's 3-card chunk now holds all 3 records, 1,073
+  characters, against 1 record and 357 planted.
   This answers "Not sure if hovering browser chunks engages the fly-to
   anymore": it flies, to the page-level stand-in, until the page's chunks
   are embedded.

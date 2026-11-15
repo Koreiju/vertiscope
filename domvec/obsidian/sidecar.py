@@ -1192,6 +1192,9 @@ def _source_file(url: str):
 #: through the plugin (`POST /source`), as before.
 PLANT_NO_CODE_SYNC = [False]
 _CODE_SYNC_LOCK = threading.Lock()
+#: The pass in progress, for `GET /code/sources` (the harness polls it: the
+#: first pass over 145 modules took ~17 min behind live capture).
+_CODE_SYNC_STATE = {"running": False, "done": 0, "total": 0, "current": "", "started": 0.0, "last": None}
 
 
 def _sync_code(workspace, *, limit: Optional[int] = None) -> Dict:
@@ -1230,10 +1233,14 @@ def _sync_code(workspace, *, limit: Optional[int] = None) -> Dict:
             ledger = {}
         seen = set()
         done_now: List[str] = []
-        for path, rel in iter_sources(base):
+        file_ms: List[float] = []
+        todo = list(iter_sources(base))
+        _CODE_SYNC_STATE.update(running=True, done=0, total=len(todo), current="", started=time.time())
+        for path, rel in todo:
             url = source_url("repo", rel)
             seen.add(url)
             out["files"] += 1
+            _CODE_SYNC_STATE["done"] = out["files"]
             try:
                 text = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
@@ -1246,6 +1253,8 @@ def _sync_code(workspace, *, limit: Optional[int] = None) -> Dict:
             if limit is not None and out["indexed"] >= limit:
                 continue
             _yield_to_foreground()
+            _CODE_SYNC_STATE["current"] = url
+            tf = time.time()
             try:
                 with _WORK_LOCK:
                     workspace.index_source(text, rel, root="repo")
@@ -1253,6 +1262,13 @@ def _sync_code(workspace, *, limit: Optional[int] = None) -> Dict:
                 ledger[url] = h
                 out["indexed"] += 1
                 done_now.append(url)
+                file_ms.append((time.time() - tf) * 1000)
+                # Saved per file: a pass cut short by a restart keeps what it
+                # did (the first one wrote only at its end, after ~17 min).
+                try:
+                    ledger_path.write_text(json.dumps(ledger, sort_keys=True), encoding="utf-8")
+                except OSError:
+                    pass
             except Exception:                       # noqa: BLE001
                 out["failed"] += 1
         out["gone"] = sum(1 for u in ledger if u.startswith("code://repo/") and u not in seen)
@@ -1263,8 +1279,12 @@ def _sync_code(workspace, *, limit: Optional[int] = None) -> Dict:
         if done_now:
             _LAST_WRITE[0] = time.time()
         out["sample"] = done_now[:20]
+        if file_ms:
+            fm = sorted(file_ms)
+            out["file_ms_p50"] = round(fm[len(fm) // 2]); out["file_ms_max"] = round(fm[-1])
     finally:
         out["ms"] = round((time.time() - t0) * 1000)
+        _CODE_SYNC_STATE.update(running=False, current="", last={k: v for k, v in out.items() if k != "sample"})
         _CODE_SYNC_LOCK.release()
     _profile("code_sync", {k: v for k, v in out.items() if k != "sample"})
     return out
@@ -2906,6 +2926,15 @@ class _Handler(BaseHTTPRequestHandler):
                 body = json.loads(self.rfile.read(length) or b"{}") or {}
             except Exception:                       # noqa: BLE001
                 body = {}
+            if body.get("background") and not body.get("plant"):
+                # Started and answered at once; `GET /code/sources` -> `sync`
+                # says how far it is. Busy if a pass is already running.
+                if _CODE_SYNC_STATE.get("running"):
+                    self._send(200, {"started": False, "busy": True, "sync": dict(_CODE_SYNC_STATE)})
+                    return
+                threading.Thread(target=_sync_code, args=(self.workspace,), name="domvec-code-sync-now", daemon=True).start()
+                self._send(200, {"started": True})
+                return
             was = PLANT_NO_CODE_SYNC[0]
             PLANT_NO_CODE_SYNC[0] = bool(body.get("plant"))
             try:
@@ -4687,7 +4716,8 @@ class _Handler(BaseHTTPRequestHandler):
             # disk does not reimplement what it measures. Read-only.
             from ..source import iter_sources, source_url
             base = Path(__file__).resolve().parents[1]
-            self._send(200, {"urls": [source_url("repo", rel) for _p, rel in iter_sources(base)]})
+            self._send(200, {"urls": [source_url("repo", rel) for _p, rel in iter_sources(base)],
+                             "sync": dict(_CODE_SYNC_STATE)})
             return
 
         if segments[0] == "profile":

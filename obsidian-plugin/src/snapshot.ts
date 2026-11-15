@@ -175,6 +175,8 @@ export function getSnapshot(cid: string): Snapshot | null {
 /** Run-time plants for the snapshot frame (the harness flips them). */
 export const snapshotConfig = { plantInertLooksLive: false };
 try { (window as any).__domvecSnapshotConfig = snapshotConfig; } catch { /* no window */ }
+/** Read-only, for the live checks: the snapshot held for a chunk id. */
+try { (window as any).__domvecSnapshotGet = (cid: string) => getSnapshot(cid); } catch { /* no window */ }
 
 export function renderSnapshot(host: HTMLElement, snap: Snapshot,
                                opts: {

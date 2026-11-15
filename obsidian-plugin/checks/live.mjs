@@ -10798,6 +10798,48 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-358",
+      asks: "a chunk's page form holds ALL of the chunk, across shadow roots (found 2026-11-14 tracing G-113: the fixture's streamed chunk spans several result cards, each its own shadow tree, and its snapshot held the FIRST card only -- 357 characters for 24 xpaths, exactly as for that card's 8): the snapshot of a streamed chunk whose addresses cross more than one shadow root, taken by the browser cell's own snapshotChunk on the live page, carries text from every card it addresses; planted (snapshotPlants.lightChain, the parentElement climb that stops at each shadow root) one card",
+      async run() {
+        const fixtures = await serveFixtures();
+        const page = fixtures.origin + "/shadow_catalogue.html";
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const PAGE = ${JSON.stringify(page)};
+          try {
+            b.plant.clear();
+            try { b.setLive(true); } catch (e) {}
+            if (!(await land(PAGE, 30000))) return { error: "the fixture never landed" };
+            let tree = null, cid = null, cards = 0;
+            for (let i = 0; i < 40 && !cid; i++) {
+              tree = b.forceTrees.get(PAGE) || b.forceTrees.get(PAGE + "/");
+              if (tree) {
+                for (let k = 1; k < 40 && !cid; k++) {
+                  const id = "f:" + PAGE + "#" + k, a = tree.addrsOf(id) || [];
+                  const n = new Set(a.map((x) => (x.match(/result-card(\\[\\d+\\])?/) || [""])[0]).filter(Boolean)).size;
+                  if (n >= 2) { cid = id; cards = n; }
+                }
+              }
+              if (!cid) await sleep(500);
+            }
+            if (!cid) return { error: "no streamed chunk spans two result cards" };
+            b.snapshotPlants.lightChain = ${planted};
+            await b.snapshotChunk(cid, PAGE, true);
+            const snap = window.__domvecSnapshotGet(cid);
+            const text = String((snap && snap.html) || "").replace(/<[^>]+>/g, " ").replace(/\\s+/g, " ");
+            const records = new Set(text.match(/Record \\d+/g) || []);
+            return { planted: ${planted}, cid, cards_addressed: cards, text_len: text.trim().length, records: records.size, sample: [...records].slice(0, 6) };
+          } finally { b.snapshotPlants.lightChain = false; }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.cards_addressed >= 2 && c.records === c.cards_addressed && !p.error && p.records === 1,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-357",
       asks: "search covers every code artifact (PLUGIN_GOAL 159: 'the completeness of results to be for all code artifacts in our db'): every module the codebase ingest selects (the sidecar's own iter_sources, GET /code/sources) has its chunks in the store after a sync, and a query scoped to the chat backend's module finds it (before the sync, 18 of 145 modules -- chat.py among them -- had none, because a module was indexed only when saved through the plugin); planted (sync with plant) nothing is indexed and whatever was missing stays missing. Run first on a store with a gap, the planted arm shows it; on an already-synced store it can only show 0 indexed",
       async run() {
@@ -10810,13 +10852,26 @@ export function makeChecks(env) {
           const sync = async (plant) => (await fetch(S + "/code/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plant }) })).json();
           const m0 = await missing();
           const planted = await sync(true), mP = await missing();
-          const clean = await sync(false), m1 = await missing();
+          // The clean pass in the background, polled: a first pass over the
+          // whole codebase took ~17 min behind live capture.
+          const asked = Date.now() / 1000 - 1;
+          let st = null;
+          for (let i = 0; i < 2400; i++) {
+            if (i === 0 || (st && !st.running && st.started < asked)) {
+              const r = await (await fetch(S + "/code/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ background: true }) })).json();
+              if (r.busy) { await new Promise((z) => setTimeout(z, 1000)); }
+            }
+            await new Promise((z) => setTimeout(z, 1000));
+            st = (await (await fetch(S + "/code/sources")).json()).sync;
+            if (st && !st.running && st.started >= asked && st.last) break;
+          }
+          const clean = (st && st.last) || {}, m1 = await missing();
           const hit = await (await fetch(S + "/search?" + new URLSearchParams({ q: "HermesBackend chat session GEN_LOCK", url: "code://repo/chat.py", k: "3" }))).json();
           return { sources: sources.length, missing_before: m0.length, missing_sample: m0.slice(0, 8),
                    planted: { indexed: planted.indexed, planted: planted.planted, missing_after: mP.length },
                    clean: { indexed: clean.indexed, unchanged: clean.unchanged, failed: clean.failed, gone: clean.gone, ms: clean.ms, busy: !!clean.busy, missing_after: m1.length, missing_left: m1.slice(0, 8) },
                    chat_hits: (hit && hit.n) || 0 };
-        })()`, { timeout: 900000 });
+        })()`, { timeout: 2500000 });
         const g = got || {};
         return {
           pass: !!g.sources && g.planted && g.planted.indexed === 0 && g.planted.missing_after === g.missing_before

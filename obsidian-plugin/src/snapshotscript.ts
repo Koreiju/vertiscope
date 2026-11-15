@@ -7,12 +7,27 @@
 /** The page-side reader. `xs` is the chunk's element xpaths. */
 /** Planted (host side, G-119): addresses through shadow roots and slots are
  *  not resolved by the sensor -- XPath alone, as before 2026-10-24. */
-export const SNAPSHOT_PLANTS = { xpathOnly: false };
+export const SNAPSHOT_PLANTS = { xpathOnly: false,
+  /** Planted: the root and path climb `parentElement`, which stops at every
+   *  shadow root -- a chunk spanning several shadow trees (the fixture's
+   *  result cards) was snapshotted as its FIRST card only, 357 characters for
+   *  24 xpaths exactly as for that card's 8 (2026-11-14). */
+  lightChain: false };
 export function snapshotScript(xpaths: string[],
                                addrs: Record<string, [string, number]> = {}): string {
   const viaSensor = !SNAPSHOT_PLANTS.xpathOnly;
+  const composed = !SNAPSHOT_PLANTS.lightChain;
   return `(function (xs, ad) {
   var MAX = 2500, count = 0;
+  // The COMPOSED parent -- the tree \`kids\` walks down: a slotted node's slot,
+  // else its element parent, else (a shadow root's top) the host.
+  function up(n) {
+    if (!${composed ? "true" : "false"}) return n.parentElement;
+    if (n.assignedSlot) return n.assignedSlot;
+    if (n.parentElement) return n.parentElement;
+    var r = n.parentNode;
+    return r && r.host ? r.host : null;
+  }
   var PROPS = ["display","position","box-sizing","color","background-color","background-image",
     "background-size","background-position","background-repeat","font-family","font-size","font-weight",
     "font-style","line-height","letter-spacing","text-transform","text-decoration-line","text-decoration-color",
@@ -84,8 +99,8 @@ export function snapshotScript(xpaths: string[],
   // each element found is widened to the block the browser lays its run out
   // in: up past every ancestor whose computed display is inline.
   function flow(n) {
-    while (n.parentElement && n.parentElement !== document.body
-           && /^inline/.test(getComputedStyle(n).display)) n = n.parentElement;
+    while (up(n) && up(n) !== document.body
+           && /^inline/.test(getComputedStyle(n).display)) n = up(n);
     return n;
   }
   var own = new Set(), path = new Set(), found = 0;
@@ -134,7 +149,7 @@ export function snapshotScript(xpaths: string[],
     return ctl ? "press" : "";
   }
   var list = Array.from(own);
-  function chain(n) { var a = []; while (n) { a.unshift(n); n = n.parentElement; } return a; }
+  function chain(n) { var a = []; while (n) { a.unshift(n); n = up(n); } return a; }
   var first = chain(list[0]), depth = first.length;
   for (i = 1; i < list.length; i++) {
     var a = chain(list[i]), k = 0;
@@ -143,7 +158,7 @@ export function snapshotScript(xpaths: string[],
   }
   var root = first[Math.max(0, depth - 1)];
   for (i = 0; i < list.length; i++) {
-    for (var p = list[i]; p && p !== root; p = p.parentElement) path.add(p);
+    for (var p = list[i]; p && p !== root; p = up(p)) path.add(p);
   }
   function kids(el) {
     if (el.shadowRoot) return Array.from(el.shadowRoot.childNodes);
@@ -246,7 +261,7 @@ export function snapshotScript(xpaths: string[],
   while (q && q.nodeType === 1) {
     var b = getComputedStyle(q).backgroundColor;
     if (b && b !== "rgba(0, 0, 0, 0)" && b !== "transparent") { bg = b; break; }
-    q = q.parentElement;
+    q = up(q);
   }
   if (!bg) bg = getComputedStyle(document.body).backgroundColor || "rgb(255, 255, 255)";
   if (bg === "rgba(0, 0, 0, 0)") bg = "rgb(255, 255, 255)";

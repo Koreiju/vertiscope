@@ -1476,7 +1476,7 @@ class PageProjector(ChunkProjector):
                       "scope": self.scope, "rows": int(model.stats.get("rows") or 0),
                       "global": ({k: model.stats.get(k) for k in
                                   ("update_rows", "trained_rows", "landmarks", "steps", "graphed",
-                                   "ms_select", "ms_graph", "ms_train", "ms_place")}
+                                   "ms_select", "ms_graph", "ms_train", "ms_place", "select_peak_mb")}
                                  if plan is not None else None),
                       "ms_train": round(ms_train, 1),
                       "ms_place": round((time.perf_counter() - t) * 1000, 1),
