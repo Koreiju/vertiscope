@@ -2672,6 +2672,10 @@ PLANT_NO_CODE_TREE = [False]
 PLANT_NO_DRAWN = [False]
 
 
+#: Planted (G-94 run 133): a chunk the stream has not placed is drawn at its raw transform.
+PLANT_PLACE_RAW = [False]
+
+
 def place_projected(workspace, cids, proj) -> Dict:
     """`place_into`, answered from the chunk projector.
 
@@ -2736,13 +2740,36 @@ def place_projected(workspace, cids, proj) -> Dict:
     timing["transformed_here"] = len(fresh)
     _t = _time.perf_counter()
     if fresh:
-        where, colour = projection.place(
-            np.asarray([rows[i] for i in fresh], dtype=np.float32))
-        if where is not None:
-            for j, i in enumerate(fresh):
-                known[meta[i].cid] = [float(v) for v in where[j][:3]]
-                if colour is not None:
-                    known_hsv[meta[i].cid] = [float(v) for v in colour[j]]
+        # **In its page's neighbourhood, as the stream will draw it.** The
+        # raw transform lands nearest its OWN page 19-23% of the time
+        # (`_place_chunks`), so a re-capture's fresh chunks were drawn across
+        # the map until the stream re-placed them: G-94 run 133, Radix_tree
+        # open, 29 of 40 chunks nearer another page, cloud spread 91.9, the
+        # farthest 26.6 page-distances off. The page projector's own rule
+        # places them; the chunk projector (no pages) keeps the transform.
+        # Planted `PLANT_PLACE_RAW`.
+        placer = getattr(proj, "_place_chunks", None)
+        if placer is not None and not PLANT_PLACE_RAW[0]:
+            vec = {meta[i].cid: np.asarray(rows[i], dtype=np.float32) for i in fresh}
+            with proj.lock:
+                url_of = dict(getattr(proj, "url_of", {}) or {})
+            url_of.update({meta[i].cid: meta[i].url for i in fresh})
+            got_pos, got_hsv = placer(projection, vec, page_pos=page_at, url_of=url_of)
+            for i in fresh:
+                c = meta[i].cid
+                if c in got_pos:
+                    known[c] = [float(v) for v in got_pos[c][:3]]
+                if c in got_hsv:
+                    known_hsv[c] = [float(v) for v in got_hsv[c]]
+            timing["placed_in_page"] = sum(1 for i in fresh if meta[i].cid in got_pos)
+        else:
+            where, colour = projection.place(
+                np.asarray([rows[i] for i in fresh], dtype=np.float32))
+            if where is not None:
+                for j, i in enumerate(fresh):
+                    known[meta[i].cid] = [float(v) for v in where[j][:3]]
+                    if colour is not None:
+                        known_hsv[meta[i].cid] = [float(v) for v in colour[j]]
         proj.enqueue(meta[i].cid for i in fresh)
     timing["ms_transform"] = round((_time.perf_counter() - _t) * 1000, 1)
 
