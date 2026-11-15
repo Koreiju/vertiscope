@@ -67,6 +67,57 @@ def _shared_capture_planted() -> bool:
     no lock -- for the arm that shows the collision."""
     return os.environ.get("DOMVEC_PLANT_SHARED_CAPTURE") == "1"
 
+#: Rows of the active set per block when choosing landmarks: the distance
+#: block is `NEAR_BLOCK x held` floats, ~350 MB at 85k held rows.
+NEAR_BLOCK = int(os.environ.get("DOMVEC_NEAR_BLOCK") or 1024)
+
+
+def _near_held(Xa, Xh, k: int, cap: int):
+    """The held rows nearest the active ones, as `update_subset` picks its
+    landmarks: the union of every active row's `k` nearest held rows, cut to
+    the `cap` whose nearest active row is closest. In blocks of active rows.
+
+    It was ONE `cdist(Xa, Xh)` (PLUGIN_GOAL 159, chat latency, 2026-11-14):
+    active x held floats, and against the whole store's ~85k held rows a
+    page update allocated 5.1 GB on an 8 GB card that also holds the chat
+    model (5.4 GB). Torch's cache kept 9 GB reserved after it, the model's
+    buffers were paged to system memory, and chat fell from 41.8 to 0.52
+    tokens/s. Blocked, the answer is the same -- each row's top-k depends on
+    its own row only, and the column minimum is a running minimum -- and the
+    peak is `NEAR_BLOCK x held`. Planted `DOMVEC_PLANT_WHOLE_CDIST=1`: one block."""
+    import torch
+    m = Xa.shape[0]
+    block = m if os.environ.get("DOMVEC_PLANT_WHOLE_CDIST") == "1" else max(1, NEAR_BLOCK)
+    js, dmin = [], None
+    for lo in range(0, m, block):
+        D = torch.cdist(Xa[lo:lo + block], Xh)
+        js.append(torch.topk(D, k, dim=1, largest=False).indices)
+        col = D.min(dim=0).values
+        dmin = col if dmin is None else torch.minimum(dmin, col)
+        del D
+    near = torch.unique(torch.cat(js).reshape(-1))
+    if len(near) > cap:
+        near = near[torch.argsort(dmin[near])[:cap]]
+    return near
+
+
+def _give_back_cache() -> None:
+    """Torch's CACHED blocks back to the driver once a fit or update is done.
+    The caching allocator keeps every block it has used, and the chat model
+    shares the card: 9,040 MB reserved with 379 MB allocated was measured in
+    the slow state. Under GPU_LOCK, so it never lands inside another thread's
+    capture. Planted `DOMVEC_PLANT_KEEP_TORCH_CACHE=1`: kept, as before."""
+    if os.environ.get("DOMVEC_PLANT_KEEP_TORCH_CACHE") == "1":
+        return
+    try:
+        import torch
+        if torch.cuda.is_available():
+            with GPU_LOCK:
+                torch.cuda.empty_cache()
+    except Exception:                                # noqa: BLE001
+        pass
+
+
 class ParametricUMAP:
     """A small MLP trained on UMAP's objective; `transform` is its forward pass."""
 
@@ -275,6 +326,7 @@ class ParametricUMAP:
         self.embedding_ = self.transform(X)
         self.stats = {"rows": len(X), "fit_s": round(secs, 3), "device": str(_device()),
                       "graph_s": self.stats.get("graph_s")}
+        _give_back_cache()
         return self
 
     def fit_transform(self, X: np.ndarray) -> np.ndarray:
@@ -301,6 +353,7 @@ class ParametricUMAP:
                            "update_rows": len(X_new),
                            "old_drift_p50": float(np.median(drift)) if len(drift) else 0.0,
                            "old_drift_p90": float(np.percentile(drift, 90)) if len(drift) else 0.0})
+        _give_back_cache()
         return self.embedding_[len(before):]
 
     def update_subset(self, X_rows: np.ndarray, idx, *, remove=None,
@@ -376,16 +429,17 @@ class ParametricUMAP:
         m = len(active)
         Xa = torch.as_tensor(self._raw[active], dtype=torch.float32, device=dev)
         picked = np.zeros(0, dtype=np.int64)
+        select_peak_mb = None
         if len(held):
+            if dev.type == "cuda":
+                torch.cuda.reset_peak_memory_stats()
             Xh = torch.as_tensor(self._raw[held], dtype=torch.float32, device=dev)
-            D = torch.cdist(Xa, Xh)
             kk = int(min(knn, len(held)))
-            _d, j = torch.topk(D, kk, dim=1, largest=False)
-            near = torch.unique(j.reshape(-1))
             cap_near = int(max(0, max_landmarks - random_landmarks))
-            if len(near) > cap_near:
-                dmin = D.min(dim=0).values[near]
-                near = near[torch.argsort(dmin)[:cap_near]]
+            near = _near_held(Xa, Xh, kk, cap_near)
+            del Xh
+            if dev.type == "cuda":
+                select_peak_mb = round(torch.cuda.max_memory_allocated() / 1048576)
             near = near.cpu().numpy()
             rest = np.setdiff1d(np.arange(len(held)), near)
             g = np.random.default_rng(self.seed + n0)
@@ -512,9 +566,11 @@ class ParametricUMAP:
             "steps": int(steps), "graphed": graphed, "ms_select": round(ms_select, 1), "ms_graph": round(ms_graph, 1),
             "ms_train": round(ms_train, 1),
             "ms_place": round((time.perf_counter() - t) * 1000, 1),
+            "select_peak_mb": select_peak_mb,
             "held_drift_p50": float(np.median(drift)) if drift is not None and len(drift) else None,
             "held_drift_p90": float(np.percentile(drift, 90)) if drift is not None and len(drift) else None,
             "held_drift_max": float(drift.max()) if drift is not None and len(drift) else None})
+        _give_back_cache()
         return self.embedding_[idx]
 
     # -- persistence ---------------------------------------------------------
