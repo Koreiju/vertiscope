@@ -379,6 +379,7 @@ Done and confirmed live (each check carries a planted arm that fails):
 | The top-result flight follows the top the strip ENDS with (the tiered search streams; it flew to the first page's top) | G-361, live: 4 provisional tops, re-flown 3x, only the final panel open; planted: the stale one open | 2026-11-15 |
 | G-157 green again: three stale readings in the check, not the app -- `!glass` counted the ego's hidden notes (results are glass since G-209), brightness read from `glow` (glass carries it in alpha), the count text predates G-211 | G-157, live: 1 drawn as itself = the shown 1; glow 0.2 -> 1 | 2026-11-15 |
 | G-167 / G-178 plants were vacuous: the tiered path bypassed `searchAsk`; the hooks moved to the field's `onAsked`/`onAnswered` on both paths | G-167, G-178 live | 2026-11-15 |
+| Picture sizes: an upper limit and a midpoint (161). Every glowing picture had drawn in the hover's range, at 2x its limit (128-280 px); now hovered 72-144, lit 28-56, the rest at most 28, in on-screen width | G-362, live: 72 / 28 / <=14; planted: neighbours at 144. Seen in a screenshot | 2026-11-15 |
 
 Measured, not fixed:
 - **G-113 fails** (passed 2026-10-07): hovering a chunk on the fixture
