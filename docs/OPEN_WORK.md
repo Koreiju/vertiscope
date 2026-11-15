@@ -528,6 +528,34 @@ Open (not started this session):
     - a drawn stand-in should not block /place;
     - a /place reply should survive later polls while the pointer stays on
       the same chunk (each poll bumps hoverSeq and drops it).
+  - Chat cells (700fa99, G-366 live, run 65). Each turn is a prompt note
+    and a reply note in domvec/graph, chained prompt -> reply -> next prompt
+    by wikilinks. The craft now draws wikilinks between ego notes as `link`
+    edges. Each prompt cell records what it was sent: turn 1 sent 2 cells
+    new to the chat; turn 2 sent 0, with 2 already in it. The prompts note
+    is the index. My reading: a cell is an ego note, a hard link a wikilink.
+    **Context control, open (a question for the reader):** an edited
+    `after [[...]]` link does not yet change what history the model sees.
+    The model keeps its own chat session.
+    Making the chain authoritative means re-sending the chain as history on
+    every turn (stateless), which costs context on an 8k-token model.
+  - Scan speed (887b69e). A re-scanned Suffix_tree took 31 s page-to-3D:
+    the sidecar 29.9 s, reconcile 14.0 s, with 984 stale anchors deleted
+    one statement each. An all-stale chunk is now one batched wipe, checked
+    after: 400 anchors in 16.5 ms against 3,841 ms. Not yet re-measured
+    live, because an all-stale re-scan did not reproduce on demand.
+    Next phases by size:
+    - anchor write: 4.0 s for 1,316 anchors (~3 ms a row on the live store,
+      against 0.5 on MDN when it was tuned);
+    - markdown render: 3.8 s;
+    - /place: 1.7 s;
+    - prequery: 1.7 s.
+  - Retrieval: G-210's first tier-1 answer took 12.8 s, and 22.8 s on a
+    freshly restarted worker (cold).
+  - World panels as the authority for 2D views (e00f495, G-367 live). A
+    click on an ego web node opens the world's own panel at the ego node,
+    inside the pane: 14 px from it, against 276 px and clipped, as measured
+    before.
   - Store question, not acted on: one document under four url leaves
     (Trie#~v and the malformed Trie##~v). Whether those addresses should exist
     at all is a capture/dedup question for the trie.
