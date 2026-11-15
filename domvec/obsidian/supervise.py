@@ -152,6 +152,64 @@ def _healthy(port: int) -> bool:
         return False
 
 
+class _Tree:
+    """The child AND its descendants, read as one process.
+
+    A venv's `python.exe` on Windows is a launcher: it starts the real
+    interpreter as ITS child and waits, at 11.7 MB and 0.02 s of CPU for good.
+    Watching only the launcher, every rule here read a busy worker as hung: on a
+    fresh venv's first start the real worker stood at 525 MB and 21 s of CPU
+    when the early-stall rule killed it, three times, and the supervisor gave
+    up (2026-11-15, the README proof's process samples). The CPU and size that
+    count are the tree's. Planted `DOMVEC_PLANT_WATCH_LAUNCHER=1`: the launcher
+    alone, as before.
+    """
+
+    def __init__(self, ps):
+        self.ps = ps
+
+    def _all(self):
+        if os.environ.get("DOMVEC_PLANT_WATCH_LAUNCHER") == "1":
+            return [self.ps]
+        try:
+            return [self.ps] + self.ps.children(recursive=True)
+        except Exception:                           # noqa: BLE001
+            return [self.ps]
+
+    def cpu_times(self):
+        user = system = 0.0
+        for p in self._all():
+            try:
+                t = p.cpu_times(); user += t.user; system += t.system
+            except Exception:                       # noqa: BLE001
+                continue
+        return type("T", (), {"user": user, "system": system})()
+
+    def memory_info(self):
+        rss = 0
+        for p in self._all():
+            try:
+                rss += p.memory_info().rss
+            except Exception:                       # noqa: BLE001
+                continue
+        return type("M", (), {"rss": rss})()
+
+
+def _kill(proc, ps) -> None:
+    """The child's whole tree, children first: killing a venv launcher alone
+    left the real interpreter running, holding the port and the store."""
+    if ps is not None and os.environ.get("DOMVEC_PLANT_WATCH_LAUNCHER") != "1":
+        try:
+            for c in ps.ps.children(recursive=True):
+                try:
+                    c.kill()
+                except Exception:                   # noqa: BLE001
+                    pass
+        except Exception:                           # noqa: BLE001
+            pass
+    proc.kill()
+
+
 def _run_child(command: List[str], env: dict, port: Optional[int], *,
                capture: bool = False, timeout: Optional[float] = None,
                fatal_log: Optional[Path] = None):
@@ -182,7 +240,7 @@ def _run_child(command: List[str], env: dict, port: Optional[int], *,
     early_done = planted
     try:
         import psutil
-        ps = psutil.Process(proc.pid)
+        ps = _Tree(psutil.Process(proc.pid))
     except Exception:                               # noqa: BLE001
         ps = None
     last_cpu, last_move = None, time.time()
@@ -200,7 +258,7 @@ def _run_child(command: List[str], env: dict, port: Optional[int], *,
         except subprocess.TimeoutExpired:
             pass
         if timeout and time.time() - started > timeout:
-            proc.kill(); proc.wait()
+            _kill(proc, ps); proc.wait()
             return done(STUCK_CODE)
         if not early_done and time.time() - started > EARLY_S:
             early_done = True
@@ -209,7 +267,7 @@ def _run_child(command: List[str], env: dict, port: Optional[int], *,
                 rss = ps.memory_info().rss / 1e6 if ps is not None else 0.0
                 small = rss < EARLY_RSS_MB or os.environ.get("DOMVEC_PLANT_EARLY_CPU_ONLY") == "1"
                 if t is not None and (t.user + t.system) < EARLY_CPU_S and small:
-                    proc.kill(); proc.wait()
+                    _kill(proc, ps); proc.wait()
                     return done(STUCK_CODE)
             except Exception:                       # noqa: BLE001
                 pass
@@ -226,7 +284,7 @@ def _run_child(command: List[str], env: dict, port: Optional[int], *,
                 dead_cpu = (cpu if cpu is not None else 0.0, time.time())
             WORKER["fatal_at"] = seen
             if time.time() - seen > FATAL_GRACE_S and time.time() - dead_cpu[1] > FATAL_GRACE_S and not _healthy(port):
-                proc.kill()
+                _kill(proc, ps)
                 try:
                     proc.wait(timeout=KILL_WAIT_S)
                 except subprocess.TimeoutExpired:
@@ -245,7 +303,7 @@ def _run_child(command: List[str], env: dict, port: Optional[int], *,
             last_cpu, last_move = cpu, time.time()
         now = time.time()
         if now - started > START_DEADLINE_S and now - last_move > START_STALL_S:
-            proc.kill()
+            _kill(proc, ps)
             proc.wait()
             return done(STUCK_CODE)
 

@@ -160,6 +160,34 @@ def test_planted_cpu_only_kills_the_large_waiting_child(tmp_path, monkeypatch):
     assert code == sv.STUCK_CODE and time.time() - t0 < 7.0
 
 
+# A venv launcher: the process the supervisor starts sits idle while ITS child
+# (the real interpreter) works -- here, 5 s of CPU, then both exit 0.
+LAUNCHER = [sys.executable, "-c", "import subprocess, sys; sys.exit(subprocess.run([sys.executable, '-c', "
+            "'import time; t = time.time(); [sum(range(10000)) for _ in iter(lambda: time.time() - t < 5, False)]']).returncode)"]
+
+
+def test_a_launchers_busy_child_is_not_an_early_stall(tmp_path, monkeypatch):
+    """2026-11-15, the README proof: the supervisor watched the venv's launcher
+    (11.7 MB, 0.02 s CPU) while the real worker stood at 525 MB and 21 s of
+    CPU, and killed it as an early stall. The tree is what counts."""
+    import domvec.obsidian.supervise as sv
+    monkeypatch.setattr(sv, "EARLY_S", 2.0)
+    monkeypatch.setattr(sv, "START_DEADLINE_S", 600.0)
+    code = sv._run_child(LAUNCHER, None, 1, timeout=30.0)
+    assert (code[0] if isinstance(code, tuple) else code) == 0
+
+
+def test_planted_watching_the_launcher_kills_the_busy_child(tmp_path, monkeypatch):
+    import domvec.obsidian.supervise as sv
+    monkeypatch.setattr(sv, "EARLY_S", 2.0)
+    monkeypatch.setattr(sv, "START_DEADLINE_S", 600.0)
+    monkeypatch.setenv("DOMVEC_PLANT_WATCH_LAUNCHER", "1")
+    monkeypatch.setattr(sv, "EARLY_RSS_MB", 10_000.0)      # the size rule is not this test's
+    t0 = time.time()
+    code = sv._run_child(LAUNCHER, None, 1, timeout=30.0)
+    assert (code[0] if isinstance(code, tuple) else code) == sv.STUCK_CODE and time.time() - t0 < 5
+
+
 def test_a_stalled_compaction_child_is_skipped_not_waited(tmp_path, monkeypatch):
     import domvec.obsidian.supervise as sv
     monkeypatch.setattr(sv, "EARLY_S", 2.0)
