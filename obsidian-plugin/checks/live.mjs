@@ -3051,7 +3051,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-113",
-      asks: "hovering a chunk on the page flies the 3D camera to THAT chunk's node and opens its panel at once with content, the outline fits inside the page, and the panel closes when the hover ends -- a planted no-focus arm does none of it",
+      asks: "hovering a chunk on the page flies the 3D camera to THAT chunk on THIS page (its stored copy or its streamed chunk -- never a dedup lead on another page, PLUGIN_GOAL 162) and opens its panel at once with content, the outline fits inside the page, and the panel closes when the hover ends -- a planted no-focus arm does none of it",
       async run() {
         // 2026-10-06: "hovering overlays should zoom-focus the camera in the
         // 3D editor on the specific chunk ... when this flying happens, this
@@ -3125,14 +3125,31 @@ export function makeChecks(env) {
             out.handed = { stored: handed, lead, placed: !!(v.hoverPlaced && v.hoverPlaced.has(handed)), drawn: v.graph.graphData().nodes.some((n) => n.id === lead) };
             out.flown = v.focusStats.flown - f0.flown;
             out.flew_to = v.focusStats.last;
+            // WHERE it flew (PLUGIN_GOAL 162: "Fly to the copy on the page you
+            // are reading; the lead elsewhere is only a dedup detail"): the
+            // flight's node and its page, or a streamed chunk of this page.
+            const docOf = (u) => String(u || "").split("#")[0];
+            const fnode = v.graph.graphData().nodes.find((n) => String(n.id).slice(0, 60) === out.flew_to);
+            out.flew_url = fnode ? (fnode.url || null) : null;
+            out.flew_streamed = String(out.flew_to || "").startsWith("f:");
+            // A streamed key names its page: "f:<url>#n".
+            out.flew_this_page = out.flown >= 1 && (out.flew_streamed
+              ? String(out.flew_to).slice(2).startsWith(docOf(PAGE)) : docOf(out.flew_url) === docOf(PAGE));
+            out.foreign_leads = (v.hoverStats && v.hoverStats.foreign_lead) || 0;
             // Why the stored chunk was or was not reached (2026-11-14: the
             // flight went to a streaming /html/body stand-in): was it placed,
             // is it drawn now, does the reader's collapse hold the page.
             out.why = { asked_place: v.hoverPlaced && v.hoverPlaced.has(pick.stored), drawn: v.graph.graphData().nodes.some((n) => n.id === pick.stored),
                         collapsed: typeof v.readerCollapsed === "function" ? v.readerCollapsed(PAGE) : null, alias: v.hoverAliases && v.hoverAliases.get(pick.stored) || null,
                         focus: { ...v.focusStats } };
+            // The panel is the FLOWN-TO node's (run 80: the flight went to the
+            // page's streamed copy, keyed "f:<url>#2|<xpath>", while the lookup
+            // asked for the lead on another page and found nothing).
             const hk = out.handed.lead;
-            const e = v.billboards.get(hk) || [...v.billboards.entries()].find(([k]) => String(k).split("|")[0] === hk)?.[1];
+            const baseOf = (k) => String(k).split("|")[0];
+            const hits = (k) => { const bk = baseOf(k); return bk === hk || (!!out.flew_to && (bk === out.flew_to || bk.slice(0, 60) === out.flew_to)); };
+            const e = v.billboards.get(hk) || [...v.billboards.entries()].find(([k]) => hits(k))?.[1];
+            out.panel_key = (() => { const f = [...v.billboards.keys()].find((k) => k === hk || hits(k)); return f ? String(f).slice(0, 120) : null; })();
             // Text where the reader sees it: the body, its shadow roots, and the
             // page form's frame (innerText does not reach into an iframe).
             const textOf = (el) => {
@@ -3164,7 +3181,10 @@ export function makeChecks(env) {
         })()`, { timeout: 180000 });
         const clean = await arm(false);
         const planted = await arm(true, clean && clean.pick ? clean.pick : null);
-        const works = (x) => !x.error && x.flown >= 1 && !!x.handed && !!x.handed.lead && x.flew_to === x.handed.lead.slice(0, 60) && !!x.panel
+        // The bar is THIS page's chunk (PLUGIN_GOAL 162), not the dedup lead:
+        // the lead of this fixture's chunk is a copy on an earlier run's page
+        // (a new port each run), which the flight must not leave the page for.
+        const works = (x) => !x.error && x.flown >= 1 && !!x.handed && x.flew_this_page && !!x.panel
           && x.panel.from_hover && x.panel.text > 0 && (x.panel.first_paint_ms ?? 1e9) <= 500
           && x.outline_frac !== null && x.outline_frac < 1;
         // Closing on leave was REPLACED by G-125 (2026-10-10: "showing hovered panels ...
@@ -3173,7 +3193,7 @@ export function makeChecks(env) {
         return {
           pass: works(clean) && !planted.error && planted.flown === 0 && !planted.panel,
           evidence: { clean, planted,
-                      bar: "clean: the camera flew to the hovered chunk's stored node, its panel opened from the hover with text within 500 ms, the outline is smaller than the viewport (the panel then PERSISTS after leave, per G-125, which replaced close-on-leave); planted (plantNoFocus): no flight, no panel" },
+                      bar: "clean: the camera flew to this page's chunk -- its stored copy or its streamed chunk, never a lead on another page (PLUGIN_GOAL 162) -- its panel opened from the hover with text within 500 ms, the outline is smaller than the viewport (the panel then PERSISTS after leave, per G-125, which replaced close-on-leave); planted (plantNoFocus): no flight, no panel" },
         };
       },
     },
@@ -6387,19 +6407,34 @@ export function makeChecks(env) {
           const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
           const box = b.pipebox;
           if (!box) return { error: "no pipeline box" };
+          let plantedBanner = null;
           try {
             if (!(await land(${JSON.stringify(PAGE)}, 30000))) return { error: "did not land" };
             await sleep(4000);
             box.plantPageUnit = ${planted};
             const wv = b.webview, r = wv.getBoundingClientRect(), wrap = wv.parentElement;
             const outlineEl = wrap.querySelector(".domvec-chunk-outline");
-            const text = () => (wrap.innerText || "").replace(/\\s+/g, " ").trim().length;
+            // The cell's text OUTSIDE the corner pipeline box: that box is the
+            // instrument panel and ticks on its own ("1.8 s · 0 in the force
+            // tree" -> "3.7 ms · 8 ...", run 81) whether or not anything is
+            // hovered, so it answers a different question.
+            const textOf = () => [...wrap.children].filter((c) => !c.classList.contains("domvec-pipebox"))
+              .map((c) => c.innerText || "").join(" ").replace(/\\s+/g, " ").trim();
+            const text = () => textOf().length;
+            // What changed, when the cell's text did: a banner is a
+            // sentence; a counter ticking is a digit. Recorded, not guessed.
+            const delta = (x, y) => { let i = 0; while (i < x.length && i < y.length && x[i] === y[i]) i++;
+              let j = 0; while (j < x.length - i && j < y.length - i && x[x.length - 1 - j] === y[y.length - 1 - j]) j++;
+              return { was: x.slice(Math.max(0, i - 20), x.length - j + 20), now: y.slice(Math.max(0, i - 20), y.length - j + 20) }; };
+            const added = [];
             const out = [];
             for (let i = 0; i < 16; i++) {
               const x = Math.round(60 + (i * 97) % Math.max(100, r.width - 120));
               const y = Math.round(90 + (i * 131) % Math.max(100, r.height - 160));
               const prev = b.lastHovered ? b.lastHovered.cid : "";
-              const before = text();
+              const beforeText = textOf(), before = beforeText.length;
+              // Non-vacuity for the banner measure: the planted arm adds one.
+              if (${planted} && i === 2 && !plantedBanner) { plantedBanner = wrap.createDiv({ cls: "domvec-check-planted-banner", text: "planted banner: hovered chunk" }); }
               wv.sendInputEvent({ type: "mouseMove", x, y });
               const t0 = performance.now();
               while (performance.now() - t0 < 1500 && !(b.lastHovered && b.lastHovered.cid && b.lastHovered.cid !== prev)) await sleep(10);
@@ -6411,7 +6446,7 @@ export function makeChecks(env) {
               out.push({
                 outline: !!outlineEl && outlineEl.offsetWidth > 0 && outlineEl.offsetHeight > 0,
                 outline_text: outlineEl ? (outlineEl.textContent || "").trim().length : -1,
-                cell_text_added: Math.max(0, text() - before),
+                cell_text_added: (() => { const now = textOf(); if (now.length > before && added.length < 4) added.push(delta(beforeText, now)); return Math.max(0, now.length - before); })(),
                 rings: ringed.length,
                 // The chunk, or the lead that draws it when it is a copy.
                 ring_is_chunk: !!ring && ring.level !== "page" && (ring.id === h.stored || ring.id === h.cid
@@ -6423,6 +6458,9 @@ export function makeChecks(env) {
                 lead_folded: !!(v.hoverAliases && v.hoverAliases.has(h.stored))
                   && !v.graph.graphData().nodes.some((n) => n.id === v.hoverAliases.get(h.stored)),
                 ring_is_page_of_hover: !!ring && ring.level === "page" && ring.url === h.url,
+                // PLUGIN_GOAL 162: a lead on ANOTHER page is a dedup detail; the
+                // hover rings this page's own copy when it is drawn.
+                ring_is_own_copy: !!ring && ring.level !== "page" && (ring.id === h.stored || ring.id === h.cid),
                 ring_level: ring ? (ring.level || "chunk") : null,
               });
               await sleep(300);
@@ -6436,11 +6474,14 @@ export function makeChecks(env) {
                      one_ring: share((o) => o.rings === 1),
                      ring_is_chunk: (() => { const d = out.filter((o) => !o.lead_folded); return d.length ? Math.round(d.filter((o) => o.ring_is_chunk).length / d.length * 100) / 100 : 0; })(),
                      lead_folded: out.filter((o) => o.lead_folded).length,
-                     lead_folded_ring_page: out.filter((o) => o.lead_folded && o.ring_is_page_of_hover).length,
+                     lead_folded_ring_page: out.filter((o) => o.lead_folded && (o.ring_is_page_of_hover || o.ring_is_own_copy)).length,
+                     lead_folded_own_copy: out.filter((o) => o.lead_folded && o.ring_is_own_copy).length,
+                     text_added: added,
                      via_alias: out.filter((o) => o.via_alias).length,
                      sample: out.slice(0, 4) };
           } finally {
             box.plantPageUnit = false;
+            if (plantedBanner) plantedBanner.remove();
           }
         })()`, { timeout: 120000 });
         const clean = await arm(false);
@@ -6448,7 +6489,7 @@ export function makeChecks(env) {
         const ok = (x) => !!x && !x.error && x.hovers >= 6 && x.outlined_without_text >= 0.8
           && x.banner_moves === 0 && x.one_ring >= 0.8 && x.ring_is_chunk >= 0.9
           && x.lead_folded_ring_page === x.lead_folded;
-        return { pass: ok(clean) && !!planted && !planted.error && planted.ring_is_chunk < 0.2,
+        return { pass: ok(clean) && !!planted && !planted.error && planted.ring_is_chunk < 0.2 && planted.banner_moves >= 1,
                  evidence: { clean, planted } };
       },
     },

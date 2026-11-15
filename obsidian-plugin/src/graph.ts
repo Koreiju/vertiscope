@@ -3070,6 +3070,8 @@ export class GraphView extends ItemView {
   private hoverPlacedFor = "";
   /** Planted (G-38): a hovered copy looked up by its own id, as before. */
   plantHoverIgnoresAlias = false;
+  /** Planted (G-113, PLUGIN_GOAL 162): a lead on another page is followed. */
+  plantFlyToForeignLead = false;
   highlightChunk(cid: string, url = "", stored = ""): void {
     if (!this.graph) return;
     // The hovered url spreads; off every chunk, it goes back (G-230).
@@ -3101,7 +3103,18 @@ export class GraphView extends ItemView {
         // id it was never found and the ring fell back to the page node
         // (2026-10-30, G-38: 10 of 11 hovers on Trie rang the page). Ring the
         // lead. Planted `plantHoverIgnoresAlias`: the copy's own id, as before.
-        const lead = !this.plantHoverIgnoresAlias && got.aliases && got.aliases[stored];
+        let lead = !this.plantHoverIgnoresAlias && got.aliases && got.aliases[stored];
+        // A lead on ANOTHER page is not followed (PLUGIN_GOAL 162: "Fly to the
+        // copy on the page you are reading; the lead elsewhere is only a dedup
+        // detail"): the hover stays on this page's chunk -- its stored node
+        // if drawn, else the page's streamed chunk. A lead on the same page
+        // (a merge group's lead) is this page's chunk and is still rung.
+        // Planted `plantFlyToForeignLead`: any lead, wherever it is drawn.
+        if (lead && lead !== stored && !this.plantFlyToForeignLead) {
+          const ln = (got.nodes || []).find((n: any) => n.id === lead);
+          const docOf = (u: string) => String(u || "").split("#")[0];
+          if (ln && ln.url && docOf(ln.url) !== urlKey) { this.hoverStats.foreign_lead = (this.hoverStats.foreign_lead || 0) + 1; lead = ""; }
+        }
         if (lead && lead !== stored) {
           if (this.hoverAliases.size > 4000) this.hoverAliases.clear();
           this.hoverAliases.set(stored, lead);
@@ -3227,7 +3240,7 @@ export class GraphView extends ItemView {
   hoverPanelCap = 1;
   /** Planted: the old close-on-hover-end behaviour. */
   plantCloseOnLeave = false;
-  hoverStats: { empty_skipped: number; units?: number; stale_stored?: number; moved_on?: number } = { empty_skipped: 0 };
+  hoverStats: { empty_skipped: number; units?: number; stale_stored?: number; moved_on?: number; foreign_lead?: number } = { empty_skipped: 0 };
   private hoverSweep = 0;
 
   private expireHoverPanels(): void {
