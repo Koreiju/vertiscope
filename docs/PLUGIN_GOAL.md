@@ -5761,3 +5761,17 @@ choice verbatim, the question text is mine.
 - *G-291 store purge: may I purge the stored pages that G-291's open work
   identified (it deletes them from the store; the compacted backup stays)?*
   -- **"Yes, purge"**: "Go ahead with the G-291 purge."
+
+### 163. (2026-11-15) Retrieval: why it fails; the search's own computation graph on the 2D plane; tools for the session
+
+> Still facing retrieval issues. not sure if this would be better off with embedding matching if we're doing triple retrieval? Perhaps some reasoning why this might occur by comparing frequency and quantized encoder embeddings and similarity rankings that way? one other thing I think would be nice to do is to bring in the computation graph of our "search" bar feature as included in the set of cells and nodes in our 2D viewer with node/panels. The idea would be to have each independent component of the existing retrieval framework to be designed with the intent of simplicity, minimalism, and interconnectedness of abstract-most independent components. The ultimate aim would be for our current retrieval approach, along with the returned results having their own similarity based soft links per some discussion on the mouse-based navigation before, which requires careful design work and planning on the side of overall architecture of our full design. to this end, perhaps consider searching the web for useful plugins and skills we can give you here in this session that will allow you to have all the necessary things you need to really start building with the full precision of the design vision in mind. We have some inital suggestions you might be able to follow up with and expand on/refine and specialize additional searches for the precision of the design vision:
+
+*With a screenshot of the retrieval cell: query "unionRect xpa...", rank 1
+"No more results found for un...", then "domvec: slate", "the attributes map
+so xpath ...", "click"; "50 retrieved of 1680 matching". The reader also
+pasted a review written by another tool (a fit matrix of skills and plugins:
+a root DESIGN.md for the two visual registers, frontend/design skills, a
+PreToolUse guard hook, unpacked Chromium extensions through ublockshim.ts, the
+craft.ts drag-vs-shift interaction, the UNIQUENESS_AND_VERSIONS keep/fade
+decision). That review is material to follow up, not the reader's words; it
+is not transcribed here as requirement.*
