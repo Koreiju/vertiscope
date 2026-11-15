@@ -1405,6 +1405,42 @@ def _project_dedup(workspace) -> int:
 
 _LEXICAL_SAVED_AT = [0.0]
 
+#: The lexical version last seen by `_warm_lexical`, and when it was first
+#: seen at that version.
+_LEX_WARM = {"version": None, "since": 0.0, "warmed": 0}
+#: Planted (2026-11-15): tf-idf rebuilt by the first SEARCH after a write, as
+#: before -- tier 1's lexical phase read 0.78-0.94 s after a capture, 20 ms
+#: at rest.
+PLANT_NO_LEXICAL_WARM = [False]
+
+
+def _warm_lexical(workspace, quiet_s: float = 0.75) -> bool:
+    """Rebuild the tf-idf weights in the background once the matrix has
+    stopped changing, so the next search finds them built. Takes only the
+    matrix's own lock -- what the search would have taken to build them
+    itself -- never `_WORK_LOCK`. Never raises; True when it warmed."""
+    if PLANT_NO_LEXICAL_WARM[0]:
+        return False
+    try:
+        freq = getattr(workspace, "freq", None)
+        if freq is None:
+            return False
+        version = getattr(freq, "version", 0)
+        now = time.monotonic()
+        if version != _LEX_WARM["version"]:
+            _LEX_WARM.update(version=version, since=now)
+            return False
+        if getattr(freq, "_tfidf", None) is not None or now - _LEX_WARM["since"] < quiet_s:
+            return False
+        started = time.perf_counter()
+        freq.tfidf()
+        _LEX_WARM["warmed"] += 1
+        _profile("lexical_warm", {"ms": round((time.perf_counter() - started) * 1000, 1),
+                                  "version": version})
+        return True
+    except Exception:                               # noqa: BLE001
+        return False
+
 
 def _save_lexical_due(workspace, every: float = 30.0) -> None:
     """Persist the frequency matrix at most every `every` seconds, if it
@@ -1515,6 +1551,7 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
             # And the lexical rows go to disk once things are quiet, so a
             # hard kill costs seconds of them, not the whole session's.
             _save_lexical_due(workspace)
+            _warm_lexical(workspace)
             continue
         _EMBED_WANTED.clear()
         while not stop.is_set():
