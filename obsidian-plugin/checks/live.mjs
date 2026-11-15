@@ -10511,6 +10511,46 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-349",
+      asks: "a code:// link opens the module in the app, never the OS (PLUGIN_GOAL 159 screenshot: a notebook's 'module repl.model' link raised Windows' 'Open external link?' for code://repo/repl/model.py#L1): window.open of a code:// address and a click on an <a href=code://...> each open the code panel for THAT address and return nothing to the OS; planted (__domvecPlantCodeLinksOut) the anchor click is left to the default (the OS) -- measured with the default cancelled by the check, so no dialog is raised",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const url = "code://repo/domvec/trie.py#L1";
+          const views = () => app.workspace.getLeavesOfType("domvec-code-view").filter((l) => l.view && l.view.url === url);
+          for (const l of views()) l.detach();
+          window.__domvecPlantCodeLinksOut = ${planted};
+          const out = { planted: ${planted} };
+          const host = document.body.createDiv(); host.style.cssText = "position:fixed;left:-9999px;top:0";
+          const a = host.createEl("a", { text: "repl.model", href: url });
+          const block = (e) => { if (e.target === a) { e.preventDefault(); out.default_cancelled_by_check = true; } };
+          document.addEventListener("click", block, false);
+          try {
+            const c0 = plugin.linkStats.code_in || 0;
+            if (!${planted}) { out.window_open_returned = window.open(url); await sleep(800); out.after_open = views().length; for (const l of views()) l.detach(); }
+            a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+            await sleep(800);
+            out.after_click = views().length;
+            out.code_in = (plugin.linkStats.code_in || 0) - c0;
+            return out;
+          } finally {
+            window.__domvecPlantCodeLinksOut = false;
+            document.removeEventListener("click", block, false);
+            host.remove();
+            for (const l of views()) l.detach();
+          }
+        })()`, { timeout: 30000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.window_open_returned === null && c.after_open >= 1 && c.after_click >= 1 && c.code_in === 2 && !c.default_cancelled_by_check
+                && !p.error && p.after_click === 0 && p.code_in === 0 && p.default_cancelled_by_check === true,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-340",
       asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) scales the 2D ego plane and leaves the camera's distance alone; a pinch (wheel + ctrl) does NOT touch the plane (159: 'remove the pinch gesture ... stick to shift scroll'); a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
       async run() {

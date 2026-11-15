@@ -931,7 +931,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    *  with `window.open`, which reached the system browser (2026-11-07: "the
    *  duckduckgo browser opens outside of the plugin"). Elsewhere in Obsidian
    *  links behave as before. Planted `__domvecPlantLinksOut`. */
-  linkStats = { to_cell: 0, passed: 0 };
+  linkStats: { to_cell: number; passed: number; code_in?: number } = { to_cell: 0, passed: 0, code_in: 0 };
   private lastPointerIn = false;
   private routeLinksToCell(): void {
     const inPanel = (t: any) => !!(t && t.closest && t.closest(".domvec-bb, .domvec-plane-card, .domvec-browser-md, .domvec-chat, .domvec-cockpit-card, .domvec-code-cell, .domvec-search3d"));
@@ -940,6 +940,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     const self = this;
     (window as any).open = function (url?: any, ...rest: any[]) {
       const u = String(url || "");
+      // A code:// address is OURS: the module's panel in the app, never the
+      // OS (PLUGIN_GOAL 159 screenshot: a notebook's "module repl.model"
+      // link raised Windows' "Open external link?" for code://repo/repl/
+      // model.py#L1). Planted `__domvecPlantCodeLinksOut`: handed to the OS.
+      if (/^code:\/\//i.test(u) && !(window as any).__domvecPlantCodeLinksOut) { void self.openCode(u); self.linkStats.code_in = (self.linkStats.code_in || 0) + 1; return null; }
       if (/^https?:/i.test(u) && self.lastPointerIn && !(window as any).__domvecPlantLinksOut) {
         const b: any = self.activeBrowser();
         if (b && typeof b.go === "function") { b.go(u); self.linkStats.to_cell++; return null; }
@@ -948,6 +953,15 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       return orig(url, ...rest);
     };
     this.register(() => { (window as any).open = orig; });
+    // An <a href="code://..."> clicked anywhere (reading view, a panel's
+    // rendered markdown): the same, before Obsidian's own handler sees it.
+    this.registerDomEvent(document, "click", (e: MouseEvent) => {
+      const a = (e.target as HTMLElement)?.closest?.("a") as HTMLAnchorElement | null;
+      const href = a ? (a.getAttribute("href") || a.dataset.href || "") : "";
+      if (!/^code:\/\//i.test(href) || (window as any).__domvecPlantCodeLinksOut) return;
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      void this.openCode(href); this.linkStats.code_in = (this.linkStats.code_in || 0) + 1;
+    }, { capture: true } as any);
   }
 
   /** For the harness: a browser cell on the plane over `path`, its plants set. */
