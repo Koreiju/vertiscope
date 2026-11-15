@@ -10659,6 +10659,29 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-353",
+      asks: "the hovered node's picture is presented large, the others stay small (PLUGIN_GOAL 159: 'the image of the very small node preview, which I think is a little too much shrinkage'): the picture shaders draw the PRESENTED picture between 64 and 140 px and every other picture at most 28 px -- a PARAMETER check on the uniforms both picture meshes read, not a pixel measurement; planted (plantSmallPresented) the presented picture held to 22-28 px, as before",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!g || !g.batch) return { error: "no batch" };
+          g.plantSmallPresented = ${planted};
+          try {
+            for (let i = 0; i < 4; i++) await frame();
+            const b = g.batch;
+            return { planted: ${planted}, mats: [b.opaque, b.clear].filter(Boolean).map((m) => { const u = m.mesh.material.uniforms; return { min: u.uMinPicPx && u.uMinPicPx.value, shown_max: u.uMaxShownPx && u.uMaxShownPx.value, others_max: u.uMaxPicPx && u.uMaxPicPx.value }; }) };
+          } finally { g.plantSmallPresented = false; }
+        })()`, { timeout: 30000 });
+        const clean = await arm(false), planted = await arm(true);
+        const all = (x, f) => !!x && !x.error && x.mats.length === 2 && x.mats.every(f);
+        return {
+          pass: all(clean, (m) => m.min === 64 && m.shown_max === 140 && m.others_max === 28) && all(planted, (m) => m.min === 22 && m.shown_max === 28 && m.others_max === 28),
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-340",
       asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) scales the 2D ego plane and leaves the camera's distance alone; a pinch (wheel + ctrl) does NOT touch the plane (159: 'remove the pinch gesture ... stick to shift scroll'); a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
       async run() {

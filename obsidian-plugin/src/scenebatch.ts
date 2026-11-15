@@ -41,6 +41,7 @@ uniform float uNearPow;
 uniform float uPxView;
 uniform float uMaxPicPx;
 uniform float uMinPicPx;
+uniform float uMaxShownPx;
 float nearK(float z, float size) { return uNear > 0.0 ? clamp(pow(max(-z / (uNear * max(size, 1e-3)), 0.0), uNearPow), uNearMin, 1.0) : 1.0; }
 varying vec2 vCorner;
 varying vec4 vColor;
@@ -59,8 +60,12 @@ void main() {
   float s = iSize * (iUv.z < 0.0 ? uZoom : 1.0) * nearK(mv.z, iSize);
   if (iUv.z >= 0.0 && uPxView > 0.0) {
     float vDepth = max(-mv.z, 0.1);
-    if (uMaxPicPx > 0.0) s = min(s, uMaxPicPx * vDepth * uPxView);
-    if (iColor.r > 1.05 && uMinPicPx > 0.0) s = max(s, uMinPicPx * vDepth * uPxView);
+    // The PRESENTED picture (the hovered node's, marked iColor.r > 1.05) has
+    // its own range, uMinPicPx..uMaxShownPx: capped at the others' 28 px it
+    // read as "a little too much shrinkage" (159). Every other picture stays
+    // capped at uMaxPicPx, so the scene is not covered in pictures.
+    if (iColor.r > 1.05 && uMinPicPx > 0.0) s = clamp(s, uMinPicPx * vDepth * uPxView, max(uMaxShownPx, uMinPicPx) * vDepth * uPxView);
+    else if (uMaxPicPx > 0.0) s = min(s, uMaxPicPx * vDepth * uPxView);
   }
   mv.xy += position.xy * s;
   gl_Position = projectionMatrix * mv;
@@ -385,6 +390,7 @@ export class SceneBatch {
       for (const m of [this.opaque, this.clear] as any[]) {
         const mu = m?.mesh?.material?.uniforms;
         if (mu?.uPxView) mu.uPxView.value = pxv;
+        if (mu?.uMinPicPx) { mu.uMinPicPx.value = this.presentMinPx; mu.uMaxPicPx.value = this.picMaxPx; if (mu.uMaxShownPx) mu.uMaxShownPx.value = this.presentMaxPx; }
       }
     }
     // PLUGIN_GOAL 137(6), seen 2026-11-08: at the full 60,927-node chunk
@@ -411,6 +417,11 @@ export class SceneBatch {
    *  picture is drawn at (distance / d) of its size, never under `nearMin`.
    *  0 turns it off. Set every frame from the camera's focus distance. */
   nearMin = 0.4;
+  /** Pictures on screen: every picture at most picMaxPx; the PRESENTED one
+   *  (the hover's) between presentMinPx and presentMaxPx (159). */
+  picMaxPx = 28;
+  presentMinPx = 64;
+  presentMaxPx = 140;
   /** The curve: (distance / d) ^ nearPow. 0.5 (PLUGIN_GOAL 159: "node
    *  shrinking should respond a lot more farther away since we'd appreciate
    *  less occlusion of our nodes at closer proximities"; "a little too much
@@ -455,7 +466,7 @@ export class SceneBatch {
     }
     return new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
-      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 }, uZoom: { value: this.zoom }, uNear: { value: 0 }, uNearMin: { value: this.nearMin }, uNearPow: { value: this.nearPow }, uPxView: { value: 0.002 }, uMaxPicPx: { value: 28.0 }, uMinPicPx: { value: 22.0 } },
+      uniforms: { atlas: { value: this.atlas }, uHue: { value: 0 }, uZoom: { value: this.zoom }, uNear: { value: 0 }, uNearMin: { value: this.nearMin }, uNearPow: { value: this.nearPow }, uPxView: { value: 0.002 }, uMaxPicPx: { value: this.picMaxPx }, uMinPicPx: { value: this.presentMinPx }, uMaxShownPx: { value: this.presentMaxPx } },
       transparent: translucent, depthWrite: !translucent,
     });
   }

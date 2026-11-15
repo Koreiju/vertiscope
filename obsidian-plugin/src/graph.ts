@@ -8878,6 +8878,8 @@ export class GraphView extends ItemView {
   nearShrinkAt = 40;
   /** Planted (159): 152's near shrink -- from 12 radii, linear, floor 0.25. */
   plantNearOld = false;
+  /** Planted (159): the presented picture capped at 28 px like every other. */
+  plantSmallPresented = false;
   private cloudAreaAt = 0;
   private cloudArea = 0;
   private cloudHaloPx = 0;
@@ -8932,6 +8934,9 @@ export class GraphView extends ItemView {
     // 159: from 40 radii out, on a square-root curve, never under 0.4.
     const bb: any = this.batch;
     if (this.plantNearOld) { bb.nearMin = 0.25; bb.nearPow = 1; } else { bb.nearMin = 0.4; bb.nearPow = 0.5; }
+    // The hovered node's picture, larger (159: "a little too much shrinkage");
+    // planted `plantSmallPresented`: 22-28 px, as before.
+    if (this.plantSmallPresented) { bb.presentMinPx = 22; bb.presentMaxPx = 28; } else { bb.presentMinPx = 64; bb.presentMaxPx = 140; }
     this.batch.setNear(this.plantNoNearShrink ? 0 : (this.plantNearOld ? 12 : this.nearShrinkAt));
     let f = 1;
     if (!this.plantNoZoomScale && this.fullViewDist > 0) {
