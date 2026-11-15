@@ -2911,6 +2911,11 @@ class _Handler(BaseHTTPRequestHandler):
                     nm = m.group(1).strip()
                     if nm and nm not in known and _refs.titled(self.workspace, nm):
                         known.append(nm)
+                    # A place inside a note (`Note#cell 2`): the note's title.
+                    elif "#" in nm and "://" not in nm:
+                        base_ = nm.split("#", 1)[0].strip()
+                        if base_ and base_ not in known and _refs.titled(self.workspace, base_):
+                            known.append(base_)
                 diags = [] if PLANT_NO_SLATE_CHECK[0] else _sm.check(trees, known=known)
                 self._send(200, {"trees": bool(trees.strip()), "diagnostics": [d.to_json() for d in diags]})
             except Exception as exc:                # noqa: BLE001
@@ -4925,12 +4930,23 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, {"name": name, "resolved": True, "kind": "code-" + got["kind"],
                                  "url": name.strip(), "cids": [], "lines": lines})
                 return
-            got = _refs.resolve(self.workspace, name)
-            if got is None:
+            # `Note#Heading#Sub`, `Note#cell 2#f` (PLUGIN_GOAL 159): the note
+            # resolved by its name, then the address unfolded inside its own
+            # text -- a heading's section, a cell's inputs and definitions.
+            base = name.split("#", 1)[0].strip()
+            got = _refs.resolve(self.workspace, base) if base else None
+            # Only an artifact found BY ITS NAME has an outline under that name:
+            # retrieval's top hit is some other chunk, and `{Name#x}` built on
+            # it would address a place the named note does not have.
+            own = got is not None and got["kind"] in ("note", "page")
+            lines = _refs.outline(got["value"], name) if own and "#" in name else None
+            if got is None or ("#" in name and lines is None):
                 self._send(200, {"name": name, "resolved": False, "lines": []})
                 return
+            if lines is None:
+                lines = _refs.rank1(got["value"], name=name if own else "")
             self._send(200, {"name": name, "resolved": True, "kind": got["kind"], "url": got["url"],
-                             "cids": got["cids"][:20], "lines": _refs.rank1(got["value"])})
+                             "cids": got["cids"][:20], "lines": lines})
             return
 
         if segments[0] == "signal":

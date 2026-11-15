@@ -1,0 +1,59 @@
+{
+ "Nb": [
+  "A notebook about radix trees, with a cell before any heading.",
+  "cell 1 python\t{Nb#cell 1}",
+  "Building\t{Nb#Building}",
+  "Using\t{Nb#Using}"
+ ],
+ "Nb#Building": [
+  "Prose under building.",
+  "Insert\t{Nb#Building#Insert}",
+  "Lookup 2\t{Nb#Building#Lookup 2}"
+ ],
+ "Nb#Building#Insert": [
+  "cell 2 python\t{Nb#cell 2}"
+ ],
+ "Nb#Building#Lookup 2": [
+  "Look things up."
+ ],
+ "Nb#Using": [
+  "cell 3 bash\t{Nb#cell 3}",
+  "Text after the cell."
+ ],
+ "Nb#Insert": [
+  "cell 2 python\t{Nb#cell 2}"
+ ],
+ "Nb#cell 1": [
+  "input\t{Radix tree}",
+  "import\tnumpy",
+  "var\tx",
+  "output\t｛'a': 1｝"
+ ],
+ "Nb#cell 2": [
+  "input\t{Radix tree}",
+  "input\t{keys}",
+  "import\tcollections",
+  "class Node\t{Nb#cell 2#Node}",
+  "def insert\t{Nb#cell 2#insert}"
+ ],
+ "Nb#cell 2#Node": [
+  "signature\tclass Node",
+  "doc\tA trie node.",
+  "def child\t{Nb#cell 2#Node#child}"
+ ],
+ "Nb#cell 2#Node#child": [
+  "signature\tdef child(self, k)",
+  "doc\tThe child at k.",
+  "return self.kids[k]"
+ ],
+ "Nb#cell 2#insert": [
+  "signature\tdef insert(root, key)",
+  "return root"
+ ],
+ "Nb#cell 3": [
+  "echo hi"
+ ],
+ "Nb#cell 4": null,
+ "Nb#Missing": null,
+ "Nb#cell 3#x": null
+}

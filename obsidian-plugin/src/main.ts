@@ -460,6 +460,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // being valid.
     this.registerEvent(this.app.vault.on("delete", (f) => {
       if (f.path.endsWith(".md")) void this.sidecar.restartKernel(f.path);
+      // Its row in the ego's `unfolded` goes too (PLUGIN_GOAL 159, G-364).
+      void this.cockpit?.noteGone(f.path);
       // A deleted note leaves the store (G-291): its pending index is
       // cancelled -- one fired AFTER the delete and put the note back, six
       // check notes on 2026-10-30 -- and its page purged, so its 3D node goes.
@@ -475,6 +477,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       // The OLD path, not the new one: the kernel is filed under where the note
       // used to be, and the note under its new name has no kernel yet.
       if (oldPath.endsWith(".md")) void this.sidecar.restartKernel(oldPath);
+      void this.cockpit?.noteMoved(oldPath, f.path);
     }));
 
     this.registerMarkdownPostProcessor(readingViewRunButtons(this));

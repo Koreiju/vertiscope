@@ -9061,8 +9061,9 @@ export function makeChecks(env) {
             await until(() => rows().length > 0, 8000);
             out.rank1 = rows();
             if (${planted}) return out;
-            // Definitions, besides the search's instant "found" rows (item 100).
-            out.rank1_all_refs = out.rank1.filter((r) => !/^found/.test(r.trim())).every((r) => /^(class|def) /.test(r.trim()));
+            // Definitions, besides the search's instant "found" rows (item 100);
+            // imports are boxes too since item 112 (G-329): every row a {ref} node.
+            out.rank1_all_refs = out.rank1.filter((r) => !/^found/.test(r.trim())).every((r) => /^(class|def) /.test(r.trim()) || /[{]code:[/][/][^}]+[}]/.test(r));
             // One rank down: a class.
             const cls = out.rank1.map((r) => r.trim()).find((r) => r.startsWith("class "));
             const clsName = cls ? cls.split(" ")[1] : "";
@@ -16725,6 +16726,136 @@ export function makeChecks(env) {
                    && c.text_play_finished === "false" && c.replayed && !c.playing_after_drag && c.text_play_after_drag === "false"
                    && c.anchored_resolved >= 1 && c.anchored_legs >= 1
                    && p.legs === 1,
+                 evidence: got };
+      },
+    },
+    {
+      id: "G-364",
+      asks: "cell hierarchies and black boxes unfold for markdown and notebook cells too, and the ego keeps what it holds open (PLUGIN_GOAL 159): a right-click on a {ref} naming a NOTEBOOK note reveals its outline -- its headings and its cells, each a {Note#Heading} / {Note#cell N} box -- not its first lines; a right-click on a cell box reveals the cell's inputs and definitions, and on a definition its signature (four ranks from the note, nested in place); which boxes are open is written into the cockpit note's `unfolded` field (the game state), and with this browser's record cleared a reopened note gets them back from the ego's; the note's text never changes; planted (cockpit.plantFlatOutline) the notebook reveals its first lines and no box; planted (cockpit.plantUnfoldsLocalOnly) nothing reaches the ego and a cleared record restores nothing; a fold stays folded though the ego's row still named the box; a note deleted takes its row with it (planted plantKeepGoneRows: the row stays)",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !ok(); t += 200) await sleep(200); return ok(); };
+          const plugin = app.plugins.getPlugin("domvec-bridge"), c = plugin.cockpit;
+          const NL = String.fromCharCode(10), TB = String.fromCharCode(9), BT = String.fromCharCode(96).repeat(3);
+          const folder = "domvec-checks";
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+          const stamp = Date.now();
+          const tName = "g364 nb " + stamp;
+          const nbText = ["A notebook " + stamp + ".", "", "# Building", "", "Prose.", "", BT + "python", "import json", "", "def insert" + stamp + "(root, key):",
+                          "    " + '"' + '"' + '"' + "Put key under root." + '"' + '"' + '"', "    return root", BT, "", "# Using", "", "Text."].join(NL) + NL;
+          const target = await app.vault.create(folder + "/" + tName + ".md", nbText);
+          const slateText = "---" + NL + "domvec: slate" + NL + "---" + NL + "probe" + NL + TB + "input" + TB + "{" + tName + "}" + NL;
+          const slate = await app.vault.create(folder + "/g364 slate " + stamp + ".md", slateText);
+          const key = slate.path.replace(/[.]md$/i, "");
+          const open = async () => {
+            const leaf = window.__domvecPlane.leaf();
+            await leaf.openFile(slate, { state: { mode: "source", source: false } });
+            await sleep(800); c.decorate(); await sleep(300);
+            return leaf;
+          };
+          const rightAt = (v, pos) => {
+            const cm = v.editor.cm, at = cm.coordsAtPos(pos);
+            const x = (at.left + at.right) / 2, y = (at.top + at.bottom) / 2;
+            const t = document.elementFromPoint(x, y) || v.contentEl;
+            t.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+          };
+          const rightEl = (el) => { const r = el.getBoundingClientRect();
+            el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + 2, clientY: r.top + 2, button: 2 })); };
+          const refEl = (v, name) => [...v.contentEl.querySelectorAll(".domvec-slate-reveal-ref")].find((e) => e.dataset.ref === name) || null;
+          const refs = (v) => [...v.contentEl.querySelectorAll(".domvec-slate-reveal-ref")].map((e) => e.dataset.ref);
+          const revealText = (v) => [...v.contentEl.querySelectorAll(".domvec-slate-reveal")].map((e) => e.textContent).join(" | ");
+          const ego = async () => { const f = c.file(); return f ? await app.vault.read(f) : ""; };
+          const egoRow = async () => { const t = await ego(); const m = t.split(NL).find((l) => l.startsWith(TB + TB + key + TB)); return m || null; };
+          const clearLocal = () => { try { window.localStorage.removeItem("domvec.slate.folds:" + slate.path); } catch (e) {} };
+          const cell = tName + "#cell 1", def = cell + "#insert" + stamp;
+          const out = { cell, def };
+          let leaf = null;
+          try {
+            if (!c.file()) await c.open();
+            for (const planted of [true, false]) {
+              c.plantFlatOutline = planted; c.plantUnfoldsLocalOnly = planted;
+              clearLocal();
+              const s0 = { ...c.unfoldStats };
+              leaf = await open();
+              let v = leaf.view;
+              const arm = {};
+              rightAt(v, v.editor.cm.state.doc.toString().indexOf("{" + tName + "}") + 3);
+              await until(() => !!v.contentEl.querySelector(".domvec-slate-reveal"), 8000);
+              arm.rank1_refs = refs(v);
+              arm.rank1_text = revealText(v).slice(0, 300);
+              // Rank 2: the heading's section; rank 3: the cell's box; rank 4: its definition's.
+              const he = refEl(v, tName + "#Building");
+              if (he) { rightEl(he); await until(() => !!refEl(v, cell), 6000); }
+              arm.section_refs = refs(v);
+              const ce = refEl(v, cell);
+              if (ce) { rightEl(ce); await until(() => !!refEl(v, def), 6000); }
+              const de = refEl(v, def);
+              if (de) { rightEl(de); await until(() => /signature/.test(revealText(v)), 6000); }
+              arm.rank2_refs = refs(v);
+              arm.deep_text = revealText(v).slice(0, 600);
+              arm.signature = /signature\\s+def insert[0-9]+\\(root, key\\)/.test(revealText(v));
+              arm.doc = /Put key under root/.test(revealText(v));
+              arm.text_unchanged = v.editor.getValue() === slateText;
+              await sleep(400); await c.writeUnfolded();
+              arm.ego_row = await egoRow();
+              // This browser's record cleared, the note reopened: the ego's record answers.
+              leaf.detach(); leaf = null; clearLocal();
+              leaf = await open(); v = leaf.view;
+              await until(() => /signature/.test(revealText(v)), planted ? 2500 : 10000);
+              arm.restored_refs = refs(v);
+              arm.restored_signature = /signature/.test(revealText(v));
+              arm.restored_from_ego = c.unfoldStats.restored_from_ego - s0.restored_from_ego;
+              arm.text_unchanged_after = v.editor.getValue() === slateText;
+              // A fold is the reader's: the ego's row still names the box until
+              // its write lands, and a decorate pass must not re-open it (G-278
+              // caught exactly that).
+              rightAt(v, v.editor.cm.state.doc.toString().indexOf("{" + tName + "}") + 3); await sleep(150);
+              for (let k = 0; k < 4; k++) { c.decorate(); await sleep(150); }
+              arm.fold_stays = !v.contentEl.querySelector(".domvec-slate-reveal");
+              await sleep(400);
+              arm.ego_row_after_fold = await egoRow();
+              out[planted ? "planted" : "clean"] = arm;
+              leaf.detach(); leaf = null;
+            }
+            // A note deleted takes its row with it (every probe note left one in
+            // the reader's cockpit before this); planted plantKeepGoneRows: it stays.
+            const rowOf = async (k) => (await ego()).split(NL).some((l) => l.startsWith(TB + TB + k + TB));
+            for (const planted of [true, false]) {
+              c.plantKeepGoneRows = planted;
+              const gn = await app.vault.create(folder + "/g364 gone " + (planted ? "p" : "c") + stamp + ".md", "x" + NL);
+              const gk = gn.path.replace(/[.]md$/i, "");
+              await app.vault.process(c.file(), (t) => t.replace(NL + TB + "unfolded" + NL, NL + TB + "unfolded" + NL + TB + TB + gk + TB + "{x}" + NL));
+              const had = await rowOf(gk);
+              await window.__domvecPlane.trash(gn); await sleep(800);
+              out[planted ? "gone_planted" : "gone_clean"] = { had, kept: await rowOf(gk) };
+            }
+            c.plantKeepGoneRows = false;
+            out.stats = { ...c.unfoldStats };
+          } finally {
+            c.plantFlatOutline = false; c.plantUnfoldsLocalOnly = false; c.plantKeepGoneRows = false;
+            try { leaf && leaf.detach(); } catch (e) {}
+            for (const f of [slate, target]) { try { await window.__domvecPlane.trash(f); } catch (e) {} }
+            await sleep(800);
+            out.ego_clean = !(await egoRow());
+            // Belt and braces: no probe row survives a failed run.
+            try { const f = c.file(); if (f) await app.vault.process(f, (t) => t.split(NL).filter((l) => !l.startsWith(TB + TB + folder + "/g364 ")).join(NL)); } catch (e) {}
+            clearLocal();
+          }
+          return out;
+        })()`, { timeout: 120000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const c = got.clean, p = got.planted;
+        const boxed = (rs) => (rs || []).some((r) => /#Building$/.test(r)) && (rs || []).some((r) => /#Using$/.test(r));
+        return { pass: boxed(c.rank1_refs) && (c.section_refs || []).includes(got.cell) && (c.rank2_refs || []).includes(got.def) && c.signature && c.doc
+                   && c.text_unchanged && c.text_unchanged_after
+                   && !!c.ego_row && c.ego_row.includes("{" + got.def + "}")
+                   && c.restored_from_ego >= 1 && c.restored_signature && (c.restored_refs || []).includes(got.def)
+                   && c.fold_stays && !(c.ego_row_after_fold || "").includes("{" + got.cell.split("#")[0] + "}")
+                   && got.gone_clean && got.gone_clean.had && !got.gone_clean.kept
+                   && got.gone_planted && got.gone_planted.had && got.gone_planted.kept
+                   && !boxed(p.rank1_refs) && !p.ego_row && !p.restored_signature && p.restored_from_ego === 0
+                   && got.ego_clean,
                  evidence: got };
       },
     },

@@ -434,8 +434,30 @@ Open (not started this session):
   re-index of sidecar.py (~6k lines + its CPG) is ~36 s.
 - The search bar as a draggable retrieval cell panel; the empty-cell
   hyperlink chain (needs the reader's screenshots to know which link).
-- Cell hierarchies / black-box unfolding for code, markdown and notebook
-  cells as ego states (persisted alongside the game state).
+- Cell hierarchies / black-box unfolding for markdown and notebook cells,
+  as ego states: LIVE-CONFIRMED (G-364, run 21; regressions G-277, G-278,
+  G-280, G-308, G-322, G-329 pass, run 20). What was built:
+  - A `{ref}` to a note unfolds by the note's own recursion, one rank per
+    right-click: its headings (`{Note#Heading#Sub}`), its cells
+    (`{Note#cell N}`), a cell's inputs, imports, top-level names,
+    definitions and output, and a definition's signature and docstring
+    (`{Note#cell N#f}`). The live check goes four ranks down.
+  - One grammar in two places: `refs.outline` serves the sidecar's `/ref`
+    for stored notes and pages; `outline.ts` serves the plugin for vault
+    notes. Both are held to one fixture, `tests/fixtures/outline_*`.
+  - What is open, in which note, is the cockpit's `unfolded` field in
+    `domvec/ego.md`, beside view, camera, plan and play. It restores a note
+    whose browser record is gone. It moves with a renamed note and leaves
+    with a deleted one.
+  Defects found on the way, both fixed:
+  - G-278 caught a fold being undone: the ego's row still named the box
+    until its write landed. A fold now holds, and G-364 checks it.
+  - Every check's probe note left a row in the reader's own cockpit: 11
+    after one run, pruned.
+  - Also: G-308's check went stale when item 112 made imports into boxes.
+    It now accepts any `{ref}` row, which is what the requirement asks.
+  Code-module black boxes (G-308) were already done and are unchanged.
+  Not yet seen by a person: G-364 is in Confirm.
 - Chat cells: prompt/response cells hard-linked in sequence; context
   control. **Latency, measured 2026-11-14** (`/profile` -> `chat_stream`,
   which now records `first_ms`, `tok_s`, `waited_ms`, `in_flight`,

@@ -29,6 +29,7 @@
 import { App, MarkdownView, TFile } from "obsidian";
 import { FoldState, SlateLine, foldsOf, parseSlate, setFolds, titleLine } from "./slatefold";
 import { makeDraggable, type PlaceStats } from "./planecard";
+import { outline, unfoldedOf, withUnfolded } from "./outline";
 export { parseSlate } from "./slatefold";
 export type { SlateLine } from "./slatefold";
 
@@ -63,7 +64,7 @@ export const COCKPIT_TEXT = [
 /** A slate's rank-1 lines (`refs.rank1` in Python): the title's first level
  *  of fields, `key<TAB>value` (a field with children shows as `{key}`); any
  *  other text, its first lines. */
-export function rank1Of(text: string, limit = 12): string[] {
+export function rank1Of(text: string, limit = 12, name = ""): string[] {
   const fs = parseSlate(text);
   const top = fs.filter((f) => f.depth === 0);
   if (top.length === 1) {
@@ -74,6 +75,9 @@ export function rank1Of(text: string, limit = 12): string[] {
       return (f.key + (v ? "\t" + v : "")).slice(0, 120);
     });
   }
+  // Named (PLUGIN_GOAL 159): any other note unfolds by its outline --
+  // headings and cells, each a `{ref}` to the next rank (`outline.ts`).
+  if (name) return outline(text, name, limit) || [];
   const out: string[] = [];
   let body = text;
   if (body.startsWith("---")) { const e = body.indexOf("\n---", 3); if (e >= 0) body = body.slice(e + 4); }
@@ -148,6 +152,7 @@ export class Cockpit {
     if (!/^\tplan\t/m.test(text)) {
       await this.app.vault.modify(f, text.replace(/^(\tlast\t.*)$/m, "$1\n\tplan\t{search.results}\n\tplay\tfalse"));
     }
+    void this.pruneUnfolded();
     // On the 2D plane over the 3D view when a graph is open (items 50, 52-53).
     const onPlane = await this.dock();
     if (onPlane) { this.stats.opened++; return onPlane; }
@@ -279,7 +284,7 @@ export class Cockpit {
       const nb = !on && isNotebook(this.app, v?.file || null) && !(window as any).__domvecPlantNotebookPlain;
       (l as any).containerEl?.toggleClass?.("domvec-nb-slate", nb);
       if ((on || nb) && v.contentEl && !this.slateHooked.has(v.contentEl)) this.hookSlate(v);
-      if (on) this.restoreFolds(v);
+      if (on || nb) this.restoreFolds(v);
       if (v?.file?.path === COCKPIT_PATH && v.contentEl && !this.hooked.has(v.contentEl)) this.hook(v);
     }
   }
@@ -376,12 +381,114 @@ export class Cockpit {
   plantRank1FromStore = false;
   private slateHooked = new WeakSet<HTMLElement>();
   private foldKey(path: string): string { return "domvec.slate.folds:" + path; }
+  private hasLocalFolds(path: string): boolean {
+    try { return window.localStorage.getItem(this.foldKey(path)) !== null; } catch { return false; }
+  }
   private loadFolds(path: string): FoldState {
     try { const s = JSON.parse(window.localStorage.getItem(this.foldKey(path)) || "null"); if (s && s.reveals) return s; } catch { /* a convenience */ }
     return { reveals: {}, collapsed: false };
   }
   private saveFolds(path: string, st: FoldState): void {
     try { window.localStorage.setItem(this.foldKey(path), JSON.stringify(st)); } catch { /* a convenience */ }
+    this.keepUnfolded(path, st);
+  }
+
+  // ---- the ego's unfolded boxes, in its own note (PLUGIN_GOAL 159) ----------
+  // "That way we can track persisting instances of the ego's current setting
+  // alongside the game state": which boxes are open, in which note, is a field
+  // of the cockpit note (`unfolded`), beside view, camera, plan and play --
+  // not this browser's localStorage alone. Read back when a note's editor
+  // holds nothing and localStorage has nothing for it (another machine, a
+  // cleared profile, a synced vault). Planted `plantUnfoldsLocalOnly`: kept
+  // in localStorage only, as before.
+  plantUnfoldsLocalOnly = false;
+  /** Planted: a note unfolds flat (its first lines), as before the outline. */
+  plantFlatOutline = false;
+  unfoldStats = { kept: 0, written: 0, restored_from_ego: 0, outlined: 0, pruned: 0 };
+  private unfoldPending = new Map<string, string[]>();
+  private unfoldTimer = 0;
+  private restoring = new Set<string>();
+  noteKey(path: string): string { return path.replace(/\.md$/i, ""); }
+  private keepUnfolded(path: string, st: FoldState): void {
+    if (path === COCKPIT_PATH || this.plantUnfoldsLocalOnly) return;
+    this.unfoldPending.set(this.noteKey(path), Object.keys(st.reveals));
+    this.unfoldStats.kept++;
+    window.clearTimeout(this.unfoldTimer);
+    this.unfoldTimer = window.setTimeout(() => void this.writeUnfolded(), 250);
+  }
+  /** Flush the pending rows into the cockpit note now (also the check's hook). */
+  async writeUnfolded(): Promise<boolean> {
+    window.clearTimeout(this.unfoldTimer);
+    const f = this.file();
+    if (!f || !this.unfoldPending.size) return false;
+    const updates = new Map(this.unfoldPending);
+    this.unfoldPending.clear();
+    let changed = false;
+    await this.app.vault.process(f, (text) => { const next = withUnfolded(text, updates); changed = next !== text; return next; });
+    if (changed) this.unfoldStats.written++;
+    return changed;
+  }
+  /** A note gone or moved: its row goes with it, or follows it. A stale row
+   *  names boxes in a note that is not there -- and every check's probe note
+   *  left one in the reader's own cockpit until this (2026-11-15: eleven rows
+   *  after one regression run). Planted `plantKeepGoneRows`: rows stay. */
+  plantKeepGoneRows = false;
+  async noteGone(path: string): Promise<void> {
+    if (!/\.md$/i.test(path) || path === COCKPIT_PATH || this.plantKeepGoneRows) return;
+    try { window.localStorage.removeItem(this.foldKey(path)); } catch { /* a convenience */ }
+    if (!(await this.egoUnfolded(path)).length && !this.unfoldPending.has(this.noteKey(path))) return;
+    this.unfoldPending.set(this.noteKey(path), []);
+    await this.writeUnfolded();
+  }
+  async noteMoved(oldPath: string, newPath: string): Promise<void> {
+    if (!/\.md$/i.test(oldPath) || oldPath === COCKPIT_PATH || this.plantKeepGoneRows) return;
+    const names = this.unfoldPending.get(this.noteKey(oldPath)) ?? await this.egoUnfolded(oldPath);
+    try {
+      const st = window.localStorage.getItem(this.foldKey(oldPath));
+      if (st !== null) { window.localStorage.setItem(this.foldKey(newPath), st); window.localStorage.removeItem(this.foldKey(oldPath)); }
+    } catch { /* a convenience */ }
+    if (!names.length) return;
+    this.unfoldPending.set(this.noteKey(oldPath), []);
+    this.unfoldPending.set(this.noteKey(newPath), names);
+    await this.writeUnfolded();
+  }
+  /** Rows whose note no longer exists, dropped (at the cockpit's open). */
+  async pruneUnfolded(): Promise<number> {
+    const f = this.file();
+    if (!f || this.plantKeepGoneRows) return 0;
+    const rows = unfoldedOf(await this.app.vault.cachedRead(f));
+    let n = 0;
+    for (const k of rows.keys()) {
+      if (!this.app.vault.getAbstractFileByPath(k + ".md")) { this.unfoldPending.set(k, []); n++; }
+    }
+    if (n) await this.writeUnfolded();
+    this.unfoldStats.pruned += n;
+    return n;
+  }
+  /** The refs the ego holds open in `path`, as its note records them. */
+  async egoUnfolded(path: string): Promise<string[]> {
+    const f = this.file();
+    if (!f) return [];
+    return unfoldedOf(await this.app.vault.cachedRead(f)).get(this.noteKey(path)) || [];
+  }
+  /** A note's reveals rebuilt from the ego's record, each by its own rank-1. */
+  private async restoreFromEgo(v: any, path: string): Promise<void> {
+    if (this.restoring.has(path) || this.plantUnfoldsLocalOnly || path === COCKPIT_PATH || this.unfoldPending.has(this.noteKey(path))) return;
+    this.restoring.add(path);
+    try {
+      const names = await this.egoUnfolded(path);
+      if (!names.length) return;
+      const reveals: Record<string, string[]> = {};
+      for (const n of names) { const ls = await this.rank1(path, n); if (ls) reveals[n] = ls; }
+      const cm = v?.editor?.cm;
+      if (!cm || v?.file?.path !== path || !Object.keys(reveals).length) return;
+      const cur = foldsOf(cm);
+      if (Object.keys(cur.reveals).length || this.hasLocalFolds(path)) return;
+      const st: FoldState = { ...this.copyFolds(cur), reveals };
+      cm.dispatch({ effects: setFolds.of(st) });
+      try { window.localStorage.setItem(this.foldKey(path), JSON.stringify(st)); } catch { /* a convenience */ }
+      this.unfoldStats.restored_from_ego++;
+    } finally { this.restoring.delete(path); }
   }
   /** Put a note's kept fold state back on its editor -- whenever the editor
    *  holds none of it: Obsidian loads a note's text AFTER the leaf opens and
@@ -390,7 +497,14 @@ export class Cockpit {
     const cm = v?.editor?.cm, path = v?.file?.path;
     if (!cm || !path) return;
     const st = this.loadFolds(path);
-    if (!(Object.keys(st.reveals).length || st.collapsed || st.graph || (st.folds || []).length)) return;
+    if (!(Object.keys(st.reveals).length || st.collapsed || st.graph || (st.folds || []).length)) {
+      // NO record here for this note (never seen in this browser, or
+      // cleared): the ego's own record may hold it. A record that says
+      // "nothing open" is the reader's last fold -- the ego's row may still
+      // name the box until its write lands, and must not re-open it.
+      if (!this.hasLocalFolds(path) && !Object.keys(foldsOf(cm).reveals).length) void this.restoreFromEgo(v, path);
+      return;
+    }
     const cur = foldsOf(cm);
     if (Object.keys(cur.reveals).length || cur.collapsed || cur.graph || (cur.folds || []).length) return;
     cm.dispatch({ effects: setFolds.of(st) });
@@ -406,9 +520,20 @@ export class Cockpit {
     // (item 22: keys are "computation graph inputs to the sticked
     // node/panel dialect editor"): its current samples, newest first.
     if (name === "keys" && (path === COCKPIT_PATH || !this.plantKeysCockpitOnly)) return g?.agent?.keyLog?.length ? g.agent.keyLog.slice() : ["(no key yet)"];
-    const want = name.trim().toLowerCase();
-    const note = this.app.vault.getMarkdownFiles().find((f) => f.basename.toLowerCase() === want);
-    if (note && !this.plantRank1FromStore) return rank1Of(await this.app.vault.cachedRead(note));
+    // `Note#Heading#Sub`, `Note#cell 2#f` (PLUGIN_GOAL 159): the note by the
+    // name before `#`, the place inside it by its outline (`outline.ts`).
+    const want = name.split("#")[0].trim().toLowerCase();
+    const note = want ? this.app.vault.getMarkdownFiles().find((f) => f.basename.toLowerCase() === want) : undefined;
+    if (note && !this.plantRank1FromStore) {
+      const text = await this.app.vault.cachedRead(note);
+      if (name.includes("#")) {
+        const got = outline(text, name);
+        if (!got) { this.foldStats.unresolved++; return null; }
+        this.unfoldStats.outlined++;
+        return got;
+      }
+      return rank1Of(text, 12, this.plantFlatOutline ? "" : name);
+    }
     const got = await this.host.ref(name);
     if (!got || !got.resolved) { this.foldStats.unresolved++; return null; }
     return got.lines;

@@ -246,6 +246,10 @@ def check(text: str, known: Iterable[str] = ()) -> List[Diagnostic]:
                 continue
             if name.split(".")[0] in outer:
                 continue
+            # `Note#Heading`, `Note#cell 2#f` (PLUGIN_GOAL 159): a place
+            # INSIDE a note -- known when the note is.
+            if "#" in name and name.split("#", 1)[0].strip() in outer:
+                continue
             # A trie ADDRESS (`code://...`, `vault://...`, `https://...`) names
             # something outside the module by where it is, as a cell's input
             # does -- resolved through the store, never a NameError here.
