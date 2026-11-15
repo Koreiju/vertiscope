@@ -533,12 +533,12 @@ export class GraphView extends ItemView {
     // The ego flight is selective (2026-10-30, items 39, 46): a drag on the
     // canvas is a hand on the stick -- the flight and its velocity dropped --
     // and the wheel re-reads the distance a flight in progress stops at.
-    canvas.addEventListener("pointerdown", (e: PointerEvent) => { this.downAt = [e.clientX, e.clientY]; if (!this.plantHoldFlight) this.agent.release(); }, { passive: true, capture: true });
+    canvas.addEventListener("pointerdown", (e: PointerEvent) => { if (!this.onScene(e)) { this.downAt = null; return; } this.downAt = [e.clientX, e.clientY]; if (!this.plantHoldFlight) this.agent.release(); }, { passive: true, capture: true });
     // A click the library's pick missed lands on what the hover shows (see
     // nodeAtScreen). After the library's own handling: if it clicked a node,
     // nothing more happens. Not on the craft, not after a drag.
     canvas.addEventListener("click", (e: MouseEvent) => {
-      if (this.plantNoClickFallback || !this.clickNode || !this.graph || e.button !== 0) return;
+      if (this.plantNoClickFallback || !this.clickNode || !this.graph || e.button !== 0 || !this.onScene(e)) return;
       if (!this.downAt || Math.hypot(e.clientX - this.downAt[0], e.clientY - this.downAt[1]) > 4) return;
       const x = e.clientX, y = e.clientY, at = performance.now();
       window.setTimeout(() => {
@@ -548,17 +548,19 @@ export class GraphView extends ItemView {
         if (n) { this.clickFallbackStats.used++; this.clickNode!(n); } else this.clickFallbackStats.none++;
       }, 0);
     });
-    // Pinch (Chromium: wheel + ctrl) or shift+scroll zooms the 2D EGO PLANE;
-    // a plain scroll stays the 3D view's zoom (158). Shift+wheel arrives as a
+    // Shift+scroll zooms the 2D EGO PLANE; a plain scroll (and a pinch, which
+    // Chromium sends as wheel + ctrl) stays the 3D view's zoom (158; 159: "I
+    // think we should remove the pinch gesture because it gets confused with
+    // regular scroll and stick to shift scroll"). Shift+wheel arrives as a
     // HORIZONTAL delta on Windows, so either axis counts. Capture phase, so
     // the orbit controls and the zoom-through never see it. Planted
     // `plantPlaneZoomIs3D`: every scroll zooms the 3D view, as before.
     canvas.addEventListener("wheel", (e: WheelEvent) => {
-      if (this.plantPlaneZoomIs3D || !this.craft || !(e.shiftKey || e.ctrlKey)) return;
+      if (this.plantPlaneZoomIs3D || !this.craft || !e.shiftKey || !this.onScene(e)) return;
       const d = e.deltaY || e.deltaX;
       if (!d) return;
       e.preventDefault(); e.stopImmediatePropagation();
-      this.craft.zoomPlane(Math.exp(-d * (e.ctrlKey ? 0.01 : 0.0015)));
+      this.craft.zoomPlane(Math.exp(-d * 0.0015));
     }, { passive: false, capture: true });
     // Grab a craft node and drag: the whole ego graph moves (2026-11-14: "I
     // should also be able to click and drag the ego graph when grabbing one
@@ -566,7 +568,7 @@ export class GraphView extends ItemView {
     // see the press; a press that does not move is still the click (pointerup
     // below reads downAt). Planted `plantNoCraftDrag`.
     canvas.addEventListener("pointerdown", (e: PointerEvent) => {
-      if (this.plantNoCraftDrag || e.button !== 0 || !this.craft) return;
+      if (this.plantNoCraftDrag || e.button !== 0 || !this.craft || !this.onScene(e)) return;
       const cn = this.craft.nodeAt(e.clientX, e.clientY);
       if (!cn) return;
       e.stopImmediatePropagation(); e.preventDefault();
@@ -579,7 +581,7 @@ export class GraphView extends ItemView {
     }, { capture: true });
     // A double right-click on a halo node deletes it from the halo (G-284).
     canvas.addEventListener("contextmenu", (e: MouseEvent) => {
-      const h = this.halo ? this.haloAt(e.clientX, e.clientY) : null;
+      const h = this.halo && this.onScene(e) ? this.haloAt(e.clientX, e.clientY) : null;
       if (!h) return;
       e.preventDefault(); e.stopPropagation();
       const now = performance.now();
@@ -588,12 +590,12 @@ export class GraphView extends ItemView {
     }, true);
     // A right-click on a bisector folds / unfolds what it dominates (G-282).
     canvas.addEventListener("contextmenu", (e: MouseEvent) => {
-      const hit = this.bisectorAt(e.clientX, e.clientY);
+      const hit = this.onScene(e) ? this.bisectorAt(e.clientX, e.clientY) : null;
       if (hit && this.toggleDominance(hit)) { e.preventDefault(); e.stopPropagation(); }
     }, true);
     // A click (no drag) on a bisector opens / closes its graph in 2D (G-282).
     canvas.addEventListener("pointerup", (e: PointerEvent) => {
-      if (!this.downAt || Math.hypot(e.clientX - this.downAt[0], e.clientY - this.downAt[1]) > 4) return;
+      if (!this.onScene(e) || !this.downAt || Math.hypot(e.clientX - this.downAt[0], e.clientY - this.downAt[1]) > 4) return;
       // A craft node: its panel on the plane, or closed back into it (item 65).
       const cn = this.craft?.nodeAt(e.clientX, e.clientY);
       // The codebase hub: a click unnests its modules, or folds them back.
@@ -625,7 +627,7 @@ export class GraphView extends ItemView {
     // steps the camera toward IT (the node becomes the focus), and close
     // enough the zoom passes through -- its panel opens on the plane.
     canvas.addEventListener("wheel", (e: WheelEvent) => {
-      if (this.plantNoMicroscope || e.deltaY >= 0 || this.agent.mode !== "map" || !this.craft) return;
+      if (this.plantNoMicroscope || e.deltaY >= 0 || this.agent.mode !== "map" || !this.craft || !this.onScene(e)) return;
       const n = this.craft.nodeAt(e.clientX, e.clientY);
       if (!n || !n.mesh) return;
       e.preventDefault(); e.stopPropagation();
@@ -636,7 +638,7 @@ export class GraphView extends ItemView {
     // close enough it passes into the cockpit -- first person; wheel-out in
     // the cockpit backs out to third person. Planted `plantNoZoomThrough`.
     canvas.addEventListener("wheel", (e: WheelEvent) => {
-      if (this.plantNoZoomThrough || this.agent.mode !== "ego") return;
+      if (this.plantNoZoomThrough || this.agent.mode !== "ego" || !this.onScene(e)) return;
       const took = this.agent.zoomThrough(e.deltaY);
       // Immediate: the orbit controls listen on this same canvas and would dolly too.
       if (took) { e.preventDefault(); e.stopImmediatePropagation(); }
@@ -646,7 +648,7 @@ export class GraphView extends ItemView {
     // 135(d)): solid (on) or translucent (off). Only within 6 px of a drawn
     // segment; anywhere else the right-click is what it was.
     canvas.addEventListener("contextmenu", (e: MouseEvent) => {
-      if (this.plantNoLinkToggle) return;
+      if (this.plantNoLinkToggle || !this.onScene(e)) return;
       const l = this.linkAt(e.clientX, e.clientY);
       if (!l) return;
       e.preventDefault(); e.stopImmediatePropagation();
@@ -6779,6 +6781,28 @@ export class GraphView extends ItemView {
     this.craft.frame();
     this.drawTethers();
   }
+  /**
+   * The event began on the 3D SCENE, not on something drawn above it -- a
+   * panel on the plane, a chunk panel, the search field, any input. The
+   * plane and its panels are children of the canvas element, so every
+   * capture-phase gesture here saw their events first: a wheel over a panel
+   * zoomed the ego or stepped the microscope instead of scrolling it, a click
+   * on a panel opened the node behind it, a press on a panel dragged the ego
+   * (PLUGIN_GOAL 159: "I also can't scroll when hovered over the panels";
+   * "Clicking on notebook panel doesn't block clicks from reaching the 3D
+   * graph editor"). Planted `plantPanelsPassThrough`: everything reaches the
+   * scene, as before.
+   */
+  plantPanelsPassThrough = false;
+  panelGuardStats = { kept_off: 0 };
+  onScene(e: Event): boolean {
+    if (this.plantPanelsPassThrough) return true;
+    const t = e.target as HTMLElement | null;
+    const above = !!t && typeof t.closest === "function"
+      && !!t.closest(".domvec-plane *, .domvec-bb, .domvec-search3d, .domvec-file, .domvec-graph-bar, input, textarea, select, button, [contenteditable='true']");
+    if (above) this.panelGuardStats.kept_off++;
+    return !above;
+  }
   /** The graph's node-click, callable by the fallback below. */
   clickNode: ((n: any) => void) | null = null;
   nodeClickAt = 0;
@@ -10673,7 +10697,9 @@ export class GraphView extends ItemView {
       // craft beside it, side by side -- the camera aims between them from
       // across the line joining them (looking along it, the craft sat on top of
       // the world), backed off by the gap, so the craft is in the shot.
-      const k = this.agent.mode === "map" && this.craft ? this.craft.where() : null;
+      // On the camera (the 2D plane, 159) the craft is in every shot already:
+      // the world alone is framed, centred.
+      const k = this.agent.mode === "map" && this.craft && !this.craft.onCamera() ? this.craft.where() : null;
       let eye = { x: c.x, y: c.y, z: c.z + this.fullViewDist };
       if (k && Number.isFinite(k.x)) {
         const gap = Math.hypot(k.x - c.x, k.y - c.y, k.z - c.z) || 1;

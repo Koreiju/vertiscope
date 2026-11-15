@@ -8386,7 +8386,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-299",
-      asks: "the ego computation graph is ONE unit in 3D, its own graph apart from the fit's world (PLUGIN_GOAL 67-69): the craft holds exactly the vault's computation-graph artifacts -- the cockpit as ego, each slate, each notebook whose cell has run, each note on the plane -- with their cells and markdown trees, every node linked to ego (containment, the kernel's order, a {ref} from one note's tree to another's); none of its nodes is a node of the fit's graph; a run's recorded input, a chunk of the world, is wired to its cell's note (I/O); the map view (third person) frames the craft beside the world, both on screen; the ego view (first person) draws it as an INSET -- every node on screen, its footprint under half the lens (2026-11-14, PLUGIN_GOAL 157: 'I cannot find our ego anywhere'); planted (plantNoLinks) the craft falls apart, (plantHiddenInEgo) it is not drawn in the ego view, (plantNoInset) it is drawn around the camera and fills the lens",
+      asks: "the ego computation graph is ONE unit in 3D, its own graph apart from the fit's world (PLUGIN_GOAL 67-69): the craft holds exactly the vault's computation-graph artifacts -- the cockpit as ego, each slate, each notebook whose cell has run, each note on the plane -- with their cells and markdown trees, every node linked to ego (containment, the kernel's order, a {ref} from one note's tree to another's); none of its nodes is a node of the fit's graph; a run's recorded input, a chunk of the world, is wired to its cell's note (I/O); the map view (third person) frames the craft beside the world, both on screen (the 3D layout; the 2D plane is on the camera, PLUGIN_GOAL 159, so the world is framed under it, both centred); the ego view (first person) draws it as an INSET -- every node on screen, its footprint under half the lens (2026-11-14, PLUGIN_GOAL 157: 'I cannot find our ego anywhere'); planted (plantNoLinks) the craft falls apart, (plantHiddenInEgo) it is not drawn in the ego view, (plantNoInset) it is drawn around the camera and fills the lens",
       async run() {
         // 2026-11-01: "the full ego computation graph as one unit, its own
         // graph separate from the red of the UMAPped components, all
@@ -8405,7 +8405,8 @@ export function makeChecks(env) {
           const pa = "domvec/graph/g299 a " + stamp + ".md", pb = "domvec/graph/g299 b " + stamp + ".md";
           const out = { planted };
           try {
-            c.plantNoLinks = planted === "links"; c.plantHiddenInEgo = planted === "hidden"; c.plantNoInset = planted === "lens";
+            // (lens) the 2D plane off the camera too (159): with it on, plantNoInset alone draws nothing around the camera.
+            c.plantNoLinks = planted === "links"; c.plantHiddenInEgo = planted === "hidden"; c.plantNoInset = planted === "lens"; c.plantPlaneOnWorld = planted === "lens";
             // Two notes through the create tool: A binds a tree; B reads A's
             // tree by {ref} and runs a cell whose input is a chunk of the world.
             // A name no other note binds: a ref resolves by name, and a second
@@ -8451,7 +8452,7 @@ export function makeChecks(env) {
             const ndc = (p) => { const v = new (c.nodes[0].mesh.position.constructor)(p.x, p.y, p.z).project(cam); return [Math.round(v.x * 100) / 100, Math.round(v.y * 100) / 100, v.z]; };
             const sh = g.shellOf(world);
             const e = c.where();
-            out.third = { drawn: c.stats.visible, craft: ndc(e), world: ndc({ x: sh.cx, y: sh.cy, z: sh.cz }) };
+            out.third = { drawn: c.stats.visible, on_camera: c.onCamera(), craft: ndc(e), world: ndc({ x: sh.cx, y: sh.cy, z: sh.cz }) };
             // First person: drawn, and where -- every node's NDC, the footprint.
             g.agent.setMode("ego"); await sleep(1200);
             out.drawn_in_ego = c.stats.visible;
@@ -8464,7 +8465,7 @@ export function makeChecks(env) {
               h: pts.length ? Math.round((Math.max(...ys) - Math.min(...ys)) * 100) / 100 : null, stats: c.stats.inset || null };
             return out;
           } finally {
-            c.plantNoLinks = false; c.plantHiddenInEgo = false; c.plantNoInset = false; c.dirty();
+            c.plantNoLinks = false; c.plantHiddenInEgo = false; c.plantPlaneOnWorld = false; c.plantNoInset = false; c.dirty();
             g.agent.setMode(mode0);
             for (const p of [pa, pb]) { try { await d.trash(p); } catch (e) { /* gone */ } }
           }
@@ -8482,7 +8483,8 @@ export function makeChecks(env) {
                 && !!c.membership && c.membership.missing.length === 0 && c.membership.extra.length === 0
                 && c.ref_ab && c.in_world === 0 && c.io >= 1
                 && third.drawn && onScreen(third.craft) && onScreen(third.world)
-                && Math.hypot(third.craft[0] - third.world[0], third.craft[1] - third.world[1]) > 0.2
+                // Beside the world in the 3D layout; on the camera (159) both centred is right.
+                && (third.on_camera || Math.hypot(third.craft[0] - third.world[0], third.craft[1] - third.world[1]) > 0.2)
                 && insetOk(c)
                 && !!links && !!links.summary && links.summary.reached_from_ego < links.summary.nodes
                 && !!hidden && hidden.drawn_in_ego === false
@@ -9988,7 +9990,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-333",
-      asks: "the ego is a non-holonomic vehicle (PLUGIN_GOAL 116): D turns the heading without moving the camera, W moves it along the heading with nothing sideways; V to third person puts the camera behind the vehicle looking at it, the craft drawn there in the ego view, W in third person moves the vehicle and the camera follows; V back puts the camera in the cockpit; the cockpit panel's camera field follows V and an edit of it picks the view, at rest (planted plantNoCameraField: the text never follows); planted (plantStrafe) D slides the camera sideways",
+      asks: "the ego's keys (PLUGIN_GOAL 116, as 159 changed them: 'keys should be lateral on the camera plane ... the left-right arrows are better off with the rotational aspect', 'a complementary roll function for *both* q and e'): D slides the camera sideways along its own right with no turn, W moves it along the heading with nothing sideways, E rolls it; V to third person puts the camera behind the vehicle looking at it, the craft drawn there in the ego view, W in third person moves the vehicle and the camera follows; V back puts the camera in the cockpit; the cockpit panel's camera field follows V and an edit of it picks the view, at rest (planted plantNoCameraField: the text never follows); planted (plantTurnAD, plantRollR) D turns the heading in place and E does nothing",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
@@ -9997,13 +9999,14 @@ export function makeChecks(env) {
           const k = (key) => a.key(new KeyboardEvent("keydown", { key }));
           const P = () => cam.position.clone(), T = () => ctl.target.clone();
           const dir = () => T().sub(P()).normalize();
-          a.plantStrafe = ${planted};
+          a.plantTurnAD = ${planted}; a.plantRollR = ${planted};
           const out = { planted: ${planted} };
           try {
             a.setMode("ego"); a.setView("first");
             const p0 = P(), d0 = dir();
             cam.updateMatrixWorld(); const right = new cam.position.constructor().setFromMatrixColumn(cam.matrixWorld, 0);
             k("d");
+            out.d_lateral = Math.round(P().sub(p0).dot(right) * 1000) / 1000;
             out.turn_moved = Math.round(P().distanceTo(p0) * 1000) / 1000;
             out.turn_angle = Math.round(Math.acos(Math.max(-1, Math.min(1, dir().dot(d0)))) * 1000) / 1000;
             const p1 = P(), h1 = dir();
@@ -10021,15 +10024,17 @@ export function makeChecks(env) {
             for (let i = 0; i < 30 && !(v.craft && v.craft.group && v.craft.group.visible); i++) await new Promise((r) => setTimeout(r, 100));
             out.craft_drawn = !!(v.craft && v.craft.group && v.craft.group.visible);
             const v0 = { ...a.vehicle.p }, c0 = P();
+            // (third person) E rolls the camera about its view normal.
             k("w");
             out.vehicle_moved = Math.round(Math.hypot(a.vehicle.p.x - v0.x, a.vehicle.p.y - v0.y, a.vehicle.p.z - v0.z) * 1000) / 1000;
             out.camera_followed = Math.round(P().distanceTo(c0) * 1000) / 1000;
             k("v");
+            { const u0 = cam.up.clone(); k("e"); out.e_rolled = Math.round(Math.acos(Math.max(-1, Math.min(1, cam.up.clone().normalize().dot(u0.normalize())))) * 1000) / 1000; }
             out.back_first = a.view === "first" && P().distanceTo(new cam.position.constructor(a.vehicle.p.x, a.vehicle.p.y, a.vehicle.p.z)) < 1e-3;
             out.stats = a.vehicleStats;
             return out;
           } finally {
-            a.plantStrafe = false;
+            a.plantTurnAD = false; a.plantRollR = false;
             a.setView("first");
             cam.position.copy(save.p); ctl.target.copy(save.t); cam.up.copy(save.u); cam.lookAt(ctl.target); ctl.update && ctl.update();
             a.setMode(save.mode);
@@ -10078,11 +10083,11 @@ export function makeChecks(env) {
         })()`, { timeout: 60000 });
         const pclean = await panel(false);
         const pplanted = await panel(true);
-        const ok = (x) => !!x && x.turn_moved < 1e-3 && x.turn_angle > 0.01 && x.forward > 0 && x.sideways < 1e-3
+        const ok = (x) => !!x && x.d_lateral > 1e-3 && x.turn_angle < 1e-3 && x.forward > 0 && x.sideways < 1e-3 && x.e_rolled > 0.01
           && x.third && x.cam_behind > 1 && x.looks_at_vehicle && x.craft_drawn && x.vehicle_moved > 0 && x.camera_followed > 0 && x.back_first;
         const pOk = !!pclean && pclean.text_after_v === "third" && pclean.view_after_edit === "first" && pclean.text_after_edit === "first"
           && !!pplanted && pplanted.text_after_v !== "third";
-        return { pass: ok(clean) && !!planted && planted.turn_moved > 1e-3 && !ok(planted) && pOk,
+        return { pass: ok(clean) && !!planted && planted.turn_angle > 0.01 && planted.e_rolled < 1e-6 && !ok(planted) && pOk,
                  evidence: { clean, planted, panel: pclean, panel_planted: pplanted } };
       },
     },
@@ -10181,8 +10186,120 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-343",
+      asks: "a panel is above the scene, not part of it (PLUGIN_GOAL 159: 'I also can't scroll when hovered over the panels'; 'Clicking on notebook panel doesn't block clicks from reaching the 3D graph editor'): a press, release, click, wheel and shift+wheel on a panel on the 2D plane reach NONE of the scene's gestures -- no craft pick (drag, click), no screen pick (the click fallback), no zoom-through, no plane zoom -- so the panel scrolls and clicks as itself; planted (plantPanelsPassThrough) the same events reach the scene's picks, as before",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(1000);
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const c = window.__domvecCraft, desk = window.__domvecPlane;
+          if (!g || !c || !desk) return { error: "no graph, craft or plane" };
+          const NL = String.fromCharCode(10);
+          const path = "domvec-checks/g343 " + (${planted} ? "p" : "c") + Date.now() + ".md";
+          const mode0 = g.agent.mode;
+          const calls = { craft_pick: 0, screen_pick: 0, zoom_through: 0, plane_zoom: 0 };
+          const wrap = (o, k, tag) => { const f = o[k]; o[k] = function (...a) { calls[tag]++; return f.apply(this, a); }; return () => { o[k] = f; }; };
+          const undo = [];
+          try {
+            await desk.create("slate", { path, text: ["---", "domvec: slate", "---", "g343", "", "line", "line", "line"].join(NL) });
+            let card = null;
+            for (let i = 0; i < 30 && !card; i++) { await sleep(200); card = desk.panelOf(path)?.card || null; }
+            if (!card) return { error: "no card" };
+            await sleep(600);
+            const t = card.querySelector(".cm-content") || card.querySelector(".markdown-preview-view") || card;
+            g.agent.setMode("ego"); await sleep(400);
+            g.plantPanelsPassThrough = ${planted};
+            const kept0 = g.panelGuardStats.kept_off;
+            undo.push(wrap(c, "nodeAt", "craft_pick"), wrap(g, "nodeAtScreen", "screen_pick"), wrap(g.agent, "zoomThrough", "zoom_through"), wrap(c, "zoomPlane", "plane_zoom"));
+            const r = t.getBoundingClientRect(), x = r.left + Math.min(40, r.width / 2), y = r.top + Math.min(20, r.height / 2);
+            const o = { clientX: x, clientY: y, bubbles: true, cancelable: true, composed: true, button: 0 };
+            t.dispatchEvent(new PointerEvent("pointerdown", { ...o, buttons: 1, pointerId: 1, pointerType: "mouse" }));
+            t.dispatchEvent(new PointerEvent("pointerup", { ...o, buttons: 0, pointerId: 1, pointerType: "mouse" }));
+            t.dispatchEvent(new MouseEvent("click", o));
+            const w1 = new WheelEvent("wheel", { ...o, deltaY: -120 }); t.dispatchEvent(w1);
+            const w2 = new WheelEvent("wheel", { ...o, deltaY: -120, shiftKey: true }); t.dispatchEvent(w2);
+            await sleep(80);
+            return { planted: ${planted}, calls, wheel_prevented: w1.defaultPrevented, shift_wheel_prevented: w2.defaultPrevented, kept_off: g.panelGuardStats.kept_off - kept0 };
+          } finally {
+            for (const u of undo) u();
+            g.plantPanelsPassThrough = false;
+            g.agent.setMode(mode0);
+            try { desk.panelOf(path)?.leaf.detach(); } catch (e) {}
+            const f = app.vault.getAbstractFileByPath(path); if (f) await app.vault.trash(f, true);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        const none = (k) => Object.values(k || {}).every((n) => n === 0);
+        return {
+          pass: !c.error && none(c.calls) && c.wheel_prevented === false && c.shift_wheel_prevented === false && c.kept_off > 0
+                && !p.error && !none(p.calls),
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
+      id: "G-344",
+      asks: "the ego's 2D plane is ON THE CAMERA, centred, in the map view too (PLUGIN_GOAL 159: 'the 2D plane must be always at a constant distance from the UI HUD. Currently, it is stuck to a 3D origin rather than the origin of the camera plane'; 'There is also parallax on camera pans of the ego which is incorrect because the ego needs to be centroided'): after a pan, an orbit and a dolly (zoom) of the camera, the craft's centre in CAMERA space is where it was -- on the view axis (|x|,|y| under 2% of its depth) at the same depth (within 0.5%), a fixed distance from the lens; planted (plantPlaneOnWorld) it sits on the world anchor (the focus), and the dolly changes its distance from the lens by more than 10%",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          const c = window.__domvecCraft;
+          if (!g || !c || !g.graph) return { error: "no graph or craft" };
+          const cam = g.graph.camera(), ctl = g.graph.controls();
+          const save = { p: cam.position.clone(), t: ctl.target.clone(), u: cam.up.clone(), mode: g.agent.mode, flat: c.flatView, ps: { ...c.planeShift } };
+          // The craft's centre is its EGO node (local 0): the group stays at the
+          // origin and each mesh is placed in world coordinates.
+          const inCam = () => { cam.updateMatrixWorld(); const ego = c.nodes.find((n) => n.kind === "ego"); const v = ego.mesh.getWorldPosition(cam.position.clone()).applyMatrix4(cam.matrixWorldInverse); return { x: v.x, y: v.y, z: v.z }; };
+          // Settled = drawn: two render-hook placements after the move (a
+          // background window renders slowly), up to 4 s; the planted arm has
+          // no hook placements and waits on the frames only.
+          let waits = 0;
+          const settle = async () => { const n0 = c.insetStats.plane_places; for (let i = 0; i < 4; i++) await new Promise((r) => requestAnimationFrame(() => r(0)));
+            for (let i = 0; i < 40 && !${planted} && c.insetStats.plane_places < n0 + 2; i++) { await sleep(100); waits++; } await sleep(100); };
+          try {
+            c.flatView = true; c.planeShift = { x: 0, y: 0 }; c.plantPlaneOnWorld = ${planted}; c.key = "";
+            g.agent.setMode("map"); await sleep(1200); await settle();
+            const a = inCam();
+            // A pan: camera and focus moved together along the camera's right by a fifth of the distance.
+            const d = cam.position.distanceTo(ctl.target);
+            cam.updateMatrixWorld(); const right = cam.position.clone().setFromMatrixColumn(cam.matrixWorld, 0).normalize();
+            cam.position.addScaledVector(right, d * 0.2); ctl.target.addScaledVector(right, d * 0.2); ctl.update && ctl.update();
+            await settle();
+            const b = inCam();
+            // An orbit: the camera turned about the focus by 0.4 rad.
+            const off = cam.position.clone().sub(ctl.target); off.applyAxisAngle(cam.up.clone().normalize(), 0.4);
+            cam.position.copy(ctl.target.clone().add(off)); cam.lookAt(ctl.target); ctl.update && ctl.update();
+            await settle();
+            const o = inCam();
+            // A dolly: the camera 30% closer to the focus.
+            cam.position.lerp(ctl.target, 0.3); ctl.update && ctl.update();
+            await settle();
+            const z = inCam();
+            const r3 = (v) => ({ x: Math.round(v.x * 100) / 100, y: Math.round(v.y * 100) / 100, z: Math.round(v.z * 100) / 100 });
+            return { planted: ${planted}, view: c.stats.view, before: r3(a), after_pan: r3(b), after_orbit: r3(o), after_dolly: r3(z), plane_places: c.insetStats.plane_places, waits };
+          } finally {
+            c.plantPlaneOnWorld = false; c.flatView = save.flat; c.planeShift = save.ps; c.key = "";
+            cam.position.copy(save.p); ctl.target.copy(save.t); cam.up.copy(save.u); cam.lookAt(ctl.target); ctl.update && ctl.update();
+            g.agent.setMode(save.mode);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const on = (v, z0) => !!v && Math.abs(v.x) < 0.02 * Math.abs(z0) && Math.abs(v.y) < 0.02 * Math.abs(z0) && Math.abs(v.z - z0) < 0.005 * Math.abs(z0);
+        const c = clean || {}, p = planted || {};
+        const z0 = c.before ? c.before.z : 0;
+        return {
+          pass: !c.error && z0 < 0 && on(c.before, z0) && on(c.after_pan, z0) && on(c.after_orbit, z0) && on(c.after_dolly, z0)
+                && !p.error && !!p.before && !!p.after_dolly && Math.abs(p.after_dolly.z - p.before.z) > 0.1 * Math.abs(p.before.z),
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-340",
-      asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) and a pinch (wheel + ctrl) scale the 2D ego plane and leave the camera's distance alone; a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
+      asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) scales the 2D ego plane and leaves the camera's distance alone; a pinch (wheel + ctrl) does NOT touch the plane (159: 'remove the pinch gesture ... stick to shift scroll'); a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -10214,7 +10331,7 @@ export function makeChecks(env) {
         const still = (x) => Math.abs(x - 1) < 0.01;
         return {
           pass: !c.error && c.shift.plane_ratio > 1.2 && still(c.shift.camera_ratio)
-                && c.pinch.plane_ratio > 1.2 && still(c.pinch.camera_ratio)
+                && still(c.pinch.plane_ratio)
                 && !still(c.plain.camera_ratio) && still(c.plain.plane_ratio)
                 && !!p.shift && still(p.shift.plane_ratio),
           evidence: { clean, planted },
@@ -10444,6 +10561,9 @@ export function makeChecks(env) {
               const cx = r.left + (o.x + 1) / 2 * r.width, cy = r.top + (1 - o.y) / 2 * r.height;
               const ev = (type) => new PointerEvent(type, { clientX: cx, clientY: cy, bubbles: true, pointerId: 1, pointerType: "mouse", button: 0, buttons: type === "pointerdown" ? 1 : 0 });
               el.dispatchEvent(ev("pointermove")); await frame(); await frame(); await sleep(250);
+              // The ego's 2D plane is on the camera, above the world (159): a
+              // point under one of its nodes is the ego's click, not this one.
+              if (window.__domvecCraft?.nodeAt?.(cx, cy)) { out.skipped_under_ego = (out.skipped_under_ego || 0) + 1; out.tried--; continue; }
               const top = document.elementFromPoint(cx, cy);
               if (top && top !== el && !top.closest(".is-preview")) {
                 // A panel the reader had open before the check is the reader's

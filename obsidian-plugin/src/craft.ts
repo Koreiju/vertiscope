@@ -226,12 +226,27 @@ export class Craft {
   insetShift = { x: 0, y: -0.4 };
   /** Third person: the craft's offset from its anchor, moved by a drag. */
   mapShift = { x: 0, y: 0, z: 0 };
+  /**
+   * The 2D plane is ON THE CAMERA in every view, centred (PLUGIN_GOAL 159:
+   * "the 2D plane must be always at a constant distance from the UI HUD.
+   * Currently, it is stuck to a 3D origin rather than the origin of the
+   * camera plane"; "There is also parallax on camera pans of the ego which is
+   * incorrect because the ego needs to be centroided"). Its offset on screen,
+   * in half-extents (0,0 the centre); dragging it moves this. Planted
+   * (`plantPlaneOnWorld`): the 2D plane on the world anchor, as before.
+   */
+  planeShift = { x: 0, y: 0 };
+  plantPlaneOnWorld = false;
+  /** Placed on the camera: the first-person inset, or the 2D plane in any view. */
+  onCamera(): boolean {
+    return (this.host.mode() === "ego" && !this.plantNoInset) || (this.flatView && !this.plantPlaneOnWorld);
+  }
   /** Planted: the inset placed on the TICK with a rounded redraw key, as it
    *  was -- it trailed the camera and snapped ("significant shaking of the
    *  ego when moving around", 2026-11-14). Now it is placed in the scene's
    *  onBeforeRender, after the camera has moved for that frame. */
   plantInsetOnTick = false;
-  insetStats = { render_places: 0, tick_places: 0 };
+  insetStats = { render_places: 0, tick_places: 0, plane_places: 0 };
   private hookedScene: any = null;
   /** Planted (146): the craft's map never turns with the heading. */
   plantFixedFrame = false;
@@ -596,6 +611,14 @@ export class Craft {
   }
 
   /** Planted: the layout as placed, clumps and all (items 119/121). */
+  /** The flat layout's half-extent (labels included), from the last relax. */
+  flatExtent: { x: number; y: number } | null = null;
+  /** Planted: the inset at the fixed angle's distance, however wide the layout. */
+  plantInsetFixedDistance = false;
+  /** Planted: on the 2D plane, the 3D layout's ellipse instead of the label's box. */
+  plantFlatEllipse = false;
+  /** Planted: labels offset along the world's x and y, not the craft's frame. */
+  plantLabelWorldOffset = false;
   plantNoRelax = false;
   relaxStats: any = { from_plane: 0, iters: 0, overlaps_before: 0, overlaps_after: 0, flat_overlaps_before: 0, flat_overlaps_after: 0, max_shift: 0 };
 
@@ -617,11 +640,22 @@ export class Craft {
     const links = this.edges.map((e) => [idx.get(e.a), idx.get(e.b)]).filter(([a, b]) => a !== undefined && b !== undefined) as [number, number][];
     // Collision ellipse half-axes: a label is ~0.4R wide (x1.4 in the inset)
     // and ~0.14R tall; the node itself 0.05R.
-    const AX = R * 0.34, AY = R * 0.16, AZ = R * 0.16, BOUND = R * 2.2;
+    let AX = R * 0.34, AY = R * 0.16;
+    const AZ = R * 0.16, BOUND = R * 2.2;
+    // On the 2D plane a node's footprint is its LABEL's box -- 0.4R x 0.1R,
+    // x1.4 as drawn there -- and two equal boxes clear each other only a full
+    // width apart; a power-4 norm is near that box, corners included. The 3D
+    // layout keeps the ellipse. Planted `plantFlatEllipse`: the ellipse on the
+    // plane too, as before (G-338: 6 label pairs overlapping, as many as with
+    // no relax at all).
+    const P4 = (x: number, y: number) => Math.sqrt(Math.sqrt(x * x * x * x + y * y * y * y));
     const run = (key: "local" | "flat", flat: boolean) => {
+      const box = flat && !this.plantFlatEllipse;
+      AX = box ? R * 0.6 : R * 0.34; AY = box ? R * 0.16 : R * 0.16;
+      const norm = (dx: number, dy: number, dz: number) => box ? P4(dx, dy) : Math.hypot(dx, dy, dz);
       const P = nodes.map((n) => ({ ...(n as any)[key] }));
       const home = P.map((p) => ({ ...p }));
-      const overlaps = () => { let c = 0; for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) { const dx = (P[j].x - P[i].x) / AX, dy = (P[j].y - P[i].y) / AY, dz = flat ? 0 : (P[j].z - P[i].z) / AZ; if (dx * dx + dy * dy + dz * dz < 1) c++; } return c; };
+      const overlaps = () => { let c = 0; for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) { const dx = (P[j].x - P[i].x) / AX, dy = (P[j].y - P[i].y) / AY, dz = flat ? 0 : (P[j].z - P[i].z) / AZ; if (norm(dx, dy, dz) < 1) c++; } return c; };
       const before = overlaps();
       let it = 0;
       for (; it < 300; it++) {
@@ -629,7 +663,7 @@ export class Craft {
         let hit = 0;
         for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) {
           let dx = (P[j].x - P[i].x) / AX, dy = (P[j].y - P[i].y) / AY, dz = flat ? 0 : (P[j].z - P[i].z) / AZ;
-          let d = Math.hypot(dx, dy, dz);
+          let d = norm(dx, dy, dz);
           if (d >= 1.15) continue;   // pushed to a MARGIN past touching: at 1.0 the home spring held them just inside
           if (d < 1) hit++;
           if (d < 1e-6) { const a = (i * 2.399 + j) % (2 * Math.PI); dx = Math.cos(a); dy = Math.sin(a); dz = 0; d = 1e-6; }
@@ -682,6 +716,11 @@ export class Craft {
     }
     const a = run("local", false), b = run("flat", true);
     (this.relaxStats as any).from_plane = fromPlane;
+    // The flat layout's half-extent, labels included (0.56R wide as drawn on
+    // the plane), for the camera distance that keeps it under half the lens.
+    let ex = 0, ey = 0;
+    for (const n of nodes) if (n.flat) { ex = Math.max(ex, Math.abs(n.flat.x) + R * 0.6); ey = Math.max(ey, Math.abs(n.flat.y) + R * 0.12); }
+    this.flatExtent = { x: ex, y: ey };
     this.relaxStats = { from_plane: fromPlane, iters: a.it + b.it, overlaps_before: a.before, overlaps_after: a.after, flat_overlaps_before: b.before, flat_overlaps_after: b.after, max_shift: Math.round(Math.max(a.ms, b.ms) / R * 100) / 100 };
   }
 
@@ -812,14 +851,22 @@ export class Craft {
     const cam = this.host.camera();
     if (!cam || !cam.position) return null;
     const R = this.stats.radius || 10;
-    const D = R / Math.tan((this.insetDeg * Math.PI) / 180);
+    // At least the fixed angle's distance; further when the flat layout is
+    // wider than 45% of the lens there (G-299: the label-sized relax spread it
+    // to 56%). Before the reader's own plane zoom, which scales on top.
+    // Planted `plantInsetFixedDistance`: the fixed angle only.
+    const tanH = Math.tan(((cam.fov || 50) * Math.PI) / 360), asp = cam.aspect || 1, E = this.flatExtent;
+    const fit = this.plantInsetFixedDistance || !E ? 0 : Math.max(E.x / (0.45 * tanH * asp), E.y / (0.45 * tanH));
+    const D = Math.max(R / Math.tan((this.insetDeg * Math.PI) / 180), fit);
+    // First person keeps its lowered inset; the 2D plane elsewhere is centred.
+    const shift = this.host.mode() === "ego" && !this.plantNoInset ? this.insetShift : this.planeShift;
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
     const halfH = D * Math.tan(((cam.fov || 50) * Math.PI) / 360);
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
     const halfW = halfH * (cam.aspect || 1);
     const p = cam.position.clone().addScaledVector(fwd, D)
-      .addScaledVector(up, halfH * this.insetShift.y).addScaledVector(right, halfW * this.insetShift.x);
+      .addScaledVector(up, halfH * shift.y).addScaledVector(right, halfW * shift.x);
     (this.stats as any).inset = { D: Math.round(D), deg: this.insetDeg };
     return { at: { x: p.x, y: p.y, z: p.z }, q: cam.quaternion.clone() };
   }
@@ -957,7 +1004,8 @@ export class Craft {
     const facing = insetMode || this.flatView;
     if (facing && !fromRender && !this.plantInsetOnTick) return;
     if (insetMode) { if (fromRender) this.insetStats.render_places++; else this.insetStats.tick_places++; }
-    const inset = insetMode ? this.inset() : null;
+    else if (this.flatView && !this.plantPlaneOnWorld && fromRender) this.insetStats.plane_places++;
+    const inset = insetMode || (this.flatView && !this.plantPlaneOnWorld) ? this.inset() : null;
     const at = inset ? inset.at : this.where();
     this.stats.anchor = { x: Math.round(at.x), y: Math.round(at.y), z: Math.round(at.z) };
     // Pulses move every frame, before the redraw key can skip it (G-331).
@@ -986,7 +1034,7 @@ export class Craft {
     const zs = this.planeScale;
     const pos = (n: CraftNode) => { const L = (inset || this.flatView) && n.flat ? n.flat : n.local; tmp.set(L.x * zs, L.y * zs, L.z * zs).applyQuaternion(this.q); return { x: at.x + tmp.x, y: at.y + tmp.y, z: at.z + tmp.z }; };
     const kN = (inset ? this.insetNodeScale : 1) * this.planeScale, kL = (inset ? this.insetLabelScale : 1) * this.planeScale;
-    (this.stats as any).view = inset ? "inset" : this.flatView ? "2d" : "3d";
+    (this.stats as any).view = insetMode ? "inset" : this.flatView ? "2d" : "3d";
     for (const n of this.nodes) { const p = pos(n); n.mesh?.position.set(p.x, p.y, p.z); n.mesh?.scale.setScalar(kN); }
     {
       const sel = this.selected ? byId.get(this.selected) : null;
@@ -1004,7 +1052,12 @@ export class Craft {
       } else if (this.selRing) this.selRing.visible = false;
     }
     const R = this.stats.radius || 10;
-    for (const s of this.labels) { const n = byId.get(s.__for); if (n) { const p = pos(n); s.position.set(p.x + R * 0.2 * kL, p.y + R * 0.07 * kL, p.z); s.scale.set(R * 0.4 * kL, R * 0.1 * kL, 1); } }
+    // The label's offset from its node along the CRAFT's own right and up --
+    // on the camera's plane, the screen's -- not the world's x and y: on a
+    // plane facing the camera the world axes put a label anywhere around its
+    // node, in depth too (2026-11-14). Planted `plantLabelWorldOffset`.
+    const lo = this.plantLabelWorldOffset ? new THREE.Vector3(R * 0.2 * kL, R * 0.07 * kL, 0) : new THREE.Vector3(R * 0.2 * kL, R * 0.07 * kL, 0).applyQuaternion(this.q);
+    for (const s of this.labels) { const n = byId.get(s.__for); if (n) { const p = pos(n); s.position.set(p.x + lo.x, p.y + lo.y, p.z + lo.z); s.scale.set(R * 0.4 * kL, R * 0.1 * kL, 1); } }
     const pts: number[] = [];
     for (const e of this.edges) {
       const a = byId.get(e.a), b = byId.get(e.b);
@@ -1145,9 +1198,10 @@ export class Craft {
     const el = this.host.canvas(), cam = this.host.camera();
     if (!el || !cam) return;
     const r = el.getBoundingClientRect();
-    if (this.host.mode() === "ego" && !this.plantNoInset) {
-      this.insetShift.x = Math.max(-0.95, Math.min(0.95, this.insetShift.x + (2 * dx) / r.width));
-      this.insetShift.y = Math.max(-0.95, Math.min(0.95, this.insetShift.y - (2 * dy) / r.height));
+    if (this.onCamera()) {
+      const s = this.host.mode() === "ego" && !this.plantNoInset ? this.insetShift : this.planeShift;
+      s.x = Math.max(-0.95, Math.min(0.95, s.x + (2 * dx) / r.width));
+      s.y = Math.max(-0.95, Math.min(0.95, s.y - (2 * dy) / r.height));
     } else {
       const at = this.where();
       const dist = cam.position.distanceTo(new THREE.Vector3(at.x, at.y, at.z));

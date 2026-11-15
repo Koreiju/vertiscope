@@ -121,7 +121,7 @@ export class Cockpit {
   private seenSlateQuery = "";
   private seenEngineQuery = "";
   private lastQuery = "";
-  private lastSeen = { mode: "", throttle: -1, action: "", hitsKey: "", playing: false, query: "", searchKey: "" };
+  private lastSeen = { mode: "", throttle: -1, action: "", hitsKey: "", playing: false, query: "", searchKey: "", view: "" };
   private slider: HTMLElement | null = null;
   private hoveredRow = -1;
   private frontRow = -1;
@@ -667,7 +667,10 @@ export class Cockpit {
     if (a.mode === this.lastSeen.mode && thr === this.lastSeen.throttle && a.lastAction === this.lastSeen.action
         && this.hitsKey(g) === this.lastSeen.hitsKey && a.playing === this.lastSeen.playing
         && (g.searchField?.query ?? "") === this.lastSeen.query
-        && this.searchKey(g) === this.lastSeen.searchKey) return;
+        && this.searchKey(g) === this.lastSeen.searchKey
+        // The camera view too: a V that changed nothing else was never written
+        // back (G-333's panel arm, 2026-11-14) -- the tick returned here.
+        && a.view === this.lastSeen.view) return;
     let fs = parseSlate(v.editor.getValue());
     const put = (path: string[], value: string) => { const fl = this.field(fs, ...path); if (fl) { this.setValue(fl, value); fs = parseSlate(v.editor.getValue()); } };
     put(["view"], a.mode);
@@ -718,7 +721,10 @@ export class Cockpit {
       this.seenEngine = { k: f.k, n: f.total };
       this.linkStats.synced++;
     }
-    this.lastSeen = { mode: a.mode, throttle: thr, action: a.lastAction, hitsKey: this.hitsKey(g), playing: a.playing, query: g.searchField?.query ?? "", searchKey: this.searchKey(g) };
+    // The view counts as seen only once it is in the text (it is written at
+    // rest only): otherwise the next tick tries again.
+    this.lastSeen = { mode: a.mode, throttle: thr, action: a.lastAction, hitsKey: this.hitsKey(g), playing: a.playing, query: g.searchField?.query ?? "", searchKey: this.searchKey(g),
+                      view: this.cameraText === a.view ? a.view : this.lastSeen.view };
     this.writeResults();
   }
 

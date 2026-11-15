@@ -21,7 +21,7 @@
  * rather than starting another -- and it brakes so as to stop at the FLOOR,
  * a fixed distance from the target, never nearer. The wheel zooms on its
  * own. With no target the craft coasts to a stop. Arrows turn the camera
- * about the focus (yaw, pitch); Q/R roll it about the view normal.
+ * about the focus (yaw, pitch); Q/E roll it about the view normal.
  *
  * A key acts only while the pointer is over the graph and nothing is typed
  * into -- the rule `arrowPan` already followed.
@@ -53,9 +53,9 @@ const KEY = "domvec.useragent";
 
 /** The keys the agent answers, and what each does, as the strip shows them. */
 const CAPS: [string, string, string][] = [
-  ["w", "W", "forward"], ["a", "A", "turn left"], ["s", "S", "back"], ["d", "D", "turn right"],
+  ["w", "W", "forward"], ["a", "A", "slide left"], ["s", "S", "back"], ["d", "D", "slide right"],
   ["v", "V", "first / third person"],
-  ["q", "Q", "roll left"], ["r", "R", "roll right"],
+  ["q", "Q", "roll left"], ["e", "E", "roll right"],
   ["ArrowLeft", "←", "yaw left about the focus"], ["ArrowRight", "→", "yaw right about the focus"],
   ["ArrowUp", "↑", "pitch up about the focus"], ["ArrowDown", "↓", "pitch down about the focus"],
   ["Shift", "⇧", "throttle up"], ["Control", "ctrl", "throttle down"],
@@ -88,7 +88,7 @@ export class UserAgent {
   accel = 120;
   /** Radians a second the heading may turn toward a new target. */
   turn = 1.6;
-  /** Radians per key step for arrows and Q/R. */
+  /** Radians per key step for arrows and Q/E. */
   rotStep = 0.035;
   target: any = null;
   /** World units: where THIS flight stops -- the reader's zoom distance when
@@ -348,7 +348,7 @@ export class UserAgent {
     this.draw();
   }
 
-  /** KSP's keys, arrows and Q/R. Returns true when the key was the agent's. */
+  /** KSP's keys, arrows and Q/E. Returns true when the key was the agent's. */
   key(e: KeyboardEvent): boolean {
     if (e.altKey || e.metaKey) return false;
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -358,11 +358,16 @@ export class UserAgent {
     else if (bare("Control")) this.setThrottle(this.throttle - 0.05);
     else if (e.ctrlKey || e.shiftKey) took = false;          // a shortcut, not ours
     else if (k === "w" || k === "s") this.move(k);
-    // NON-HOLONOMIC (PLUGIN_GOAL 116, G-333): A/D turn the heading; the
-    // vehicle never slides sideways. Planted `plantStrafe`: they strafe.
-    else if (k === "a" || k === "d") { if (this.plantStrafe) this.move(k); else this.turnHeading(k === "a" ? 1 : -1); }
+    // LATERAL in the camera plane (PLUGIN_GOAL 159, over 116's non-holonomic
+    // A/D: "s and d keys should be lateral on the camera plane in the 3D
+    // space, since the left-right arrows are better off with the rotational
+    // aspect"). The arrows turn. Planted `plantTurnAD`: A/D turn the heading,
+    // as 116 had them.
+    else if (k === "a" || k === "d") { if (this.plantTurnAD) this.turnHeading(k === "a" ? 1 : -1); else this.move(k); }
     else if (k === "v") this.setView(this.view === "first" ? "third" : "first");
-    else if (k === "q" || k === "r") this.roll(k === "q" ? -1 : 1);
+    // Q and E roll, as a pair (159: "a complementary roll function for *both*
+    // q and e"). Planted `plantRollR`: the old Q/R pair.
+    else if (k === "q" || k === (this.plantRollR ? "r" : "e")) this.roll(k === "q" ? -1 : 1);
     else if (k === "ArrowLeft" || k === "ArrowRight") this.orbit(k === "ArrowLeft" ? 1 : -1, 0);
     else if (k === "ArrowUp" || k === "ArrowDown") this.orbit(0, k === "ArrowUp" ? 1 : -1);
     else took = false;
@@ -401,8 +406,10 @@ export class UserAgent {
   view: "first" | "third" = "first";
   plantCraftLeftBehind = false;
   plantStoredUp = false;
-  /** Planted (G-333): A/D strafe sideways, as before the vehicle. */
-  plantStrafe = false;
+  /** Planted (G-333, 159): A/D turn the heading, as 116's vehicle had them. */
+  plantTurnAD = false;
+  /** Planted (159): roll right on R, as before; E does nothing. */
+  plantRollR = false;
   vehicleStats = { turns: 0, views: 0, sideways_max: 0 };
   /** The vehicle's place and heading (third person keeps them apart from the camera). */
   vehicle: { p: any; dir: any } | null = null;
@@ -505,13 +512,16 @@ export class UserAgent {
     ctl.update?.();
   }
 
-  /** W/S: forward/back along the heading at the throttle's speed (A/D only when planted to strafe). */
+  /** W/S: forward/back along the heading; A/D: sideways in the camera's plane -- at the throttle's speed. */
   private move(k: string): void {
     const { ctl, right, back, cam } = this.axes();
     if (!ctl || !ctl.target) return;
     const s = Math.max(0.05, this.throttle) * this.vmax * 0.12;      // one key step
-    if (this.view === "third" && this.vehicle && (k === "w" || k === "s")) {
-      const d = this.vehicle.dir, sg = k === "w" ? 1 : -1;
+    if (this.view === "third" && this.vehicle) {
+      // Third person: the VEHICLE moves -- along its heading (W/S) or across
+      // the camera's plane (A/D) -- and the chase camera follows.
+      const sg = k === "w" || k === "d" ? 1 : -1;
+      const d = k === "w" || k === "s" ? this.vehicle.dir : right;
       this.vehicle.p = v3(this.vehicle.p.x + d.x * s * sg, this.vehicle.p.y + d.y * s * sg, this.vehicle.p.z + d.z * s * sg);
       this.target = null;
       this.chase();
@@ -530,7 +540,7 @@ export class UserAgent {
     ctl.update?.();
   }
 
-  /** Q/R: roll about the view normal. */
+  /** Q/E: roll about the view normal. */
   private roll(sign: number): void {
     const { cam, ctl, back } = this.axes();
     if (!ctl) return;
