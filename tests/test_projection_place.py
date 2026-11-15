@@ -122,17 +122,34 @@ def test_the_fit_itself_is_unchanged():
     `_spread` still has to SPREAD -- the fix must not have turned the
     transform into a no-op by copying the wrong thing.
     """
+    from domvec.obsidian import layout as L
     rng = np.random.default_rng(11)
     coords = rng.normal(0.0, 2.0, (300, 3)).astype(np.float32)
-    out = _spread(coords.copy(), 3)
+    # The RANK spread maps each axis exactly onto 0..1 and keeps its order
+    # exactly. `_declump` (6a54546, 2026-11-08 -- after this test was written)
+    # then relaxes each point by at most half the median gap, by design, so
+    # an edge point may sit a hair past an end (-0.015 on this sample) and a
+    # near tie may swap. The two are measured apart.
+    L.PLANT_NO_DECLUMP[0] = True
+    try:
+        ranked = _spread(coords.copy(), 3)
+    finally:
+        L.PLANT_NO_DECLUMP[0] = False
     for axis in range(3):
-        col = out[:, axis]
+        col = ranked[:, axis]
         assert abs(float(col.min())) < 1e-6 and abs(float(col.max()) - 1.0) < 1e-6, \
             "axis %d was not spread onto 0..1: %.3f..%.3f" % (
                 axis, col.min(), col.max())
         # Order preserved exactly, which is the other half of the contract.
         assert np.array_equal(np.argsort(col), np.argsort(coords[:, axis])), \
             "axis %d changed the order of the points" % axis
+    out = _spread(coords.copy(), 3)
+    gap = float(L._LAST_FIT["declump"]["target"])
+    for axis in range(3):
+        col = out[:, axis]
+        assert -gap <= float(col.min()) and float(col.max()) <= 1.0 + gap, \
+            "axis %d left 0..1 by more than one median gap (%.4f): %.3f..%.3f" % (
+                axis, gap, col.min(), col.max())
 
 
 # --- G-12: a fit is persisted and queried back -------------------------------
