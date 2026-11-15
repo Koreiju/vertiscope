@@ -353,3 +353,49 @@ Open (not started this session):
 - Ad-blocking beyond uBlock (YouTube ad skip): needs downloads -> the user's permission.
 - `build/` (253k files) inside the vault: the user's call where stores live.
 - Third-person framing: the world's centre can sit just off screen after a mode switch (G-299 'third' arm, NDC x -0.54..-1.08 across runs).
+
+## PLUGIN_GOAL 159 (2026-11-14), item by item
+
+Done and confirmed live (each check carries a planted arm that fails):
+
+| Item (159's words, shortened) | Check | Commit |
+|---|---|---|
+| 2D plane at a constant distance from the HUD; no parallax, centroided | G-344 (ego at camera-space (0,0,-148.6) through pan/orbit/dolly; planted: 847 -> 593) | cd49b13 |
+| Can't scroll over panels; clicks on a panel reach the 3D graph | G-343 (0 scene picks from panel events; planted 3/1/1/1) | cd49b13 |
+| Remove pinch; shift+scroll only zooms the plane | G-340 (pinch plane ratio 1.0) | cd49b13 |
+| A/D lateral on the camera plane; Q and E roll | G-333 (D slides 19.2, E rolls 0.052 rad); also fixed the cockpit camera field never following V | cd49b13 |
+| (found on the way) ego labels overlapping; label offset in world axes | G-338 (6 -> 0 label overlaps), G-299 | cd49b13 |
+| The "beef" node: named, opens; dangling tags not drawn | G-345; tests/test_md_title.py | 978b0f6 |
+| (found on the way) streaming node tagged by its temporary id | G-346 | a020a4f |
+| Panels resizable from edges on hover | G-347 | eb3c5bc |
+| Hoverable gesture guides: 2D, 3D, README tools | G-348 | 27f070f |
+| (screenshot) code:// link raised the OS "Open external link?" | G-349 (window.open + anchor; the live-preview click itself not driven) | edb1aea |
+| Node shrinking from further away, less at the end | G-350 -- PARAMETER check only; not measured on screen | 28e30b4 |
+
+Measured, not fixed:
+- **G-113 fails**: hovering a stored chunk on the fixture page flew the
+  camera to a streaming node for the page's whole `/html/body`, not the
+  chunk under the pointer; its panel did not open. This is the answer to
+  "Not sure if hovering browser chunks engages the fly-to anymore": it
+  flies, to the wrong node.
+- Picture nodes are clamped to 22-28 px (`uMinPicPx`/`uMaxPicPx`); likely
+  the "very small node preview", untouched.
+- The harness reads a busy sidecar as "died" and stops the run (seen
+  three times today; the process was healthy each time).
+
+Open (not started this session):
+- Double-click fly: the 2D camera plane flies to a linked node and takes
+  it in at the intersection (MIMO: the rank-1 centroid).
+- World nodes' panels as the authority for every 2D representation;
+  "rendering issues with representations" not yet itemised.
+- Hover previews with text headers / semantic anchors (raw markdown names
+  such as "[[Only include res..." are still the world nodes' names).
+- The search bar as a draggable retrieval cell panel; search over all
+  code artifacts; the empty-cell hyperlink chain.
+- Cell hierarchies / black-box unfolding for code, markdown and notebook
+  cells as ego states (persisted alongside the game state).
+- Chat cells: several-minute latency; prompt/response cells hard-linked
+  in sequence; context control.
+- Scanning and streaming to the 3D graph: still slow.
+- Lag between node form and panel form; the selected node visible
+  through a panel.
