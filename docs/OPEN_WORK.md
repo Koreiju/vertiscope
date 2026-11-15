@@ -516,6 +516,18 @@ Open (not started this session):
         nearest-neighbour median of 8.4;
       - near-page max 0.51-0.94;
       - the page's chunks not folded 10 s after leaving it.
+  - G-113 (68b3169), hover fly-to (PLUGIN_GOAL 159: "Not sure if hovering
+    browser chunks engages the fly-to anymore"). It does: one agent flight
+    to the hovered page's streamed chunk, and a panel from the hover in
+    21-48 ms. The check still fails on its bar, which is the STORED chunk.
+    That chunk's dedup lead is a copy on an earlier run's fixture page
+    (new port each run), and in the pages view it never draws.
+    **Question for the reader:** when a hovered chunk's lead lives on another
+    page, should the camera fly there, or stay on this page's chunk?
+    Candidates tried and reverted because they were untestable here:
+    - a drawn stand-in should not block /place;
+    - a /place reply should survive later polls while the pointer stays on
+      the same chunk (each poll bumps hoverSeq and drops it).
   - Store question, not acted on: one document under four url leaves
     (Trie#~v and the malformed Trie##~v). Whether those addresses should exist
     at all is a capture/dedup question for the trie.
