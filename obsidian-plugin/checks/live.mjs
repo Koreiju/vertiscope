@@ -10798,6 +10798,34 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-357",
+      asks: "search covers every code artifact (PLUGIN_GOAL 159: 'the completeness of results to be for all code artifacts in our db'): every module the codebase ingest selects (the sidecar's own iter_sources, GET /code/sources) has its chunks in the store after a sync, and a query scoped to the chat backend's module finds it (before the sync, 18 of 145 modules -- chat.py among them -- had none, because a module was indexed only when saved through the plugin); planted (sync with plant) nothing is indexed and whatever was missing stays missing. Run first on a store with a gap, the planted arm shows it; on an already-synced store it can only show 0 indexed",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const S = "http://127.0.0.1:8788";
+          const cy = async (q) => (await (await fetch(S + "/cypher", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: q }) })).json()).rows || [];
+          const sources = (await (await fetch(S + "/code/sources")).json()).urls || [];
+          const stored = async () => new Set((await cy("MATCH (c:Chunk) WHERE c.url STARTS WITH 'code://repo/' AND NOT c.url ENDS WITH '#~v' RETURN DISTINCT c.url")).map((r) => r[0]));
+          const missing = async () => { const s = await stored(); return sources.filter((u) => !s.has(u)); };
+          const sync = async (plant) => (await fetch(S + "/code/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plant }) })).json();
+          const m0 = await missing();
+          const planted = await sync(true), mP = await missing();
+          const clean = await sync(false), m1 = await missing();
+          const hit = await (await fetch(S + "/search?" + new URLSearchParams({ q: "HermesBackend chat session GEN_LOCK", url: "code://repo/chat.py", k: "3" }))).json();
+          return { sources: sources.length, missing_before: m0.length, missing_sample: m0.slice(0, 8),
+                   planted: { indexed: planted.indexed, planted: planted.planted, missing_after: mP.length },
+                   clean: { indexed: clean.indexed, unchanged: clean.unchanged, failed: clean.failed, gone: clean.gone, ms: clean.ms, busy: !!clean.busy, missing_after: m1.length, missing_left: m1.slice(0, 8) },
+                   chat_hits: (hit && hit.n) || 0 };
+        })()`, { timeout: 900000 });
+        const g = got || {};
+        return {
+          pass: !!g.sources && g.planted && g.planted.indexed === 0 && g.planted.missing_after === g.missing_before
+                && g.clean && !g.clean.busy && g.clean.missing_after === 0 && g.chat_hits > 0,
+          evidence: got,
+        };
+      },
+    },
+    {
       id: "G-354",
       asks: "one chat generation at a time on the shared model (PLUGIN_GOAL 159, chat cells; 2026-11-14 two turns at once crashed the worker with an access violation in gpt4all): two chat-cell turns sent together through the running sidecar never run at once -- the second WAITS (waited_ms near the first's length) and neither is refused; planted (plant_unlocked) both run together (in_flight 2). Both arms use dry_ms, a turn without the model, so the planted arm cannot take the worker down",
       async run() {

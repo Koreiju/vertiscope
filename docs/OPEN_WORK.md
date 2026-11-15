@@ -417,10 +417,15 @@ Open (not started this session):
   - A FRESH worker: 45 tokens/s on CUDA, 0.25 s to the first token, 2.5 s
     for the cold load. The model and its 8,192-token KV cache take 5.4 GB
     and leave 1,052 MB of the 8 GB card.
-  - A LONG-RUNNING worker: 0.6-1.3 tokens/s and 39-43 s to the first token,
-    at 100% GPU. Not yet explained: VRAM spill was the first guess, but
-    torch held 2 MB when measured; the worker also held 23.3 GB private
-    with 1.1 GB of 31.6 free and the machine paging (~450 pages/s).
+  - A LONG-RUNNING worker: 0.5-1.3 tokens/s and 11-43 s to the first token,
+    at 100% GPU. EXPLAINED (61230be): torch on the same card. Tokens/s fell
+    41.8 -> 8.4 -> 0.52 as torch's reserve rose 3,984 -> 4,288 -> 8,912 MB;
+    the model needs 5.4 GB of 8,188, so past ~2.8 GB of torch it is paged
+    to system memory. The 5.1 GB live allocation was pumap's landmark
+    selection, ONE cdist of a page's rows against all ~85k held rows; now
+    blocked (34 vs 347 MB peak on a 3k x 20k test, identical picks) and
+    torch's cache given back after every fit/update. NOT YET confirmed on
+    a warm live worker.
   - CRASH: two turns on the one gpt4all model at once -> "Windows fatal
     exception: access violation" in `prompt_model`. FIXED: `chat.GEN_LOCK`
     serializes every generation on the shared model (a second turn waits,

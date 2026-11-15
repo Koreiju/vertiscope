@@ -1188,6 +1188,103 @@ def _source_file(url: str):
     return None
 
 
+#: Planted: no codebase sync -- a module reaches the store only when saved
+#: through the plugin (`POST /source`), as before.
+PLANT_NO_CODE_SYNC = [False]
+_CODE_SYNC_LOCK = threading.Lock()
+
+
+def _sync_code(workspace, *, limit: Optional[int] = None) -> Dict:
+    """The codebase into the trie, as it is on disk NOW (PLUGIN_GOAL 159: "the
+    completeness of results to be for all code artifacts in our db").
+
+    A module reached the store only when saved through the plugin
+    (`POST /source`); written or edited any other way -- git, an editor, a
+    session like this one -- it was never indexed. Measured 2026-11-14: 18 of
+    145 `domvec/` modules had no chunk at all (`chat.py`, `models.py`,
+    `front.py`, `slate.py`, `blackbox.py` ...), so a search for the chat
+    backend could not return the chat backend, and every module edited since
+    its last save was searched as it USED to read.
+
+    O(files) to hash, O(delta) to write: each module's text is hashed and
+    compared with the ledger of what was last indexed (`code_index.json`);
+    a missing or changed one goes through `index_source` -> `_project_page`,
+    the path a save takes. One file per `_WORK_LOCK` hold, standing aside for
+    foreground work between files. A module deleted from disk is REPORTED
+    (`gone`), never purged: removing pages is not this loop's call."""
+    import hashlib
+    from ..source import iter_sources, source_url
+    out = {"files": 0, "indexed": 0, "unchanged": 0, "failed": 0, "gone": 0, "ms": 0, "planted": bool(PLANT_NO_CODE_SYNC[0])}
+    if PLANT_NO_CODE_SYNC[0] or workspace is None or getattr(workspace, "read_only", False):
+        return out
+    if not _CODE_SYNC_LOCK.acquire(blocking=False):
+        out["busy"] = True
+        return out
+    t0 = time.time()
+    try:
+        base = Path(__file__).resolve().parents[1]
+        ledger_path = Path(workspace.path) / "code_index.json"
+        try:
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except Exception:                           # noqa: BLE001
+            ledger = {}
+        seen = set()
+        done_now: List[str] = []
+        for path, rel in iter_sources(base):
+            url = source_url("repo", rel)
+            seen.add(url)
+            out["files"] += 1
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                out["failed"] += 1
+                continue
+            h = hashlib.sha1(text.encode("utf-8")).hexdigest()
+            if ledger.get(url) == h:
+                out["unchanged"] += 1
+                continue
+            if limit is not None and out["indexed"] >= limit:
+                continue
+            _yield_to_foreground()
+            try:
+                with _WORK_LOCK:
+                    workspace.index_source(text, rel, root="repo")
+                _project_page(workspace, url)
+                ledger[url] = h
+                out["indexed"] += 1
+                done_now.append(url)
+            except Exception:                       # noqa: BLE001
+                out["failed"] += 1
+        out["gone"] = sum(1 for u in ledger if u.startswith("code://repo/") and u not in seen)
+        try:
+            ledger_path.write_text(json.dumps(ledger, sort_keys=True), encoding="utf-8")
+        except OSError:
+            pass
+        if done_now:
+            _LAST_WRITE[0] = time.time()
+        out["sample"] = done_now[:20]
+    finally:
+        out["ms"] = round((time.time() - t0) * 1000)
+        _CODE_SYNC_LOCK.release()
+    _profile("code_sync", {k: v for k, v in out.items() if k != "sample"})
+    return out
+
+
+def _code_sync_forever(workspace, stop) -> None:
+    """`_sync_code` two minutes after start (the store and the projector warm
+    first), then every five: a module written outside the plugin is
+    searchable within five minutes of being saved."""
+    if stop.wait(120.0):
+        return
+    while True:
+        try:
+            _sync_code(workspace)
+        except Exception as exc:                    # noqa: BLE001
+            _profile("code_sync", {"error": str(exc)[:160]})
+        if stop.wait(300.0):
+            return
+
+
 def _project_page(workspace, url: str) -> None:
     """Queue every chunk a page holds now, plus any the projector still
     holds for it that the page has lost."""
@@ -2793,6 +2890,28 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, {"trees": bool(trees.strip()), "diagnostics": [d.to_json() for d in diags]})
             except Exception as exc:                # noqa: BLE001
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
+        if route == "code/sync":
+            # The codebase sync on demand (`_sync_code`); the harness's door.
+            # `plant` runs it as before the sync: nothing indexed.
+            if self.client_address[0] not in ("127.0.0.1", "::1"):
+                self._send(403, {"error": "loopback only"})
+                return
+            if not self.capture_allowed or self.workspace is None:
+                self._send(403, {"error": "writing is off (start with --capture)"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}") or {}
+            except Exception:                       # noqa: BLE001
+                body = {}
+            was = PLANT_NO_CODE_SYNC[0]
+            PLANT_NO_CODE_SYNC[0] = bool(body.get("plant"))
+            try:
+                self._send(200, _sync_code(self.workspace, limit=body.get("limit")))
+            finally:
+                PLANT_NO_CODE_SYNC[0] = was
             return
 
         if route == "source":
@@ -4562,6 +4681,15 @@ class _Handler(BaseHTTPRequestHandler):
                              "since_write_s": round(time.time() - _LAST_WRITE[0], 1)})
             return
 
+        if segments[:2] == ["code", "sources"]:
+            # The modules the codebase sync reads, by the sync's OWN selection
+            # (`iter_sources`) -- so a check comparing the store against the
+            # disk does not reimplement what it measures. Read-only.
+            from ..source import iter_sources, source_url
+            base = Path(__file__).resolve().parents[1]
+            self._send(200, {"urls": [source_url("repo", rel) for _p, rel in iter_sources(base)]})
+            return
+
         if segments[0] == "profile":
             query = parse_qs(parts.query)
             if (query.get("reset") or [""])[0]:
@@ -5580,6 +5708,8 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
                          name="domvec-poison-watch", daemon=True).start()
         threading.Thread(target=_warm_containment, args=(workspace, stop),
                          name="domvec-warm-containment", daemon=True).start()
+        threading.Thread(target=_code_sync_forever, args=(workspace, stop),
+                         name="domvec-code-sync", daemon=True).start()
     if workspace is not None:
         threading.Thread(target=_build_codegraph, args=(workspace,),
                          name="domvec-codegraph", daemon=True).start()
