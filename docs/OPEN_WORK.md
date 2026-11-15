@@ -371,7 +371,8 @@ Done and confirmed live (each check carries a planted arm that fails):
 | Hoverable gesture guides: 2D, 3D, README tools | G-348 | 27f070f |
 | (screenshot) code:// link raised the OS "Open external link?" | G-349 (window.open + anchor; the live-preview click itself not driven) | edb1aea |
 | Node shrinking from further away, less at the end | G-350 -- PARAMETER check only; not measured on screen | 28e30b4 |
-| Hover headers, not raw markdown (the okapi tooltip); tooltip text escaped | G-351 | (this commit) |
+| Hover headers, not raw markdown (the okapi tooltip); tooltip text escaped | G-351 | b05ce8d |
+| The selected node seen through a panel: the tether's end ring drawn over the card | G-352 | (this commit) |
 
 Measured, not fixed:
 - **G-113 fails** (passed 2026-10-07): hovering a chunk on the fixture
@@ -410,5 +411,4 @@ Open (not started this session):
 - Chat cells: several-minute latency; prompt/response cells hard-linked
   in sequence; context control.
 - Scanning and streaming to the 3D graph: still slow.
-- Lag between node form and panel form; the selected node visible
-  through a panel.
+- Lag between node form and panel form.

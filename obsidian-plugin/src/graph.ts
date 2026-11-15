@@ -2169,7 +2169,9 @@ export class GraphView extends ItemView {
     return true;
   }
   intoCraftStats = { flown: 0 };
-  tetherStats = { drawn: 0 };
+  tetherStats = { drawn: 0, under_panel: 0 };
+  /** Planted (159): a tether drawn to a node hidden behind a panel, over the panel. */
+  plantTetherOverPanels = false;
   private tetherSvg: SVGSVGElement | null = null;
   private tetherAt = 0;
   private drawTethers(): void {
@@ -2186,7 +2188,7 @@ export class GraphView extends ItemView {
     }
     const svg = this.tetherSvg;
     while (svg.firstChild) svg.firstChild.remove();
-    this.tetherStats.drawn = 0;
+    this.tetherStats.drawn = 0; this.tetherStats.under_panel = 0;
     if (this.plantNoTether || !C.group?.visible) return;
     const desk: any = (window as any).__domvecPlane;
     const cam = g.camera(), pr = plane.getBoundingClientRect(), cr = this.canvasEl!.getBoundingClientRect();
@@ -2199,6 +2201,13 @@ export class GraphView extends ItemView {
       v.copy(n.mesh.position).project(cam);
       if (v.z > 1) continue;
       const x2 = cr.left + (v.x + 1) / 2 * cr.width - pr.left, y2 = cr.top + (1 - v.y) / 2 * cr.height - pr.top;
+      // A node BEHIND a panel (the ego is on the camera now, under the cards)
+      // gets no tether: its end ring was drawn over the panel's text (159: "I
+      // can also see the selected node in the background of the panel").
+      if (!this.plantTetherOverPanels) {
+        const over = document.elementFromPoint(x2 + pr.left, y2 + pr.top) as HTMLElement | null;
+        if (over?.closest?.(".domvec-plane-card, .domvec-bb")) { this.tetherStats.under_panel++; continue; }
+      }
       const r = card.getBoundingClientRect();
       const cx = r.left + r.width / 2 - pr.left, cy = r.top + r.height / 2 - pr.top;
       const dx = x2 - cx, dy = y2 - cy;

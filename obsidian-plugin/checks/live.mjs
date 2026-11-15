@@ -10609,6 +10609,56 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-352",
+      asks: "nothing of the ego is drawn over a panel (PLUGIN_GOAL 159: 'I can also see the selected node in the background of the panel' -- the tether's end ring, drawn in a layer above the cards, at a node now under them): with a plane card placed over its own ego node, no tether ring or line end lies inside any card; the node is counted as under a panel; planted (plantTetherOverPanels) the ring is drawn inside the card",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          await window.__domvec.act("open", "graph"); await sleep(800);
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, c = window.__domvecCraft, desk = window.__domvecPlane;
+          if (!g || !c || !desk) return { error: "no graph, craft or plane" };
+          const NL = String.fromCharCode(10);
+          const path = "domvec-checks/g352 " + (${planted} ? "p" : "c") + Date.now() + ".md";
+          const mode0 = g.agent.mode;
+          try {
+            g.agent.setMode("map"); await sleep(600);
+            await desk.create("slate", { path, text: ["---", "domvec: slate", "---", "g352", ""].join(NL) });
+            let card = null; for (let i = 0; i < 30 && !card; i++) { await sleep(200); card = desk.panelOf(path)?.card || null; }
+            if (!card) return { error: "no card" };
+            await c.fresh(); for (let i = 0; i < 4; i++) await frame();
+            const node = c.nodes.find((n) => n.path === path && n.mesh);
+            if (!node) return { error: "no ego node for the card" };
+            // The card moved over its own node's place on screen.
+            const cam = g.graph.camera(), cr = g.canvasEl.getBoundingClientRect(), plane = card.offsetParent, pr = plane.getBoundingClientRect();
+            c.group.updateMatrixWorld(true);
+            const v = node.mesh.position.clone().project(cam);
+            const sx = cr.left + (v.x + 1) / 2 * cr.width, sy = cr.top + (1 - v.y) / 2 * cr.height;
+            card.style.right = "auto"; card.style.left = (sx - pr.left - card.offsetWidth / 2) + "px"; card.style.top = (sy - pr.top - card.offsetHeight / 2) + "px";
+            g.plantTetherOverPanels = ${planted}; g.tetherAt = 0; g.drawTethers();
+            const svg = plane.querySelector(".domvec-tethers");
+            const cards = [...plane.querySelectorAll(".domvec-plane-card")].map((e) => e.getBoundingClientRect());
+            const inside = (x, y) => cards.some((r) => x > r.left + 1 && x < r.right - 1 && y > r.top + 1 && y < r.bottom - 1);
+            const rings = svg ? [...svg.querySelectorAll("circle")].map((e) => [Number(e.getAttribute("cx")) + pr.left, Number(e.getAttribute("cy")) + pr.top]) : [];
+            return { planted: ${planted}, node_under_card: inside(sx, sy), rings: rings.length, rings_in_cards: rings.filter(([x, y]) => inside(x, y)).length, under_panel: g.tetherStats.under_panel };
+          } finally {
+            g.plantTetherOverPanels = false;
+            try { desk.panelOf(path)?.leaf.detach(); } catch (e) {}
+            const f = app.vault.getAbstractFileByPath(path); if (f) await app.vault.trash(f, true);
+            try { localStorage.removeItem("domvec-plane-card:" + path); } catch (e) {}
+            g.agent.setMode(mode0);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: !c.error && c.node_under_card === true && c.rings_in_cards === 0 && c.under_panel >= 1
+                && !p.error && p.node_under_card === true && p.rings_in_cards >= 1,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-340",
       asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) scales the 2D ego plane and leaves the camera's distance alone; a pinch (wheel + ctrl) does NOT touch the plane (159: 'remove the pinch gesture ... stick to shift scroll'); a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
       async run() {
