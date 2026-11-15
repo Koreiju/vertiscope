@@ -934,7 +934,7 @@ export function makeChecks(env) {
     return { clean: await arm(""), late: await arm("late"), scatter: await arm("scatter"), dup: await arm("dup") };
   })());
 
-  const tidyFixtures = async (origin) => {
+  const tidyFixtures = async (origin, asPrefix = false) => {
     try {
       if (!origin) return -1;
       // The cell's RESTORE memory first (2026-11-15, G-113 runs 86-90): the
@@ -945,7 +945,7 @@ export function makeChecks(env) {
       // only where it names THIS origin; a reader's own page is kept.
       try {
         await evaluate(`(() => {
-          const O = ${JSON.stringify(origin + "/")}, hit = (u) => String(u || "").startsWith(O);
+          const O = ${JSON.stringify(asPrefix ? origin : origin + "/")}, hit = (u) => String(u || "").startsWith(O);
           let n = 0;
           for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) {
             const v = l.view; if (v && hit(v.ownUrl)) { v.ownUrl = ""; n++; }
@@ -958,7 +958,7 @@ export function makeChecks(env) {
           return n;
         })()`);
       } catch { /* the purge below still runs */ }
-      const listed = await ask("/pages?contains=" + encodeURIComponent(origin + "/"));
+      const listed = await ask("/pages?contains=" + encodeURIComponent(asPrefix ? origin : origin + "/"));
       let removed = 0;
       for (const url of listed.urls || []) {
         const res = await fetch(`${SIDECAR}/purge`, {
@@ -2372,9 +2372,13 @@ export function makeChecks(env) {
         // Search Assist panels; then "Tests aren't validating on the original
         // websites"). A query string of its own per arm makes each a page new
         // to the store.
-        const arm = (planted) => evaluate(`(async () => {
+        const arm = (planted, plant2 = "") => evaluate(`(async () => {
           ${PREP}
           if (${planted}) b.plant.add("distilled-panels");
+          const gvP = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          gvP.plantPinFollowsForeignLead = ${JSON.stringify(plant2)} === "foreign-lead";
+          const skipped0 = gvP.pinForeignLeadSkipped || 0;
+          if (${JSON.stringify(plant2)} && ${JSON.stringify(plant2)} !== "foreign-lead") b.plant.add(${JSON.stringify(plant2)});
           const words = (t) => String(t || "").replace(/\\s+/g, " ").trim().toLowerCase().split(" ").filter(Boolean);
           // Share of the page's words the panel says, IN ORDER (greedy subsequence).
           const inOrder = (page, panel) => {
@@ -2386,7 +2390,7 @@ export function makeChecks(env) {
           const lofi = (t) => /\\(\\s[^)]{1,80}\\s\\)/.test(t) || /\\]\\(/.test(t) || /^\\s*- /m.test(t);
           try {
             for (const p of b.pinnedState()) b.unpin(p.cid);
-            const target = "https://duckduckgo.com/?q=radix+trie&ia=web&d36=" + (${planted} ? "p" : "c") + Date.now();
+            const target = "https://duckduckgo.com/?q=radix+trie&ia=web&d36=" + (${JSON.stringify(plant2)} ? "u" : ${planted} ? "p" : "c") + Date.now();
             await land(target, 25000);
             // Stored first: a pin reads its chunk from the store.
             for (let i = 0; i < 60 && !(b.pipebox && b.pipebox.map.url === target && b.pipebox.map.size > 0); i++) await sleep(250);
@@ -2414,6 +2418,12 @@ export function makeChecks(env) {
             // can be open beside the pinned one, and the first .domvec-bb in
             // the document was the hover panel (an empty board, 2026-10-07).
             const pinCid = (b.pinnedState()[0] || {}).cid || "";
+            // Did the pin land on the result the reader pointed at? The pinned
+            // address and the aimed result, related in the page itself.
+            const pinMatched = (b.pinnedState()[0] || {}).matched || "";
+            const pin_on_aim = pinMatched ? await b.webview.executeJavaScript("(function(x){var n=document.evaluate(x,document,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;" +
+              "var li=document.querySelector('article[data-testid=\\\"result\\\"]');if(n&&n.nodeType===3)n=n.parentElement;return !!(n&&li&&(li.contains(n)||(n.contains(li)&&n.querySelectorAll('article').length<=1)));})(" + JSON.stringify(pinMatched) + ")").catch(() => null) : null;
+            if (${JSON.stringify(plant2)} === "unscaled-pin") return { planted: ${JSON.stringify(plant2)}, pins: b.pinnedState().length, pin_matched: pinMatched, pin_on_aim, aim: at };
             // The pin's panel waits for its vector, and a duplicate is drawn
             // by another chunk's billboard (pinAlias).
             const gv0 = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
@@ -2443,6 +2453,14 @@ export function makeChecks(env) {
                        images: imgs.length, images_loaded: imgs.filter((i) => i.complete && i.naturalWidth > 0).length };
             };
             const card = read(".domvec-pin-card"), board = read(".domvec-bb");
+            // The panel's own state, read before anything is closed: which form
+            // it settled in and whether the page form had a snapshot to draw.
+            const en0 = gv0.billboards.get(bbId());
+            const snapHeld = window.__domvecSnapshotGet ? window.__domvecSnapshotGet(bbId()) : undefined;
+            const panel_state = en0 ? { form: en0.form || null, userForm: !!en0.userForm, pageEmpty: !!en0.pageEmpty, savedForm: !!en0.savedForm,
+              stuck: !!en0.pinned, node_url: String(en0.node.url || "").slice(-40), virtual: !!en0.node.virtual, here: String(b.currentPage()).slice(-40),
+              snap_held: snapHeld === undefined ? "unexposed" : !!snapHeld, snap_chars: snapHeld ? String(snapHeld.html || "").length : 0,
+              page_try: en0.pageTry || null, form_log: en0.formLog || [], body_has_frame: !!en0.el.querySelector(".domvec-bb-body iframe"), body_has_cell: !!en0.el.querySelector(".domvec-bb-body .domvec-bb-cell") } : null;
             // A chunk of the open page opened from the GRAPH (not pinned): its
             // billboard asks the browser for the snapshot (2026-09-27: "the 3D
             // gui is not reflecting the same structure of panel as in the
@@ -2461,22 +2479,33 @@ export function makeChecks(env) {
             }
             const diag = { want: [...(gv0.pinWanted || [])], alias: [...(gv0.pinAlias || [])], bbs: [...gv0.billboards.keys()],
                            place: await gv0.sidecar.place([pinCid]).then((x) => ({ n: (x.nodes || []).map((n) => n.cid + "@" + String(n.url).slice(-20)), al: x.aliases, unk: x.unknown, unplaced: x.unplaced })).catch((e) => String(e)) };
-            return { planted: ${planted}, diag, pins: b.pinnedState().length, pin_cid: pinCid, boards_open: boards,
+            return { planted: ${JSON.stringify(plant2)} || ${planted}, diag, pins: b.pinnedState().length, pin_cid: pinCid,
+                     foreign_lead_skipped: (gvP.pinForeignLeadSkipped || 0) - skipped0,
+                     panel_state, pin_matched: pinMatched || null, pin_on_aim, aim: at, boards_open: boards,
                      snapshot: b.lastSnapshot, page, card, board, from_graph: fromGraph };
           } finally {
             for (const p of b.pinnedState()) b.unpin(p.cid);
             b.plant.clear();
+            gvP.plantPinFollowsForeignLead = false;
           }
         })()`, { timeout: 120000 });
         try {
           const clean = await arm(false);
           const planted = await arm(true);
+          // The pin's aim: the reader's point is the pane's, the page's
+          // elementFromPoint takes CSS px. Planted: handed over unscaled.
+          const unscaled = await arm(false, "unscaled-pin");
           const looks = (x, p) => x.frame && x.in_order >= 0.9 && !x.lofi
             && x.title_color === p.title && x.crumb_color === p.crumb_color && x.crumb_deco === p.crumb_deco;
+          // One form drawn: the page form ALONE, no editor cell left under it.
           const ok = (r) => r.pins === 1 && looks(r.card, r.page) && looks(r.board, r.page)
+            && !!r.panel_state && !(r.panel_state.body_has_frame && r.panel_state.body_has_cell)
             && r.card.images_loaded >= 1
             && !!r.from_graph && r.from_graph.form === "page" && r.from_graph.elements > 3;
-          return { pass: ok(clean) && !ok(planted), evidence: { clean, planted } };
+          return { pass: ok(clean) && clean.pin_on_aim === true && !ok(planted) && (planted.board.text || "").trim().length > 0 && !!unscaled && unscaled.pin_on_aim !== true,
+                   evidence: { clean, planted, planted_unscaled: unscaled,
+                               // This check's own query pages, and only those.
+                               purged: await tidyFixtures("https://duckduckgo.com/?q=radix+trie&ia=web&d36=", true) } };
         } finally { /* nothing served */ }
       },
     },
@@ -3216,7 +3245,11 @@ export function makeChecks(env) {
             // asked for the lead on another page and found nothing).
             const hk = out.handed.lead;
             const baseOf = (k) => String(k).split("|")[0];
-            const hits = (k) => { const bk = baseOf(k); return bk === hk || (!!out.flew_to && (bk === out.flew_to || bk.slice(0, 60) === out.flew_to)); };
+            // ...or the HOVERED chunk's own panel: since a copy is drawn on its own
+            // page (PLUGIN_GOAL 162), the flight can land on the drawn stored node
+            // while the hover's panel is keyed by the streamed chunk (run 124).
+            const hovered = new Set((out.calls || []).map((c) => baseOf(c.cid)).filter((c) => c.startsWith("f:")));
+            const hits = (k) => { const bk = baseOf(k); return bk === hk || hovered.has(bk) || (!!out.flew_to && (bk === out.flew_to || bk.slice(0, 60) === out.flew_to)); };
             const e = v.billboards.get(hk) || [...v.billboards.entries()].find(([k]) => hits(k))?.[1];
             out.panel_key = (() => { const f = [...v.billboards.keys()].find((k) => k === hk || hits(k)); return f ? String(f).slice(0, 120) : null; })();
             // Text where the reader sees it: the body, its shadow roots, and the
@@ -3300,12 +3333,13 @@ export function makeChecks(env) {
                 const lead = got && got.aliases && got.aliases[st];
                 const ln = lead && (got.nodes || []).find((n) => (n.cid ?? n.id) === lead);
                 seen.push({ stored: st, lead: lead || null, lead_url: ln ? ln.url : null });
-                if (lead && ln && docOf(ln.url) === A) { pick = { ...p, stored: st, lead }; break; }
+                // A lead on ANY page but B: with identical content, a copy left by a run whose purge failed can be the lead (run 105: run 101's A, purge lost to a sidecar crash).
+                if (lead && ln && docOf(ln.url) !== B) { pick = { ...p, stored: st, lead, lead_url: ln.url }; break; }
               }
               if (!pick) await sleep(700);
             }
             out.candidates = seen.slice(0, 6);
-            if (!pick) return { ...out, error: "precondition: no chunk of B is aliased to a lead on A" };
+            if (!pick) return { ...out, error: "precondition: no chunk of B is aliased to a lead on another page" };
             out.pick = pick;
             // As a reader arrives: nothing placed or aliased for this page yet.
             v.plantFlyToForeignLead = ${planted};
@@ -3341,8 +3375,10 @@ export function makeChecks(env) {
             } finally { v.highlightChunk = hc; }
             out.hover_in_page = await b.webview.executeJavaScript("(function(){var h=document.querySelectorAll(':hover');return h.length?h[h.length-1].tagName+'#'+(h[h.length-1].id||''):null;})()").catch(() => "err");
             out.cross_page_refused = (b.hoverStats && b.hoverStats.cross_page_refused) || 0;
-            if (!calls.some((c) => c.cid && !String(c.cid).startsWith("f:"))) break;
-            overridden++;
+            // Retried too when the hover never arrived (run 124: no calls, the
+            // pointer's move not delivered to the page).
+            if (calls.length && !calls.some((c) => c.cid && !String(c.cid).startsWith("f:"))) break;
+            if (!calls.length) out.hover_missed = (out.hover_missed || 0) + 1; else overridden++;
             wc2.sendInputEvent({ type: "mouseMove", x: -8, y: -8 }); wc2.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 });
             await sleep(800);
             }
@@ -3357,13 +3393,38 @@ export function makeChecks(env) {
             const doc = streamed ? docOf(String(out.flew_to).slice(2)) : docOf(fnode && fnode.url);
             // The lead's absorbed node may carry no url (run 94: flew to A's
             // lead, read ""): the flight to the lead itself is A's by definition.
-            out.flew_on = !out.flown ? null : out.flew_to === pick.lead ? "A" : doc === B ? "B" : doc === A ? "A" : String(doc).slice(0, 80);
+            out.flew_on = !out.flown ? null : out.flew_to === pick.lead ? "A" : doc === B ? "B" : doc === docOf(pick.lead_url || A) ? "A" : String(doc).slice(0, 80);
             out.foreign_leads = v.hoverStats.foreign_lead || 0;
             out.lead_page_unknown = v.hoverStats.lead_page_unknown || 0;
             out.alias_kept = v.hoverAliases.get(pick.stored) || null;
+            // The PIN, by the same rule (PLUGIN_GOAL 162): pinned on B, the
+            // shared chunk's panel is B's own copy, never A's lead -- only B is
+            // open, so only B's copy can be drawn live (D-36, run 110). Pinned
+            // by address, as the right-click resolves one; planted
+            // plantPinFollowsForeignLead: the panel opens on the lead.
+            v.plantPinFollowsForeignLead = ${planted};
+            const skip0 = v.pinForeignLeadSkipped || 0;
+            for (const p of b.pinnedState()) b.unpin(p.cid);
+            // The hover above draws B's copy as its own unit node (G-38's fix,
+            // PLUGIN_GOAL 162), and a pin finding a drawn node never decides
+            // anything (run 123: skipped 0 in both arms). Dropped, so the pin
+            // makes its own decision between B's copy and A's lead.
+            const hadCopyNode = v.graph.graphData().nodes.some((n) => n.id === pick.stored);
+            try { v.dropUnitNode(pick.stored); } catch (e) {}
+            const sharedXp = await b.webview.executeJavaScript("(function(){var el=document.getElementById('shared');var parts=[];while(el&&el.nodeType===1&&el.tagName){var tag=el.tagName.toLowerCase(),i=1,sib=el.previousElementSibling;while(sib){if(sib.tagName===el.tagName)i++;sib=sib.previousElementSibling;}parts.unshift(i>1?tag+'['+i+']':tag);el=el.parentElement;}return '/'+parts.join('/');})()");
+            const pinned = await b.pinXpath(sharedXp).catch((e2) => ({ error: String(e2) }));
+            const pinCid = pinned && pinned.cid ? pinned.cid : "";
+            for (let i = 0; i < 40 && pinCid && !v.billboards.has((v.pinAlias && v.pinAlias.get(pinCid)) || pinCid); i++) await sleep(250);
+            const drawnAs = (v.pinAlias && v.pinAlias.get(pinCid)) || pinCid;
+            const pnode = v.graph.graphData().nodes.find((n) => n.id === drawnAs);
+            out.pin = { had_copy_node: hadCopyNode, copy_node_dropped: hadCopyNode && !v.graph.graphData().nodes.some((n) => n.id === pick.stored && n.unit), xpath: sharedXp, cid: pinCid, error: pinned && pinned.error || null, drawn_as: drawnAs, on_lead: !!pinCid && drawnAs === pick.lead,
+                        panel_open: v.billboards.has(drawnAs), node_url: pnode ? String(pnode.url || "").slice(-40) : null,
+                        skipped: (v.pinForeignLeadSkipped || 0) - skip0 };
+            for (const p of b.pinnedState()) b.unpin(p.cid);
             return out;
           } finally {
             v.plantFlyToForeignLead = false;
+            v.plantPinFollowsForeignLead = false;
             for (const [id, e] of [...v.billboards.entries()]) if (e.fromHover) v.closeBillboard(id);
             // PARKED, or the purge is undone: B was the page on show, and the
             // live loop wrote it back after every purge (runs 86-88: B on all
@@ -3386,6 +3447,10 @@ export function makeChecks(env) {
         // up, flew to B with the same decision). Reported, not judged.
         const followsLead = !!foreignPlanted && !foreignPlanted.error && foreignPlanted.alias_kept === foreignPlanted.pick.lead
           && (foreignPlanted.calls || []).some((c) => c.stored === foreignPlanted.pick.lead) && foreignPlanted.foreign_leads === 0;
+        // The pin: B's own copy, its panel open, never the lead; planted, on the lead.
+        const pinHere = !!foreignClean && !!foreignClean.pin && !!foreignClean.pin.cid && !foreignClean.pin.on_lead
+          && foreignClean.pin.panel_open && foreignClean.pin.skipped >= 1;
+        const pinFollows = !!foreignPlanted && !!foreignPlanted.pin && foreignPlanted.pin.on_lead && foreignPlanted.pin.skipped === 0;
         // The bar is THIS page's chunk (PLUGIN_GOAL 162), not the dedup lead:
         // the lead of this fixture's chunk is a copy on an earlier run's page
         // (a new port each run), which the flight must not leave the page for.
@@ -3396,8 +3461,8 @@ export function makeChecks(env) {
         // should persist, but disappear after a minute maybe"): the panel outlives the
         // hover, and G-125's check holds that. `closed_after_leave` stays as evidence.
         return {
-          pass: works(clean) && !planted.error && planted.flown === 0 && !planted.panel && staysHere && followsLead,
-          evidence: { foreign: { clean: foreignClean, planted: foreignPlanted, stays_here: staysHere, planted_follows_lead: followsLead }, purged,
+          pass: works(clean) && !planted.error && planted.flown === 0 && !planted.panel && staysHere && followsLead && pinHere && pinFollows,
+          evidence: { foreign: { clean: foreignClean, planted: foreignPlanted, stays_here: staysHere, planted_follows_lead: followsLead, pin_here: pinHere, planted_pin_follows: pinFollows }, purged,
                       clean, planted,
                       bar: "clean: the camera flew to this page's chunk -- its stored copy or its streamed chunk, never a lead on another page (PLUGIN_GOAL 162) -- its panel opened from the hover with text within 500 ms, the outline is smaller than the viewport (the panel then PERSISTS after leave, per G-125, which replaced close-on-leave); planted (plantNoFocus): no flight, no panel" },
         };
@@ -4820,7 +4885,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-124",
-      asks: "a navigation's first hover flight ZOOMS; later flights keep the reader's own zoom and only re-aim; planted (plantAlwaysZoom): every flight resets the distance",
+      asks: "in EGO traversal (where a hover flies), a navigation's first hover flight ZOOMS in; later flights keep the reader's own zoom and only re-aim -- the camera stops at the reader's distance from the new node; planted (plantAlwaysZoom) every flight zooms in, and (plantAgentIgnoresZoom) the first flight does not",
       async run() {
         const fixtures = await serveFixtures();
         const page = fixtures.origin + "/practice_rows.html";
@@ -4830,7 +4895,8 @@ export function makeChecks(env) {
             const PAGE = ${JSON.stringify(page)};
             const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
             const wc = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
-            v.plantAlwaysZoom = ${planted};
+            v.plantAlwaysZoom = ${JSON.stringify(planted)} === "always";
+            v.plantAgentIgnoresZoom = ${JSON.stringify(planted)} === "ignore";
             try {
               try { b.setLive(true); } catch (e) {}
               await land(PAGE, 30000);
@@ -4842,31 +4908,65 @@ export function makeChecks(env) {
               for (const p of pts) { const st = b.storedCidFor("f:" + b.session + "#" + p.id, b.session); if (!st) continue; if (!A) A = { ...p, st }; else if (st !== A.st) { B = { ...p, st }; break; } }
               if (!A || !B) return { planted: ${planted}, error: "two stored chunks under the pointer not found" };
               v.zoomState = { zoomedFor: "", zoomedAt: -1e9 };
-              const g = v.graph, dist = () => { const c = g.camera().position, t = g.controls().target; return Math.hypot(c.x - t.x, c.y - t.y, c.z - t.z); };
-              const f0 = { ...v.focusStats };
+              // EGO traversal: in map mode a hover moves nothing by design
+              // ("not at all in map view"), and this check had been measuring
+              // a camera that never flew (run 100-105: d_after = d_user in both
+              // arms; the agent was in map mode). The reader's mode is restored.
+              const ag = v.agent, mode0 = ag.mode;
+              ag.setMode("ego");
+              const g = v.graph;
+              // Distance from the camera to the node FLOWN TO -- an agent flight
+              // moves the look point with the camera, so camera-to-target is
+              // constant through it and says nothing about the stop.
+              const nodeOf = () => ag.target || ag.focus || null;
+              const dNode = () => { const nn = nodeOf(), c = g.camera().position; return nn ? Math.hypot(c.x - nn.x, c.y - nn.y, c.z - (nn.z || 0)) : NaN; };
+              const settle = async (ms) => { let last = NaN, still = 0; const t0 = performance.now();
+                while (performance.now() - t0 < ms) { await sleep(150); const d = dNode(); if (Number.isFinite(d) && Math.abs(d - last) < 0.5) { if (++still >= 4) break; } else still = 0; last = d; }
+                return dNode(); };
+              const f0 = { ...v.focusStats }, z0 = ag.stats.zoomed_in || 0;
               // CSS px -> the pane's px: sendInputEvent takes the pane's. The scale is the pane's width over the page's innerWidth -- NOT getZoomFactor, which read 0.177 on DuckDuckGo drawn at 0.25 (227 / 909).
               const az = (await (async (w) => { try { const iw = await w.executeJavaScript("innerWidth"); return iw > 0 ? w.getBoundingClientRect().width / iw : 1; } catch (e) { return 1; } })(b.webview));
-              wc.sendInputEvent({ type: "mouseMove", x: Math.round(A.x * az), y: Math.round(A.y * az) }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: Math.round(A.x * az) + 1, y: Math.round(A.y * az) });
-              await sleep(1500);
-              const d0 = dist();
-              // The reader zooms out: three times as far along the view.
-              const c = g.camera().position, t = g.controls().target;
-              g.cameraPosition({ x: t.x + (c.x - t.x) * 3, y: t.y + (c.y - t.y) * 3, z: t.z + (c.z - t.z) * 3 }, { x: t.x, y: t.y, z: t.z }, 0);
-              await sleep(400);
-              const dUser = dist();
-              wc.sendInputEvent({ type: "mouseMove", x: Math.round(B.x * az), y: Math.round(B.y * az) }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: Math.round(B.x * az) + 1, y: Math.round(B.y * az) });
-              await sleep(1500);
-              const d1 = dist();
-              return { planted: ${planted}, flown: v.focusStats.flown - f0.flown, zoomed: v.focusStats.zoomed - f0.zoomed,
-                       kept: v.focusStats.kept_zoom - f0.kept_zoom, d_first: Math.round(d0), d_user: Math.round(dUser), d_after: Math.round(d1) };
-            } finally { v.plantAlwaysZoom = false; }
+              try {
+                // Far out first, so a zoom-in is visible as one.
+                const c00 = g.camera().position, t00 = g.controls().target;
+                g.cameraPosition({ x: t00.x + (c00.x - t00.x) * 2, y: t00.y + (c00.y - t00.y) * 2, z: t00.z + (c00.z - t00.z) * 2 }, { x: t00.x, y: t00.y, z: t00.z }, 0);
+                await sleep(300);
+                wc.sendInputEvent({ type: "mouseMove", x: Math.round(A.x * az), y: Math.round(A.y * az) }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: Math.round(A.x * az) + 1, y: Math.round(A.y * az) });
+                const nA = await (async () => { for (let i = 0; i < 20 && !nodeOf(); i++) await sleep(100); return nodeOf(); })();
+                const d0 = await settle(9000);
+                // The reader zooms out WITH THE WHEEL, as a reader does: the
+                // event reaches the controls and the agent's own wheel listener
+                // (graph.ts: canvas wheel -> agent.zoomed()). A camera set by
+                // script (runs 100-106) reached neither, and the agent flew back
+                // to the node it had not yet left.
+                const snap = () => ({ target: ag.target ? String(ag.target.id).slice(0, 12) : null, standoff: ag.stats.standoff, bends: ag.stats.bends || 0, arrivals: ag.stats.arrivals || 0, flights: ag.stats.flights || 0, d: Math.round(dNode()) });
+                const s_first = snap();
+                const cv = g.renderer().domElement, cr = cv.getBoundingClientRect();
+                for (let k = 0; k < 6; k++) { cv.dispatchEvent(new WheelEvent("wheel", { deltaY: 240, clientX: cr.left + cr.width / 2, clientY: cr.top + cr.height / 2, bubbles: true, cancelable: true })); await sleep(60); }
+                await sleep(900);
+                const dUser = dNode();
+                const s_user = snap();
+                wc.sendInputEvent({ type: "mouseMove", x: Math.round(B.x * az), y: Math.round(B.y * az) }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: Math.round(B.x * az) + 1, y: Math.round(B.y * az) });
+                for (let i = 0; i < 20 && nodeOf() === nA; i++) await sleep(100);
+                const nB = nodeOf();
+                const d1 = await settle(12000);
+                return { planted: ${JSON.stringify(planted)}, mode_was: mode0, flown: v.focusStats.flown - f0.flown, zoomed: v.focusStats.zoomed - f0.zoomed,
+                         kept: v.focusStats.kept_zoom - f0.kept_zoom, zoomed_in: (ag.stats.zoomed_in || 0) - z0, floor: ag.floor,
+                         same_node: !!nA && nA === nB, d_first: Math.round(d0), d_user: Math.round(dUser), d_after: Math.round(d1),
+                         agent: { first: s_first, user: s_user, after: snap() } };
+              } finally { ag.setMode(mode0); }
+            } finally { v.plantAlwaysZoom = false; v.plantAgentIgnoresZoom = false; }
           })()`, { timeout: 150000 });
           const clean = await arm(false);
-          const planted = await arm(true);
+          const planted = await arm("always");
+          const ignored = await arm("ignore");
           const kept = (x) => x.d_user > 0 && Math.abs(x.d_after - x.d_user) / x.d_user < 0.15;
-          return { pass: !clean.error && clean.flown >= 2 && clean.zoomed === 1 && kept(clean) && !planted.error && !kept(planted),
-                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin),
-                               bar: "clean: two flights, one zoom, the second keeps the reader's distance within 15%; planted: the distance resets" } };
+          // The first flight zooms IN: it stops nearer than it started, at the floor's order.
+          const zoomedIn = (x) => x.zoomed_in >= 1 && x.d_first > 0 && x.d_first < 0.5 * x.d_user;
+          return { pass: !clean.error && !clean.same_node && clean.flown >= 2 && clean.zoomed === 1 && clean.zoomed_in === 1 && zoomedIn(clean) && kept(clean)
+                         && !planted.error && !kept(planted) && !ignored.error && !zoomedIn(ignored),
+                   evidence: { clean, planted_always: planted, planted_ignore: ignored, purged: await tidyFixtures(fixtures.origin),
+                               bar: "ego traversal. clean: two flights to two nodes, one zoom decided and flown in (stop under half the reader's later distance), the second stops at the reader's distance within 15%; planted always-zoom: the distance resets; planted ignore-zoom: the first flight does not zoom in" } };
         } finally { await fixtures.close(); }
       },
     },
@@ -6636,7 +6736,7 @@ export function makeChecks(env) {
         // pushes the hovered address and nothing is written into the
         // document. Real pointer moves (`sendInputEvent`), as G-195.
         const PAGE = "https://en.wikipedia.org/wiki/Trie";
-        const arm = (planted) => evaluate(`(async () => {
+        const arm = (planted, undrawn = false) => evaluate(`(async () => {
           ${PREP}
           const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
           const box = b.pipebox;
@@ -6646,6 +6746,8 @@ export function makeChecks(env) {
             if (!(await land(${JSON.stringify(PAGE)}, 30000))) return { error: "did not land" };
             await sleep(4000);
             box.plantPageUnit = ${planted};
+            v.plantCopyUndrawn = ${undrawn};
+            const ownCopy0 = v.hoverStats.own_copy_drawn || 0;
             const wv = b.webview, r = wv.getBoundingClientRect(), wrap = wv.parentElement;
             const outlineEl = wrap.querySelector(".domvec-chunk-outline");
             // The cell's text OUTSIDE the corner pipeline box: that box is the
@@ -6696,12 +6798,26 @@ export function makeChecks(env) {
                 // hover rings this page's own copy when it is drawn.
                 ring_is_own_copy: !!ring && ring.level !== "page" && (ring.id === h.stored || ring.id === h.cid),
                 ring_level: ring ? (ring.level || "chunk") : null,
+                ring_via: v.hoverRing ? { ...v.hoverRing } : null,
+                // Who was ringed and who was hovered, for a miss to be read.
+                ids: { ring: ring ? String(ring.id).slice(-28) : null, ring_url: ring ? String(ring.url || "").slice(-24) : null,
+                       cid: String(h.cid || "").slice(-28), stored: h.stored || null, url_full: h.url || "", alias: (v.hoverAliases && v.hoverAliases.get(h.stored)) || null, url: String(h.url || "").slice(-24) },
               });
               await sleep(300);
             }
+            // A miss, placed: does a node exist for the stored or streamed id,
+            // and what does the store say of the stored chunk (vector? alias?).
+            for (const m of out.filter((o) => !o.ring_is_chunk && !o.lead_folded).slice(0, 3)) {
+              const st = m.ids.stored, nodes = v.graph.graphData().nodes;
+              const got = st ? await v.sidecar.place([st]).catch((e2) => ({ error: String(e2) })) : null;
+              m.placed = { node_stored: !!st && nodes.some((n) => n.id === st), node_streamed: nodes.some((n) => String(n.id).endsWith(m.ids.cid)),
+                           reply_nodes: got && got.nodes ? got.nodes.map((n) => (n.cid ?? n.id)).slice(0, 4) : null,
+                           unplaced: got && got.unplaced || null, unknown: got && got.unknown || null, alias: got && got.aliases ? got.aliases[st] || null : null,
+                           hover_placed: v.hoverPlaced ? v.hoverPlaced.has(st) : null, collapsed: v.readerCollapsed ? v.readerCollapsed(m.ids.url_full || "") : null };
+            }
             const n = out.length;
             const share = (f) => n ? Math.round(out.filter(f).length / n * 100) / 100 : 0;
-            return { planted: ${planted}, hovers: n,
+            return { planted: ${planted}, undrawn: ${undrawn}, hovers: n, own_copy_drawn: (v.hoverStats.own_copy_drawn || 0) - ownCopy0,
                      outlined_without_text: share((o) => o.outline && o.outline_text === 0),
                      banner_moves: out.filter((o) => o.cell_text_added > 0).length,
                      max_text_added: Math.max(0, ...out.map((o) => o.cell_text_added)),
@@ -6712,19 +6828,28 @@ export function makeChecks(env) {
                      lead_folded_own_copy: out.filter((o) => o.lead_folded && o.ring_is_own_copy).length,
                      text_added: added,
                      via_alias: out.filter((o) => o.via_alias).length,
-                     sample: out.slice(0, 4) };
+                     misses: out.filter((o) => !o.ring_is_chunk && !o.lead_folded).slice(0, 4),
+                     sample: out.slice(0, 2) };
           } finally {
             box.plantPageUnit = false;
+            v.plantCopyUndrawn = false;
             if (plantedBanner) plantedBanner.remove();
           }
         })()`, { timeout: 120000 });
+        // FIRST, before any clean hover draws a copy's own node (a confirm
+        // reloads the plugin, so the graph starts without one): a copy whose
+        // lead is on another page left undrawn, ringing its page (PLUGIN_GOAL 162).
+        const undrawn = await arm(false, true);
         const clean = await arm(false);
         const planted = await arm(true);
         const ok = (x) => !!x && !x.error && x.hovers >= 6 && x.outlined_without_text >= 0.8
           && x.banner_moves === 0 && x.one_ring >= 0.8 && x.ring_is_chunk >= 0.9
           && x.lead_folded_ring_page === x.lead_folded;
-        return { pass: ok(clean) && !!planted && !planted.error && planted.ring_is_chunk < 0.2 && planted.banner_moves >= 1,
-                 evidence: { clean, planted } };
+        // The undrawn plant is caught only where the page HAS such a copy; it
+        // must then ring less, and the clean arm must have drawn one.
+        const copyCaught = !!undrawn && !undrawn.error && (clean.own_copy_drawn === 0 || undrawn.ring_is_chunk < clean.ring_is_chunk);
+        return { pass: ok(clean) && !!planted && !planted.error && planted.ring_is_chunk < 0.2 && planted.banner_moves >= 1 && copyCaught,
+                 evidence: { clean, planted, planted_copy_undrawn: undrawn, copy_caught: copyCaught } };
       },
     },
     {

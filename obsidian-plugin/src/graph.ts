@@ -3072,6 +3072,12 @@ export class GraphView extends ItemView {
   plantHoverIgnoresAlias = false;
   /** Planted (G-113, PLUGIN_GOAL 162): a lead on another page is followed. */
   plantFlyToForeignLead = false;
+  /** Planted (G-38): a hovered `base|element` is looked up by its full id only. */
+  plantRingIgnoresBase = false;
+  /** Planted (G-38, 162): a copy whose lead is on another page is left undrawn. */
+  plantCopyUndrawn = false;
+  /** The last hover ring's resolution, for the harness. */
+  hoverRing: any = null;
   highlightChunk(cid: string, url = "", stored = ""): void {
     if (!this.graph) return;
     // The hovered url spreads; off every chunk, it goes back (G-230).
@@ -3116,7 +3122,19 @@ export class GraphView extends ItemView {
           const ln = (got.nodes || []).find((n: any) => (n.cid ?? n.id) === lead)   // the reply keys `cid`; `absorb` renames it
             || ((this.graph?.graphData().nodes || []) as any[]).find((n: any) => n.id === lead);
           const docOf = (u: string) => String(u || "").split("#")[0];
-          if (ln && ln.url && docOf(ln.url) !== urlKey) { this.hoverStats.foreign_lead = (this.hoverStats.foreign_lead || 0) + 1; lead = ""; }
+          if (ln && ln.url && docOf(ln.url) !== urlKey) {
+            this.hoverStats.foreign_lead = (this.hoverStats.foreign_lead || 0) + 1; lead = "";
+            // This page's copy, drawn ON this page: a copy is drawn as its lead,
+            // and its streamed chunk was folded into it, so with the lead
+            // refused it was drawn nowhere and the ring fell to the page (G-38,
+            // run 121: Wikipedia's "Page tools" on Trie, its lead on Durham, NC;
+            // 3 of 14 hovers). Its own unit node under this page, as a pin's.
+            // Planted `plantCopyUndrawn`: left undrawn, as before.
+            if (!this.plantCopyUndrawn && !(this.graph?.graphData().nodes || []).some((n: any) => n.id === stored)) {
+              this.ensureUnitNode({ id: stored, url, name: stored });
+              this.hoverStats.own_copy_drawn = (this.hoverStats.own_copy_drawn || 0) + 1;
+            }
+          }
           else if (!ln || !ln.url) this.hoverStats.lead_page_unknown = (this.hoverStats.lead_page_unknown || 0) + 1;
         }
         if (lead && lead !== stored) {
@@ -3131,20 +3149,33 @@ export class GraphView extends ItemView {
     // exists at all, so ringing only exact ids would light nothing up for
     // every hover until the reader had already unfolded that page -- which
     // is the one case they least need the correspondence drawn.
+    let via = "";
     let target = cid ? data.nodes.find((n: any) => n.id === cid) : null;
-    if (!target && stored) target = data.nodes.find((n: any) => n.id === stored) || null;
+    if (target) via = "cid";
+    // The hovered chunk by its BASE id: the cell hands `base|element` for an
+    // element inside a chunk, and the streamed node is drawn as `base`.
+    // Planted `plantRingIgnoresBase`.
+    if (!target && baseCid && baseCid !== cid && !this.plantRingIgnoresBase) { target = data.nodes.find((n: any) => n.id === baseCid) || null; if (target) via = "base"; }
+    if (!target && stored) { target = data.nodes.find((n: any) => n.id === stored) || null; if (target) via = "stored"; }
     if (!target && stored && this.hoverAliases.has(stored)) {
       const lead = this.hoverAliases.get(stored);
       target = data.nodes.find((n: any) => n.id === lead) || null;
+      if (target) via = "alias";
     }
     // A streamed chunk already folded into a stored one: that one.
     if (!target && cid) {
       const into = this.collapsedTo.get(cid) || this.forceSpecs.get(cid)?.cid;
-      if (into) target = data.nodes.find((n: any) => n.id === into) || null;
+      if (into) { target = data.nodes.find((n: any) => n.id === into) || null; if (target) via = "collapsed"; }
     }
     if (!target && cid && url) {
       target = data.nodes.find(
         (n: any) => n.level === "page" && n.url === url);
+      if (target) via = "page";
+    }
+    // How the ring was found, for the harness (G-38, run 120: a copy whose
+    // lead is on another page rang its page while its streamed node was drawn).
+    if (cid) { this.hoverRing = { cid: cid.slice(-60), base: baseCid.slice(-60), stored, via: via || "none",
+      streamed_drawn: !!baseCid && data.nodes.some((n: any) => n.id === baseCid), collapsed_to: (this.collapsedTo.get(cid) || this.collapsedTo.get(baseCid) || "") };
     }
     let changed = false;
     for (const n of data.nodes) {
@@ -3244,7 +3275,7 @@ export class GraphView extends ItemView {
   hoverPanelCap = 1;
   /** Planted: the old close-on-hover-end behaviour. */
   plantCloseOnLeave = false;
-  hoverStats: { empty_skipped: number; units?: number; stale_stored?: number; moved_on?: number; foreign_lead?: number; lead_page_unknown?: number } = { empty_skipped: 0 };
+  hoverStats: { empty_skipped: number; units?: number; stale_stored?: number; moved_on?: number; foreign_lead?: number; lead_page_unknown?: number; own_copy_drawn?: number } = { empty_skipped: 0 };
   private hoverSweep = 0;
 
   private expireHoverPanels(): void {
@@ -3582,6 +3613,8 @@ export class GraphView extends ItemView {
   private zoomState = { zoomedFor: "", zoomedAt: -1e9 };
   /** Planted: every flight re-zooms (the old behaviour), and tracking copies every jitter. */
   plantAlwaysZoom = false;
+  /** Planted (G-124, 2026-11-15): the agent flies without the zoom decision, as before. */
+  plantAgentIgnoresZoom = false;
   plantNoSmooth = false;
   private focusTimer = 0;
   private focusPending: any = null;
@@ -3693,7 +3726,11 @@ export class GraphView extends ItemView {
     // The user agent flies it (PLUGIN_GOAL 2026-10-29): slowly, to a hard
     // floor, in ego view; not at all in map view. Planted
     // `agent.plantFastFlight`: the 0.4 s tween below.
-    if (this.agent.fly(n)) {
+    // The zoom decision goes WITH the flight: the agent was handed the node
+    // alone, so a navigation's first flight never zoomed in and the decision
+    // was counted but never flown (G-124 run 100: planted plantAlwaysZoom,
+    // 2 zooms decided, the distance unchanged). Planted `plantAgentIgnoresZoom`.
+    if (this.agent.fly(n, decided.zoom && !this.plantAgentIgnoresZoom)) {
       this.focusStats.flown++;
       this.focusStats.agent = (this.focusStats.agent || 0) + 1;
       // Which node, on this path too: only the tween's path named it, so a
@@ -3998,6 +4035,9 @@ export class GraphView extends ItemView {
     // the moment it arrives. ONE attempt per panel -- it is also the upgrade
     // (2026-10-11: the attempt ran twice and first paint took 222-763 ms).
     const pageAttempt = this.plantSerialPanel ? null : this.tryPageForm(entry);
+    // Held on the entry so a caller that re-renders the panel (a pin making
+    // it stuck) can let the page form land first (D-36, run 112).
+    entry.pageAttempt = pageAttempt;
     const quick = this.plantSerialPanel
       ? await this.tryPageForm(entry)
       : await Promise.race([pageAttempt!, new Promise<string>((r) => window.setTimeout(() => r("slow"), this.pageFormWaitMs))]);
@@ -4068,13 +4108,19 @@ export class GraphView extends ItemView {
 
   /** The page form at once, if it exists and shows the chunk; false otherwise, nothing drawn. */
   private async tryPageForm(entry: any): Promise<boolean> {
+    // What the attempt saw, on the entry, for the harness (D-36, run 113:
+    // a held snapshot and a panel left in markdown).
+    const t0 = performance.now();
+    const note = (why: string, ok = false) => { entry.pageTry = { why, ok, ms: Math.round(performance.now() - t0), at: Math.round(t0 - (entry.openedAt || t0)) }; return ok; };
     const got = await this.pageFormFor(entry);
     const snap = got ? getSnapshot(entry.node.id) : null;
-    if (!snap || !this.billboards.has(entry.node.id)) return false;
+    if (!snap) return note("no snapshot (" + String(got) + ")");
+    if (!this.billboards.has(entry.node.id)) return note("panel closed");
     const html = String(snap.html || "");
     const text = html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").trim();
-    if (text.length < 3 && !/<(img|video|svg|canvas|picture)/i.test(html)) return false;
-    return this.renderForm(entry, "page", false);
+    if (text.length < 3 && !/<(img|video|svg|canvas|picture)/i.test(html)) return note("empty snapshot");
+    const ok = await this.renderForm(entry, "page", false);
+    return note(ok ? "drawn" : "render refused", ok);
   }
 
   /** The page form, if it exists and shows the chunk; else the markdown stays. */
@@ -4282,6 +4328,12 @@ export class GraphView extends ItemView {
   /** Planted (D-36): the fallback markdown overwrites a page form that landed while it waited. */
   plantPanelRace = false;
   private async renderForm(entry: any, form: "page" | "markdown", fresh = true, fallback = false): Promise<boolean> {
+    // Renders are numbered on the entry: the LATEST-started owns the form.
+    // The fallback markdown paint checked "has the page form landed?" before
+    // its awaits, and wrote `form = markdown` 1 ms after the page form drew
+    // (D-36, run 115: page at 157 ms, markdown at 158) -- the stuck panel
+    // was then re-rendered as markdown over it. Planted `plantPanelRace`.
+    const seq = entry.renderSeq = (entry.renderSeq || 0) + 1;
     const body = entry.el.querySelector(".domvec-bb-body") as HTMLElement | null;
     if (!body) return false;
     const id = entry.node.id;
@@ -4306,7 +4358,7 @@ export class GraphView extends ItemView {
       // markdown emptied the body after it and replaced a page form of 77
       // elements with its own half a second after the panel opened (D-36,
       // 2026-10-19: "form none" from the graph).
-      if (fallback && entry.form === "page" && !this.plantPanelRace) return true;
+      if (fallback && (entry.form === "page" || entry.renderSeq !== seq) && !this.plantPanelRace) return true;
       body.empty();
       // A STUCK panel's markdown half is the notebook's own markdown cell --
       // the same Obsidian editor, with every feature the notes have (the
@@ -4321,7 +4373,7 @@ export class GraphView extends ItemView {
       const hoverCell = !entry.el.hasClass("is-stuck") && !this.plantHoverStatic && !this.plantStaticMarkdown;
       if (entry.el.hasClass("is-stuck") && !this.plantStaticMarkdown) {
         const cellMd = this.chunkMarkdown(entry.payload);
-        if (await this.mountCell(entry, body, cellMd)) return true;
+        if (await this.mountCell(entry, body, cellMd)) { (entry.formLog = entry.formLog || []).push({ form: "markdown-cell", fresh, fallback, at: Math.round(performance.now() - (entry.openedAt || 0)), form_was: entry.form }); return true; }
       }
       const host = body.createDiv({ cls: "domvec-bb-md markdown-rendered" });
       const md = this.chunkMarkdown(entry.payload);
@@ -4332,8 +4384,20 @@ export class GraphView extends ItemView {
       // measured 2,070 ms, against 1 ms for this render).
       if (hoverCell && md.trim()) {
         const t0 = performance.now();
-        void this.mountCell(entry, body, md, true).then((ok) => {
+        const mine: { box?: HTMLElement; leaf?: any } = {};
+        void this.mountCell(entry, body, md, true, mine).then((ok) => {
           if (!ok || !body.isConnected) return;
+          // Overtaken (the page form drew while the editor mounted): the cell
+          // is removed, or the panel showed the page AND an editor under it
+          // (D-36, run 117: frame and cell both in one body).
+          if (!this.plantPanelRace && (entry.renderSeq !== seq || entry.form === "page")) {
+            // ITS OWN cell only: a stuck re-render may be mounting its cell in
+            // the same body (D-36 run 118, planted arm: both removed, panel empty).
+            mine.box?.remove();
+            if (mine.leaf && entry.cellLeaf === mine.leaf) { try { mine.leaf.detach(); } catch { /* gone */ } entry.cellLeaf = null; }
+            (entry.formLog = entry.formLog || []).push({ form: "cell-dropped", at: Math.round(performance.now() - (entry.openedAt || 0)) });
+            return;
+          }
           host.remove();
           const box = body.querySelector(".domvec-bb-cell") as HTMLElement | null;
           if (box) box.style.display = "";
@@ -4349,7 +4413,16 @@ export class GraphView extends ItemView {
         };
       });
     }
+    if (fallback && (entry.renderSeq !== seq || (form === "markdown" && entry.form === "page")) && !this.plantPanelRace) {
+      (entry.formLog = entry.formLog || []).push({ form: form + "-overtaken", fresh, fallback, at: Math.round(performance.now() - (entry.openedAt || 0)) });
+      return true;
+    }
     entry.form = form;
+    // The panel's form history, for the harness: which call set which form
+    // and when (D-36, run 114: a page form drawn, then markdown, no click).
+    (entry.formLog = entry.formLog || []).push({ form, fresh, fallback, at: Math.round(performance.now() - (entry.openedAt || 0)),
+      by: String(new Error().stack || "").split("\n").slice(2, 5).map((x) => x.trim().replace(/^at /, "").replace(/\s*\(.*\)$/, "")).join(" < ") });
+    if (entry.formLog.length > 12) entry.formLog.shift();
     entry.snapshot = form === "page";
     entry.el.toggleClass("is-md", form === "markdown");
     if (entry.toggle) entry.toggle.setText(form === "page" ? "markdown" : "page");
@@ -8392,7 +8465,27 @@ export class GraphView extends ItemView {
       if (got?.nodes?.length) this.absorb(got.nodes, got.edges, undefined, keep ? { keep } : {});
       // A duplicate or a merge group's member is drawn by ANOTHER chunk: the
       // pin's billboard opens on that one (G-82, 2026-10-12).
-      if (got?.aliases?.[cid] && !this.plantNoPinAlias) drawnAs = String(got.aliases[cid]);
+      // ...but never a lead on ANOTHER page (PLUGIN_GOAL 162, as for the
+      // hover): the reader pinned what this page shows, and only this page's
+      // copy can be drawn live from it. D-36, run 110: the pin's copy was
+      // aliased to a lead on an earlier visit's page; the panel opened on
+      // that lead, whose page was not open, and fell back to the distilled
+      // card (frame false). This page's copy hangs from its own unit node
+      // under the page being browsed. Planted `plantPinFollowsForeignLead`.
+      const leadId = got?.aliases?.[cid] ? String(got.aliases[cid]) : "";
+      if (leadId && !this.plantNoPinAlias && !this.plantPinFollowsForeignLead) {
+        const here = this.browsingUrl ? String(this.browsingUrl() || "") : "";
+        const ln = (got.nodes || []).find((x: any) => String(x.cid ?? x.id) === leadId)
+          || this.graph.graphData().nodes.find((x: any) => x.id === leadId);
+        const docOf = (u: string) => String(u || "").split("#")[0];
+        if (here && ln && ln.url && docOf(ln.url) !== docOf(here)) {
+          this.pinForeignLeadSkipped++;
+          node = this.ensureUnitNode({ id: cid, url: here, virtual: true, name: cid });
+          drawnAs = cid;
+          break;
+        }
+      }
+      if (leadId && !this.plantNoPinAlias) drawnAs = leadId;
       // The store has no such chunk: no vector is coming, so stop asking and
       // let the browser re-anchor the pin by its address (G-82).
       else if (got?.unknown?.includes(cid) && !this.plantWaitUnknown) break;
@@ -8420,7 +8513,16 @@ export class GraphView extends ItemView {
     const stuck: any = this.billboards.get(drawnAs);
     if (stuck && !this.plantPinFollows) {
       stuck.pinned = true; stuck.el.addClass("is-stuck"); stuck.el.removeClass("is-preview"); this.stuckPins++;
-      if (stuck.form !== "page") await this.renderForm(stuck, "markdown").catch(() => false);
+      // The page form is the billboard's default whenever the chunk's page is
+      // open (133: "the exact same thing as the billboards (two-view; web
+      // rendered and markdown)"). Its attempt is let finish first, and the
+      // stuck markdown is a FALLBACK that yields to a page form that landed:
+      // re-rendered unconditionally, it emptied the body after the page form
+      // had drawn -- D-36, run 112: snapshot held (18,430 chars), panel left
+      // in markdown in one arm and in page form in the next, by timing alone.
+      // Planted `plantPanelRace`: the markdown overwrites, as before.
+      if (stuck.pageAttempt && !this.plantPanelRace) await Promise.race([Promise.resolve(stuck.pageAttempt).catch(() => false), new Promise((r) => window.setTimeout(r, 3000))]);
+      if (stuck.form !== "page") await this.renderForm(stuck, "markdown", true, !this.plantPanelRace).catch(() => false);
       // Opened FROM THE EGO, it opens on the plane beside that node (PLUGIN_GOAL
       // 159: the world's panels are "the authority of how we extend on the
       // representations ... at the precise level in the 2D computation graph
@@ -8458,7 +8560,7 @@ export class GraphView extends ItemView {
   /** The chunk's markdown as a NOTE, opened in a real editor leaf inside the
    *  panel -- one markdown panel for billboards, code panels and notebook
    *  cells. Kept at `domvec/chunks/<cid>.md`; an edit there is the reader's. */
-  async mountCell(entry: any, body: HTMLElement, md: string, hidden = false): Promise<boolean> {
+  async mountCell(entry: any, body: HTMLElement, md: string, hidden = false, out: { box?: HTMLElement; leaf?: any } | null = null): Promise<boolean> {
     const cid = String(entry.node.id).replace(/[^\w.-]+/g, "_");
     const folder = "domvec/chunks", path = `${folder}/${cid}.md`;
     const vault = this.app.vault;
@@ -8471,6 +8573,7 @@ export class GraphView extends ItemView {
     const leaf = new Leaf(this.app);
     const box = body.createDiv({ cls: "domvec-bb-cell" });
     if (hidden) box.style.display = "none";
+    if (out) { out.box = box; out.leaf = leaf; }
     box.appendChild(leaf.containerEl);
     await leaf.openFile(f, chunkNoteState(f.path));
     entry.cellLeaf = leaf; entry.cellPath = path;
@@ -8529,6 +8632,10 @@ export class GraphView extends ItemView {
   plantPinFolded = false;
   plantPinWaitsForPlace = false;
   pinUnplacedOpened = 0;
+  /** Planted (162): a pin follows its dedup lead even onto another page. */
+  plantPinFollowsForeignLead = false;
+  /** Pins drawn from this page's own copy because their lead was on another page. */
+  pinForeignLeadSkipped = 0;
   /** Planted (133): a pin's billboard follows its node, as before. */
   plantPinFollows = false;
   stuckPins = 0;

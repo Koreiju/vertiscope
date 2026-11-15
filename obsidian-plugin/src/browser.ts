@@ -1237,7 +1237,7 @@ export class BrowserView extends ItemView {
   }
 
   /** Last snapshot outcome, for the harness: what was read and how much. */
-  lastSnapshot: { cid: string; ok: boolean; elements: number; found: number; asked: number; ms: number; why?: string } | null = null;
+  lastSnapshot: { cid: string; ok: boolean; elements: number; found: number; asked: number; ms: number; why?: string; xpaths?: string[] } | null = null;
 
   /**
    * Read the chunk's own elements from the live page (D-36) -- only when the
@@ -1250,7 +1250,7 @@ export class BrowserView extends ItemView {
     const asked = (read.xpaths || []).length;
     const note = (ok: boolean, why: string, s: any = null) => {
       this.lastSnapshot = { cid: read.cid, ok, elements: s ? s.elements : 0, found: s ? s.found : 0,
-                            asked, ms: Math.round(performance.now() - t0), why: why || undefined };
+                            asked, ms: Math.round(performance.now() - t0), why: why || undefined, xpaths: (read.xpaths || []).slice(0, 3) };
     };
     if (!wv || !asked) { note(false, "no page or no xpaths"); return false; }
     let here = "";
@@ -2307,9 +2307,20 @@ export class BrowserView extends ItemView {
     if (!wv) return;
     const url = this.currentPage();
     let xpath = "";
+    // The point is in the PANE's pixels (the host window's, less the cell's
+    // offset); `elementFromPoint` takes the page's CSS pixels. At desktop
+    // width the page is drawn scaled (0.25 on DuckDuckGo in a narrow cell),
+    // and the unscaled point (37, 133) pinned the sticky header where the
+    // reader had pointed at a result's snippet, CSS (148, 532) -- D-36,
+    // run 109. The page converts by its own innerWidth over the pane's
+    // width: the drawn scale, not getZoomFactor (0.177 read where 0.25 was
+    // drawn). Planted `unscaled-pin`: the point is handed over as-is.
+    const paneW = (wv as any).getBoundingClientRect?.().width || 0;
+    const sc = this.plant.has("unscaled-pin") || !(paneW > 0) ? "1" : "(innerWidth/" + paneW + ")";
     try {
       xpath = await wv.executeJavaScript(
-        "(function(){var el=document.elementFromPoint(" + x + "," + y + ");" +
+        "(function(){var s=" + sc + ";if(!(s>0)||!isFinite(s))s=1;" +
+        "var el=document.elementFromPoint(" + x + "*s," + y + "*s);" +
         "if(!el) return '';var parts=[];" +
         "while(el && el.nodeType===1 && el.tagName){" +
         "var tag=el.tagName.toLowerCase(),i=1,sib=el.previousElementSibling;" +
