@@ -308,7 +308,15 @@ class Proof:
         Short calls polled from here: one call waiting minutes inside the app
         outlived the CDP socket's timeout and read as a failure (2026-11-15)."""
         t0 = time.time()
-        url = (self.clone / FIXTURE).as_uri()
+        # A web page, as the README's reader browses one: the fixture served
+        # over HTTP from here (the plugin's own checks do the same).
+        import functools, http.server, threading
+        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str((self.clone / FIXTURE).parent))
+        handler.log_message = lambda *a, **k: None
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self._srv = srv
+        url = "http://127.0.0.1:%d/%s" % (srv.server_address[1], Path(FIXTURE).name)
         opened = self.eval("""(async () => {
             const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
             const p = app.plugins.plugins["domvec-bridge"];
@@ -323,13 +331,24 @@ class Proof:
         })()""" % json.dumps(url))
         if not isinstance(opened, dict) or not opened.get("browser"):
             return self.record("use", False, t0, opened=opened)
+        # THAT page in the store -- not a page count: the code sync fills a new
+        # store with the repository's modules, and a count of them read as the
+        # browsed page having landed (2026-11-15).
+        def stored() -> bool:
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/pages", timeout=30) as r:
+                    return url in (json.load(r).get("urls") or [])
+            except Exception:                           # noqa: BLE001
+                return False
         pages, t_page = 0, None
-        for k in range(180):
-            time.sleep(1.0)
-            pages = (_health(PORT) or {}).get("pages", 0)
-            if pages >= 1:
-                t_page = k + 1
+        for k in range(90):
+            time.sleep(2.0)
+            if stored():
+                pages, t_page = 1, 2 * (k + 1)
                 break
+        cell = self.eval("""(() => { const b = app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+            return b ? { live: b.live, shown: b.shownUrl ? b.shownUrl() : null, tick: b.tickStats, go: b.goStats,
+                         width: b.containerEl.offsetWidth } : null; })()""")
         GRAPH = """(() => { const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
             return { view: !!g, graph: !!(g && g.graph), nodes: g && g.graph ? g.graph.graphData().nodes.length : 0,
                      level: g ? g.level : null, search: !!(g && g.searchField) }; })()"""
@@ -370,7 +389,11 @@ class Proof:
             except Exception as exc:                    # noqa: BLE001
                 why["/pages"] = "error: %s" % str(exc)[:120]
         ok = opened.get("health_ok") and pages >= 1 and (g or {}).get("nodes", 0) > 0 and hits >= 1
-        return self.record("use", ok, t0, page=FIXTURE, pages=pages, page_after_s=t_page, graph=g,
+        try:
+            srv.shutdown()
+        except Exception:                               # noqa: BLE001
+            pass
+        return self.record("use", ok, t0, page=url, stored=bool(pages), page_after_s=t_page, cell=cell, graph=g,
                            graph_after_s=t_graph, word=word, hits=hits, top=top, why=why, **opened)
 
     # -- the whole thing ------------------------------------------------------
