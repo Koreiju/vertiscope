@@ -387,8 +387,20 @@ Done and confirmed live (each check carries a planted arm that fails):
 | G-94 (162: "Keep layout, retire check"). The question said world overlap passes -- it does NOT in the default layout: `projector` pins all mapped nodes at their fit, 1,793 world pairs. Overlap bar retired, both censuses reported; judged on the billboard bar (planted big chunks caught); near/tree reported, no plant moves them under the projector | G-94, run 85 | e91a225 |
 | Chat context (162: "Model keeps its session"): the chain of cells is a record only; no change | decision, no code | c67c62f |
 | G-291 purge (162: "Yes, purge"): 83 stored `vault://` pages of deleted check notes, 91 chunks, via `POST /purge` -- 83 ok, 0 failed; pages 1,136 -> 1,053. A fresh G-299 run leaked 0 | list kept at the session scratchpad `gone_vault_pages.json` | 2026-11-15 |
+| G-113's foreign-lead skip proven live: `/place` keys nodes `cid`, so the lead's page was never checked; a fixture pair (one article under two urls) and a planted arm | G-113, run 97/101 | 3970d54 |
+| (found on the way) hovering a short element opened the NEIGHBOUR's panel: the unit climb picked the majority chunk; now the element's own chunk | tests/forcetree_adopt (clean #1, planted `plantMajorityUnit` #2); G-113 run 97: H1 hovered, #1's panel | 3970d54 |
+| (found on the way) fixture pages came back after their purge: the cell reopens its last http page on every plugin reload; `tidyFixtures` forgets restore memory for its own origin | G-113 runs 86-97: B on 4 ports resurrected, 0 after | 3970d54 |
+| Eight checks aimed hovers/clicks in CSS px; `sendInputEvent` takes the pane's px, and the page is drawn at pane width / innerWidth (not `getZoomFactor`: 0.177 vs 0.25 on DuckDuckGo) | runs 98-101; G-122, G-124, G-39 now reach their targets | 3659475 |
+| G-125 read hover panels by stored cid; streamed panels are keyed f:<url>#n | G-125, run 100 (pass) | 3659475 |
+| G-39 re-scoped to 133: the pin is a stuck panel on the plane, not the side card | G-39, run 104 (pass): 653 chars, side hidden | 0c6cd01 |
 
 Measured, not fixed:
+- **Third native store crash today** (0xC0000005, 12:51:03), on a capture's anchor reconcile: `UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid})-[e:Anchors]->(:Address) DELETE e`, n=3. Only that thread was in kuzu (faulthandler dump), so it is not a race between our threads. Earlier today: `SET c.snap` (07:53), `CHECKPOINT` (09:51). This one came ~1 min after G-113's fixture purges (DETACH DELETE of Address rows) -- a hypothesis to test offline (purge then re-ingest with changed anchors, in a scratch store), not a finding.
+- **G-122's stored unit is the whole table**: practice_rows is stored as 2 chunks; the clean outline is 1,249 px against a 760 px row, and the planted cell outline 663 px -- the check's premise ("one forum row is one card") no longer holds for this page's chunking. A chunk-granularity question, not an aiming one.
+- **G-124's planted arm does not reset the distance** (plantAlwaysZoom: zoomed 2 but d_after = d_user); clean passes (2 flights, 1 zoom, distance kept).
+- **D-36 pins DuckDuckGo's header when aimed at the page's scale** and the right result when unaimed -- the one site where scaling made it worse; not explained (the pin may resolve from the hover state rather than the click point).
+- **The hover poll races the sensor's hover**: re-issued by stored cid, it discards an in-flight place reply (G-113 run 100). Counted (`poll_overrode`); the app is unchanged.
+- Pre-existing plugin unit-test failures (fail at HEAD too): 3 forcetree prose-list/track-row unit tests, one gesture test, searchfield.test.mjs.
 - **G-113 fails** (passed 2026-10-07; PASSES again 2026-11-15, run 81, see the table): hovering a chunk on the fixture
   page flies the camera -- to a STREAMING stand-in at the page's place, not
   to the chunk. Diagnosed with the check's new `why` evidence (run 35): the
