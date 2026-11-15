@@ -488,6 +488,37 @@ Open (not started this session):
     - G-5 has 14-52 page nodes off screen at the default camera;
     - G-231 spreads retrieval over 5 pages (floor 6).
     G-94 has been failing since 2026-11-04. Each needs its own diagnosis.
+  - **Diagnosed and fixed, 2026-11-15 (runs 44-58), all at ~190 fps.**
+    First found: the Obsidian window was MINIMISED, and rAF ran at 1 Hz
+    whatever the unthrottling flags. G-311 and G-275 read that frame rate as
+    regressions. A probe that says "visible, focused" (`wake`) can still be
+    minimised; `getCurrentWindow().isMinimized()` is the test.
+    - G-344 (5262fa7): the check started wherever the previous check had left
+      the camera, one unit from its focus, where the dolly clamps at
+      minDistance 1. It now reframes first. Planted -1110.75 -> -777.52;
+      clean -135.54 throughout.
+    - G-320 (fe6c983): the microscope scales the on-camera plane.
+    - G-275 (72a6d62, 62a8b11): a play's first leg zooms in. The planted arm's
+      bound is relative to the clean flight (6.1 against 873).
+    - G-5 (62a8b11): the frame is HELD while the layout settles, until
+      anyone takes the camera. Fresh load 1,048/1,048; a 1.35x spread is held
+      (planted 1,027).
+    - G-311 (62a8b11): the wheel's zoom floor clamped the chase. A write trace
+      on camera.position named TrackballControls._checkDistances. Planted
+      plantFloorInChase: 400 drawn for 81.4 asked.
+    - G-231 (683c074): the share is the document's. The store holds Trie under
+      Trie, Trie#, Trie#~v and Trie##~v, and each url took its own sixth.
+      Now 7 pages, top-2 share 0.34.
+    - G-94 (ea7544f): only the instrument is fixed. multi_parent counted the
+      corpus (133 in every arm) and now counts the open page (clean 0, web 2).
+      **Still failing, on layout:**
+      - burial 77/1,068: same-host pages ~3 world units apart against a
+        nearest-neighbour median of 8.4;
+      - near-page max 0.51-0.94;
+      - the page's chunks not folded 10 s after leaving it.
+  - Store question, not acted on: one document under four url leaves
+    (Trie#~v and the malformed Trie##~v). Whether those addresses should exist
+    at all is a capture/dedup question for the trie.
   - Also found: the map view can be left with its focus ONE unit ahead of
     the camera (a cockpit's framing), and checks that save and restore the
     camera pass it on across plugin reloads. Recentre clears it (1 -> 427).
