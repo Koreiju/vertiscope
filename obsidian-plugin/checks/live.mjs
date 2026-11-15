@@ -10682,6 +10682,28 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-354",
+      asks: "one chat generation at a time on the shared model (PLUGIN_GOAL 159, chat cells; 2026-11-14 two turns at once crashed the worker with an access violation in gpt4all): two chat-cell turns sent together through the running sidecar never run at once -- the second WAITS (waited_ms near the first's length) and neither is refused; planted (plant_unlocked) both run together (in_flight 2). Both arms use dry_ms, a turn without the model, so the planted arm cannot take the worker down",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const turn = () => fetch("http://127.0.0.1:8788/chat_stream", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt: "G-354", dry_ms: 1500, plant_unlocked: ${planted} }) }).then(async (r) => ({ status: r.status, n: (await r.text()).length }));
+          const got = await Promise.all([turn(), turn()]);
+          const p = await (await fetch("http://127.0.0.1:8788/profile")).json();
+          const recs = (p.chat_stream || []).filter((x) => x.dry).slice(-2).map((x) => ({ in_flight: x.in_flight, waited_ms: x.waited_ms, ms: x.ms, unlocked: x.unlocked }));
+          return { planted: ${planted}, got, recs };
+        })()`, { timeout: 30000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = (x) => !!x && Array.isArray(x.recs) && x.recs.length === 2 && x.got.every((g) => g.status === 200 && g.n > 0);
+        const c = clean || {}, p = planted || {};
+        return {
+          pass: ok(c) && c.recs.every((r) => r.in_flight === 1) && Math.max(...c.recs.map((r) => r.waited_ms)) >= 1000
+                && ok(p) && p.recs.some((r) => r.in_flight === 2),
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-340",
       asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) scales the 2D ego plane and leaves the camera's distance alone; a pinch (wheel + ctrl) does NOT touch the plane (159: 'remove the pinch gesture ... stick to shift scroll'); a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
       async run() {
