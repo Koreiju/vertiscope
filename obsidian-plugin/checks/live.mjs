@@ -3104,6 +3104,12 @@ export function makeChecks(env) {
             out.outline_frac = rect ? Math.round(rect.w * rect.h / (vp[0] * vp[1]) * 1000) / 1000 : null;
             out.flown = v.focusStats.flown - f0.flown;
             out.flew_to = v.focusStats.last;
+            // Why the stored chunk was or was not reached (2026-11-14: the
+            // flight went to a streaming /html/body stand-in): was it placed,
+            // is it drawn now, does the reader's collapse hold the page.
+            out.why = { asked_place: v.hoverPlaced && v.hoverPlaced.has(pick.stored), drawn: v.graph.graphData().nodes.some((n) => n.id === pick.stored),
+                        collapsed: typeof v.readerCollapsed === "function" ? v.readerCollapsed(PAGE) : null, alias: v.hoverAliases && v.hoverAliases.get(pick.stored) || null,
+                        focus: { ...v.focusStats } };
             const e = v.billboards.get(pick.stored);
             // Text where the reader sees it: the body, its shadow roots, and the
             // page form's frame (innerText does not reach into an iframe).

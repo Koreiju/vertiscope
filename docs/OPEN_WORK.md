@@ -373,11 +373,22 @@ Done and confirmed live (each check carries a planted arm that fails):
 | Node shrinking from further away, less at the end | G-350 -- PARAMETER check only; not measured on screen | 28e30b4 |
 
 Measured, not fixed:
-- **G-113 fails**: hovering a stored chunk on the fixture page flew the
-  camera to a streaming node for the page's whole `/html/body`, not the
-  chunk under the pointer; its panel did not open. This is the answer to
-  "Not sure if hovering browser chunks engages the fly-to anymore": it
-  flies, to the wrong node.
+- **G-113 fails** (passed 2026-10-07): hovering a chunk on the fixture
+  page flies the camera -- to a STREAMING stand-in at the page's place, not
+  to the chunk. Diagnosed with the check's new `why` evidence (run 35): the
+  hovered chunk `3f27378019c15d90` is a store-wide copy drawn as its lead
+  `de74da454b355ad4`; `/place` was asked (`asked_place: true`), neither is
+  drawn within the check's window -- on a page landed seconds before, its
+  chunks have no vector yet, so nothing can place them -- and the hover
+  falls back, as PLUGIN_GOAL 125 designed, to the streamed chunk at its
+  page's place. Two defects under it: (1) a freshly scanned page's chunks
+  are unreachable by hover until embedded -- the same latency as "scanning
+  and streaming to the 3D graph from the browser is also still quite
+  slow"; (2) the stand-in panel opened with 0 characters: the fixture's
+  text is inside shadow DOM and the streaming payload carried none of it.
+  This answers "Not sure if hovering browser chunks engages the fly-to
+  anymore": it flies, to the page-level stand-in, until the page's chunks
+  are embedded.
 - Picture nodes are clamped to 22-28 px (`uMinPicPx`/`uMaxPicPx`); likely
   the "very small node preview", untouched.
 - The harness reads a busy sidecar as "died" and stops the run (seen
