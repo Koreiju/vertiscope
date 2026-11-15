@@ -5890,18 +5890,27 @@ export function makeChecks(env) {
               let cx = 0, cy = 0, cz = 0; for (const n of ns) { cx += n.x; cy += n.y; cz += n.z || 0; }
               cx /= ns.length; cy /= ns.length; cz /= ns.length;
               const h0 = v.frameHoldStats.holds;
+              // On the scaled map (G-324) every mapped node is held at S x fit
+              // and glides back to it: moving the nodes was undone within the
+              // wait, and the planted arm read every node on screen (run 70,
+              // 1,290 of 1,290). There the spread a load really makes is the
+              // SCALE stepping up -- so that is the stimulus.
+              const scaled = !!v.scaledMode, s0 = v.mapScale;
               try {
-                for (const n of ns) {
+                if (scaled) v.mapScale = s0 * 1.35;
+                else for (const n of ns) {
                   n.x = cx + (n.x - cx) * 1.35; n.y = cy + (n.y - cy) * 1.35; n.z = cz + ((n.z || 0) - cz) * 1.35;
                   if (n.fx != null) { n.fx = n.x; n.fy = n.y; n.fz = n.z; }
                 }
                 v.graph.d3ReheatSimulation?.();
-                await sleep(1500);
-                return { ...census(), holds: v.frameHoldStats.holds - h0 };
+                await sleep(scaled ? 3000 : 1500);
+                return { ...census(), holds: v.frameHoldStats.holds - h0, scaled };
               } finally {
+                if (scaled) v.mapScale = s0;
                 for (const [n, x, y, z, fx, fy, fz] of keep) { n.x = x; n.y = y; n.z = z; n.fx = fx; n.fy = fy; n.fz = fz; }
                 v.plantNoFrameHold = false;
                 v.graph.d3ReheatSimulation?.();
+                if (scaled) await sleep(1500);
               }
             };
             out.spread = await spread(false);
