@@ -10458,6 +10458,59 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-348",
+      asks: "gesture guides on the graph's bar (PLUGIN_GOAL 159: 'clearer instructions on how gestures for the 2D editor work in some hoverable button that expands into a full panel ... another button for that which corresponds to the 3D gestures like moving the camera with wasd+arrows etc, also simple guides on the fundamental tool cell sets that we have outlined in our README, where each row in the first table is a different cell-level tool'): hovering '? 2D', '? 3D' and '? tools' each expands a panel of rows; the 3D panel names every key the agent answers (W A S D Q E V, the arrows, throttle) as the agent's own table has them -- A and D slide, Q and E roll; the tools panel has exactly the README first table's rows, by name; a click pins a panel, leaving does not close it, a second click does; planted (__domvecPlantNoHelp) hovering opens nothing",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!g) return { error: "no graph" };
+          window.__domvecPlantNoHelp = ${planted};
+          const btn = (t) => [...g.containerEl.querySelectorAll("button.domvec-help-button")].find((b) => b.textContent === t);
+          const panelFor = (t) => [...document.querySelectorAll(".domvec-help-panel")].find((p) => p.dataset.help === t) || null;
+          const rowsOf = (p) => p ? [...p.querySelectorAll("tr")].map((tr) => [...tr.children].map((td) => td.textContent)) : [];
+          const out = { planted: ${planted} };
+          try {
+            for (const t of ["? 2D", "? 3D", "? tools"]) {
+              const b = btn(t); if (!b) { out[t] = { button: false }; continue; }
+              b.dispatchEvent(new PointerEvent("pointerenter", { bubbles: false })); await sleep(250);
+              const p = panelFor(t);
+              out[t] = { button: true, open: !!p, rows: rowsOf(p) };
+              b.dispatchEvent(new PointerEvent("pointerleave", { bubbles: false })); await sleep(400);
+              out[t].closed_on_leave = !panelFor(t);
+            }
+            // Pin: click, leave, still open; click again, closed.
+            const b = btn("? 3D");
+            if (b) { b.click(); await sleep(200); b.dispatchEvent(new PointerEvent("pointerleave", { bubbles: false })); await sleep(400); out.pinned_stays = !!panelFor("? 3D"); b.click(); await sleep(200); out.unpinned = !panelFor("? 3D"); }
+            // The README's first table, read here to compare names.
+            const text = await app.vault.adapter.read("README.md");
+            const lines = text.split(String.fromCharCode(10)).map((l) => l.replace(String.fromCharCode(13), ""));
+            const i = lines.findIndex((l) => /^\\s*\\|.*\\|\\s*$/.test(l));
+            const names = [];
+            for (let k = i + 2; k < lines.length && /^\\s*\\|/.test(lines[k]); k++) names.push(lines[k].split("|")[1].replace(/\\*\\*/g, "").trim());
+            out.readme_tools = names;
+            return out;
+          } finally {
+            window.__domvecPlantNoHelp = false;
+            for (const p of document.querySelectorAll(".domvec-help-panel")) p.remove();
+          }
+        })()`, { timeout: 30000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean || {}, p = planted || {};
+        const keys3 = (c["? 3D"]?.rows || []).map((r) => r[0] + " " + r[1]);
+        const has = (k, what) => keys3.some((s) => s.startsWith(k + " ") && s.includes(what));
+        const toolNames = (c["? tools"]?.rows || []).map((r) => r[0]);
+        return {
+          pass: !c.error && c["? 2D"]?.open && (c["? 2D"].rows || []).length >= 8 && c["? 2D"].closed_on_leave
+                && c["? 3D"]?.open && has("W", "forward") && has("A", "slide left") && has("D", "slide right") && has("Q", "roll left") && has("E", "roll right") && has("V", "third") && has("←", "yaw")
+                && c["? tools"]?.open && toolNames.length === (c.readme_tools || []).length && toolNames.length >= 3 && toolNames.every((n, i) => n === c.readme_tools[i])
+                && c.pinned_stays && c.unpinned
+                && !p.error && !p["? 2D"]?.open && !p["? 3D"]?.open && !p["? tools"]?.open,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-340",
       asks: "two zooms (PLUGIN_GOAL 158: 'while scroll actions in the 3D view zoom on the 3D graph, pinching and unpinching actions or shift scroll should zoom in and out on the 2D graph plane'): in the map view, shift+scroll (sent as a horizontal delta, as Windows does) scales the 2D ego plane and leaves the camera's distance alone; a pinch (wheel + ctrl) does NOT touch the plane (159: 'remove the pinch gesture ... stick to shift scroll'); a plain scroll moves the camera and leaves the plane's scale alone; planted (plantPlaneZoomIs3D) shift+scroll zooms the 3D view",
       async run() {

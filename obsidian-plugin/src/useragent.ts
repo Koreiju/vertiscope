@@ -52,7 +52,7 @@ export interface AgentHost {
 const KEY = "domvec.useragent";
 
 /** The keys the agent answers, and what each does, as the strip shows them. */
-const CAPS: [string, string, string][] = [
+export const CAPS: [string, string, string][] = [
   ["w", "W", "forward"], ["a", "A", "slide left"], ["s", "S", "back"], ["d", "D", "slide right"],
   ["v", "V", "first / third person"],
   ["q", "Q", "roll left"], ["e", "E", "roll right"],

@@ -1385,3 +1385,13 @@ body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) 
 .domvec-bb.is-resizing *, .domvec-plane-card.is-resizing * { user-select: none; }
 /* A resized chunk panel's body fills its new height. */
 .domvec-bb > .domvec-bb-body, .domvec-bb > .domvec-bb-md { flex: 1 1 auto; min-height: 0; }
+
+/* The gesture guides (PLUGIN_GOAL 159): hover expands, a click pins. */
+.domvec-help-button.is-pinned { background: var(--interactive-accent); color: var(--text-on-accent); }
+.domvec-help-panel { position: fixed; z-index: 60; width: 430px; max-height: 70vh; overflow: auto;
+  background: var(--background-primary); border: 1px solid var(--background-modifier-border);
+  border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); padding: 8px 10px; font-size: var(--font-ui-small); }
+.domvec-help-title { font-weight: 600; margin-bottom: 6px; color: var(--text-normal); }
+.domvec-help-table { width: 100%; border-collapse: collapse; }
+.domvec-help-table td { padding: 3px 6px; vertical-align: top; border-top: 1px solid var(--background-modifier-border); color: var(--text-muted); }
+.domvec-help-key { white-space: nowrap; color: var(--text-normal) !important; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); }

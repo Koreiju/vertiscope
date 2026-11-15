@@ -43,6 +43,8 @@ import type { ActRecord, ActResult } from "./panelact";
 import { PANEL_VIEW, PanelView } from "./panelview";
 import { SearchField, brightness, fade, holdStep, type FieldHit, type FieldAnswer } from "./searchfield";
 import { edgeResizable } from "./edgeresize";
+import { helpButton, GESTURES_2D, GESTURES_3D_MOUSE, readmeTools } from "./help";
+import { CAPS } from "./useragent";
 
 export const GRAPH_VIEW = "domvec-graph-view";
 
@@ -509,6 +511,16 @@ export class GraphView extends ItemView {
     drift.setAttr("aria-label", "Idle drift: the camera turns and the colours cycle after a few seconds of no input");
     this.driftButton = drift;
     drift.onclick = () => { this.driftEnabled = !this.driftEnabled; };
+    // The guides (159): hover expands, a click pins. The 3D keys are the
+    // agent's own table; the tools are the README's first table, read now.
+    {
+      helpButton(bar, "? 2D", "The 2D computation-graph plane: gestures", () => GESTURES_2D);
+      helpButton(bar, "? 3D", "The 3D view: keys and mouse", () => [
+        ...CAPS.map(([, label, what]) => [label, what] as [string, string]),
+        ...GESTURES_3D_MOUSE,
+      ]);
+      helpButton(bar, "? tools", "The cell-level tools (README, first table)", () => readmeTools(this.app));
+    }
     // The ego graph as the 2D plane or in 3D (158).
     const egoView = bar.createEl("button", { text: "ego 2D" });
     egoView.addClass("domvec-ego-view-toggle");
