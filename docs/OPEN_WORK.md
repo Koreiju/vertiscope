@@ -352,7 +352,7 @@ Open (not started this session):
 - Per-artifact scoping of interactions (158): each artifact panel's own tool space linked into the reservoir graph.
 - Ad-blocking beyond uBlock (YouTube ad skip): needs downloads -> the user's permission.
 - `build/` (253k files) inside the vault: the user's call where stores live.
-- Third-person framing: the world's centre can sit just off screen after a mode switch (G-299 'third' arm, NDC x -0.54..-1.08 across runs).
+- ~~Third-person framing: the world's centre can sit just off screen after a mode switch (G-299 'third' arm, NDC x -0.54..-1.08 across runs).~~ Re-measured 2026-11-15, runs 9-13: craft at (0, 0) and world at x -0.05..0.09 in 4 of 5 runs, both centred (159's plane on the camera). One clean arm read craft -0.57 / world -0.64, still on screen; not reproduced since. G-299's first-person inset had passed VACUOUSLY: it read 35 nodes at one point (0 x 0, 'under half the lens'), its meshes just rebuilt and not yet placed by a frame. It now waits for the inset to be placed and spread, and requires a visible footprint (> 0.05): live 0.59 x 0.56.
 
 ## PLUGIN_GOAL 159 (2026-11-14), item by item
 

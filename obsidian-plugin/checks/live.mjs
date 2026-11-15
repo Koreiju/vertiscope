@@ -8484,7 +8484,29 @@ export function makeChecks(env) {
             const e = c.where();
             out.third = { drawn: c.stats.visible, on_camera: c.onCamera(), craft: ndc(e), world: ndc({ x: sh.cx, y: sh.cy, z: sh.cz }) };
             // First person: drawn, and where -- every node's NDC, the footprint.
-            g.agent.setMode("ego"); await sleep(1200);
+            // Read once the render hook has PLACED the inset: it is placed only
+            // there, and read before a frame had run (a background pane draws
+            // a few a second) every node still sat where the rebuild put it,
+            // one point, and a 0 x 0 footprint passed "under half the lens".
+            const rp0 = c.insetStats.render_places;
+            g.agent.setMode("ego");
+            await until(() => c.insetStats.render_places >= rp0 + 2, 6000);
+            // ...and SPREAD: a rebuild (the check's own dirty()) makes fresh
+            // meshes, unplaced until the next frame -- one point in a
+            // background pane drawing a few frames a second. Collapsed after
+            // 8 s is the defect; the wait is recorded.
+            const spread = () => new Set(c.nodes.filter((n) => n.mesh).map((n) => [n.mesh.position.x, n.mesh.position.y, n.mesh.position.z].map((v) => Math.round(v * 10)).join(","))).size > 1;
+            const tw = Date.now();
+            await until(() => !c.stats.visible || spread(), 8000);
+            out.spread_after_ms = Date.now() - tw;
+            out.renders_before_read = c.insetStats.render_places - rp0;
+            {
+              const P = c.nodes.filter((n) => n.mesh).map((n) => n.mesh.position);
+              out.inset_state = { planeScale: c.planeScale, radius: c.stats.radius, flat_extent: c.flatExtent, building: c.building, stale: c.stale,
+                                  distinct: new Set(P.map((p) => [p.x, p.y, p.z].map((v) => Math.round(v * 10)).join(","))).size,
+                                  flat_distinct: new Set(c.nodes.map((n) => n.flat ? Math.round(n.flat.x * 10) + "," + Math.round(n.flat.y * 10) : "-")).size,
+                                  anchor: c.stats.anchor, view: c.stats.view };
+            }
             out.drawn_in_ego = c.stats.visible;
             const cam1 = g.graph.camera();
             cam1.updateMatrixWorld();
@@ -8505,7 +8527,10 @@ export function makeChecks(env) {
         const hidden = await arm("hidden");
         const lens = await arm("lens");
         const c = clean || {};
-        const insetOk = (x) => !!x && x.drawn_in_ego === true && !!x.ego_inset && x.ego_inset.all_on_screen && x.ego_inset.w < 1 && x.ego_inset.h < 1;
+        // Visible AND inset: a footprint of some size (a collapsed one is no
+        // ego to see), under half the lens.
+        const insetOk = (x) => !!x && x.drawn_in_ego === true && !!x.ego_inset && x.ego_inset.all_on_screen
+          && x.ego_inset.w > 0.05 && x.ego_inset.h > 0.05 && x.ego_inset.w < 1 && x.ego_inset.h < 1;
         const onScreen = (v) => !!v && Math.abs(v[0]) <= 1 && Math.abs(v[1]) <= 1 && v[2] < 1;
         const third = c.third || {};
         return {
