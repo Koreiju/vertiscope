@@ -2332,6 +2332,8 @@ export function makeChecks(env) {
             await sleep(500);
             const at = await b.webview.executeJavaScript(
               "(function(){var r=document.getElementById('more-results').getBoundingClientRect();return [Math.round(r.left+r.width/2),Math.round(r.top+r.height/2)]})()");
+            // CSS px -> the pane's px: sendInputEvent takes the pane's. The scale is the pane's width over the page's innerWidth -- NOT getZoomFactor, which read 0.177 on DuckDuckGo drawn at 0.25 (227 / 909).
+            { const z = (await (async (w) => { try { const iw = await w.executeJavaScript("innerWidth"); return iw > 0 ? w.getBoundingClientRect().width / iw : 1; } catch (e) { return 1; } })(b.webview)); at[0] = Math.round(at[0] * z); at[1] = Math.round(at[1] * z); }
             b.webview.sendInputEvent({ type: "mouseDown", x: at[0], y: at[1], button: "left", clickCount: 1 });
             b.webview.sendInputEvent({ type: "mouseUp", x: at[0], y: at[1], button: "left", clickCount: 1 });
             // The new results arrive below the button; the store saves them.
@@ -2399,6 +2401,8 @@ export function makeChecks(env) {
             const at = await b.webview.executeJavaScript(
               "(function(){var r=document.querySelector('article[data-testid=\\\"result\\\"] [data-result=\\\"snippet\\\"] b').getBoundingClientRect();return [Math.round(r.left+r.width/2),Math.round(r.top+r.height/2)]})()");
             b.lastGesture = "";
+            // CSS px -> the pane's px: sendInputEvent takes the pane's. The scale is the pane's width over the page's innerWidth -- NOT getZoomFactor, which read 0.177 on DuckDuckGo drawn at 0.25 (227 / 909).
+            { const z = (await (async (w) => { try { const iw = await w.executeJavaScript("innerWidth"); return iw > 0 ? w.getBoundingClientRect().width / iw : 1; } catch (e) { return 1; } })(b.webview)); at[0] = Math.round(at[0] * z); at[1] = Math.round(at[1] * z); }
             for (let i = 0; i < 2; i++) {
               b.webview.sendInputEvent({ type: "mouseDown", x: at[0], y: at[1], button: "right", clickCount: 1 });
               b.webview.sendInputEvent({ type: "mouseUp", x: at[0], y: at[1], button: "right", clickCount: 1 });
@@ -3168,7 +3172,7 @@ export function makeChecks(env) {
             // CSS px -> the pane's px (the cell is zoomed to fit): sent
             // unscaled, (30,70) landed at CSS (105,245) at zoom 0.286 -- the
             // "#1 named while the pointer was in #2" of run 61 was this.
-            const zf = (wc.getZoomFactor && wc.getZoomFactor()) || 1;
+            const zf = (await (async (w) => { try { const iw = await w.executeJavaScript("innerWidth"); return iw > 0 ? w.getBoundingClientRect().width / iw : 1; } catch (e) { return 1; } })(b.webview));
             out.zoom = Math.round(zf * 1000) / 1000;
             wc.sendInputEvent({ type: "mouseMove", x: Math.round(pick.x * zf), y: Math.round(pick.y * zf) });
             await sleep(40);
@@ -3304,15 +3308,22 @@ export function makeChecks(env) {
             if (!pick) return { ...out, error: "precondition: no chunk of B is aliased to a lead on A" };
             out.pick = pick;
             // As a reader arrives: nothing placed or aliased for this page yet.
+            v.plantFlyToForeignLead = ${planted};
+            // The hover poll can re-issue the hover by the STORED cid (no stored
+            // chunk handed), which bumps the hover sequence and discards the
+            // place reply carrying the alias (run 100, planted: the lead never
+            // re-handed). A race in the app, recorded; the arm retries until
+            // the sensor's own hover survives, up to three times.
+            let calls = [], f0 = null, overridden = 0, wc2 = null;
+            for (let attempt = 0; attempt < 3; attempt++) {
             v.hoverPlaced.clear(); v.hoverAliases.clear();
             v.hoverStats.foreign_lead = 0; v.hoverStats.lead_page_unknown = 0;
-            v.plantFlyToForeignLead = ${planted};
-            const f0 = { ...v.focusStats };
-            const calls = [], hc = v.highlightChunk;
+            f0 = { ...v.focusStats };
+            calls = []; const hc = v.highlightChunk;
             v.highlightChunk = function (cid, url, stored) { if (calls.length < 12) calls.push({ cid: String(cid || "").slice(-70), url: String(url || "").slice(-40), stored: stored || "", collapsed: url ? v.readerCollapsed(url) : null, placed_before: v.hoverPlaced.has(stored) }); return hc.apply(this, arguments); };
             // The guest's webContents NOW, after two navigations, not the one
             // taken before them (run 92: no hover reached the view at all).
-            const wc2 = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
+            wc2 = window.require("@electron/remote").webContents.fromId(b.webview.getWebContentsId());
             out.wc_same = wc2 === wc || (wc2 && wc && wc2.id === wc.id);
             out.box_visible = !!(b.pipebox && b.pipebox.visible && b.pipebox.visible());
             try {
@@ -3320,7 +3331,7 @@ export function makeChecks(env) {
               // CSS px -> the pane's px: the cell is zoomed to fit (0.286 on a
               // 366 px pane showing a 1,280 px layout), and sendInputEvent
               // takes the pane's (run 93: (300,284) hovered only <html>).
-              const z = (wc2.getZoomFactor && wc2.getZoomFactor()) || 1;
+              const z = (await (async (w) => { try { const iw = await w.executeJavaScript("innerWidth"); return iw > 0 ? w.getBoundingClientRect().width / iw : 1; } catch (e) { return 1; } })(b.webview));
               out.zoom = Math.round(z * 1000) / 1000;
               pick.sx = Math.round(pick.x * z); pick.sy = Math.round(pick.y * z);
               wc2.sendInputEvent({ type: "mouseMove", x: pick.sx, y: pick.sy });
@@ -3330,6 +3341,12 @@ export function makeChecks(env) {
             } finally { v.highlightChunk = hc; }
             out.hover_in_page = await b.webview.executeJavaScript("(function(){var h=document.querySelectorAll(':hover');return h.length?h[h.length-1].tagName+'#'+(h[h.length-1].id||''):null;})()").catch(() => "err");
             out.cross_page_refused = (b.hoverStats && b.hoverStats.cross_page_refused) || 0;
+            if (!calls.some((c) => c.cid && !String(c.cid).startsWith("f:"))) break;
+            overridden++;
+            wc2.sendInputEvent({ type: "mouseMove", x: -8, y: -8 }); wc2.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 });
+            await sleep(800);
+            }
+            out.poll_overrode = overridden;
             out.calls = calls;
             out.hovered = b.lastHovered ? { cid: String(b.lastHovered.cid || "").slice(-70), stored: b.lastHovered.stored || "" } : null;
             out.b_page_drawn = v.graph.graphData().nodes.some((n) => n.level === "page" && docOf(n.url) === B);
@@ -3420,9 +3437,11 @@ export function makeChecks(env) {
               wc.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 });
               await sleep(400);
               b.pipebox.hover = null;
-              wc.sendInputEvent({ type: "mouseMove", x: Math.round(geo.cx), y: Math.round(geo.cy) });
+              // CSS px -> the pane's px: sendInputEvent takes the pane's. The scale is the pane's width over the page's innerWidth -- NOT getZoomFactor, which read 0.177 on DuckDuckGo drawn at 0.25 (227 / 909).
+              const gz = (await (async (w) => { try { const iw = await w.executeJavaScript("innerWidth"); return iw > 0 ? w.getBoundingClientRect().width / iw : 1; } catch (e) { return 1; } })(b.webview));
+              wc.sendInputEvent({ type: "mouseMove", x: Math.round(geo.cx * gz), y: Math.round(geo.cy * gz) });
               await sleep(40);
-              wc.sendInputEvent({ type: "mouseMove", x: Math.round(geo.cx) + 1, y: Math.round(geo.cy) });
+              wc.sendInputEvent({ type: "mouseMove", x: Math.round(geo.cx * gz) + 1, y: Math.round(geo.cy * gz) });
               let h = null;
               for (let i = 0; i < 25; i++) { await sleep(100); h = b.pipebox.hover; if (h && h.rect && (${planted} || h.stored)) break; }
               await sleep(300);
@@ -3675,9 +3694,11 @@ export function makeChecks(env) {
             out.pick = pick;
             pb.plantNoStructure = ${planted};
             pb.plantHoverById = ${!!byId};
-            wc.sendInputEvent({ type: "mouseMove", x: pick.x, y: pick.y });
+            // CSS px -> the pane's px: sendInputEvent takes the pane's. The scale is the pane's width over the page's innerWidth -- NOT getZoomFactor, which read 0.177 on DuckDuckGo drawn at 0.25 (227 / 909).
+            const pz = (await (async (w) => { try { const iw = await w.executeJavaScript("innerWidth"); return iw > 0 ? w.getBoundingClientRect().width / iw : 1; } catch (e) { return 1; } })(b.webview));
+            wc.sendInputEvent({ type: "mouseMove", x: Math.round(pick.x * pz), y: Math.round(pick.y * pz) });
             await sleep(40);
-            wc.sendInputEvent({ type: "mouseMove", x: pick.x + 2, y: pick.y + 1 });
+            wc.sendInputEvent({ type: "mouseMove", x: Math.round(pick.x * pz) + 1, y: Math.round(pick.y * pz) + 1 });
             await sleep(1800);
             const st = pb.structure;
             const shown = [...b.containerEl.querySelectorAll(".domvec-chunk-struct")].filter((el) => el.style.display !== "none" && el.getBoundingClientRect().width > 0).length;
@@ -4745,15 +4766,22 @@ export function makeChecks(env) {
               for (const p of pts) { const st = b.storedCidFor("f:" + b.session + "#" + p.id, b.session); if (!st) continue; if (!A) A = { ...p, st }; else if (st !== A.st) { B = { ...p, st }; break; } }
               if (!A) return { planted: ${planted}, error: "no point under the pointer resolves to a stored chunk", points: pts.length };
               const open = () => [...v.billboards.values()].filter((e) => e.fromHover).length;
+              // The hover panels BY KEY: a streamed chunk's panel is keyed by its
+              // streamed key (f:<url>#n, or #n|unit), not by the stored cid --
+              // looked up by the stored cid, A and B "never opened" while one
+              // panel stood open (runs 98-99: open_after_b 1, a/b_opened false).
+              const openIds = () => [...v.billboards.entries()].filter(([, e]) => e.fromHover).map(([k]) => String(k));
               // The stored chunk a hover OPENS is the one the host resolved from the
               // hovered element's own address (P-B7, 2026-10-11) -- finer than the
               // in-page chunk's, so it is read from the hover, not predicted from
               // the id. B is the first point whose hover resolves elsewhere.
-              const hoverAt = async (q) => { wc.sendInputEvent({ type: "mouseMove", x: q.x, y: q.y }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: q.x + 1, y: q.y }); await sleep(250);
+              // CSS px -> the pane's px: sendInputEvent takes the pane's. The scale is the pane's width over the page's innerWidth -- NOT getZoomFactor, which read 0.177 on DuckDuckGo drawn at 0.25 (227 / 909).
+              const hz = (await (async (w) => { try { const iw = await w.executeJavaScript("innerWidth"); return iw > 0 ? w.getBoundingClientRect().width / iw : 1; } catch (e) { return 1; } })(b.webview));
+              const hoverAt = async (q) => { wc.sendInputEvent({ type: "mouseMove", x: Math.round(q.x * hz), y: Math.round(q.y * hz) }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: Math.round(q.x * hz) + 1, y: Math.round(q.y * hz) }); await sleep(250);
                                              return (b.pipebox.hover && b.pipebox.hover.stored) || q.st; };
               A = { ...A, st: await hoverAt(A) };
               await sleep(1050);
-              const aOpen = v.billboards.has(A.st);
+              const idsA = openIds(), aOpen = idsA.length === 1;
               B = null;
               // On a narrow pane one chunk can fill the viewport: the search scrolls
               // a viewport at a time (A's panel persists through it -- the point).
@@ -4770,7 +4798,7 @@ export function makeChecks(env) {
               }
               if (!B) return { planted: ${planted}, error: "no second point resolves to another stored chunk", a: A.st, seen };
               await sleep(1050);
-              const bOpen = v.billboards.has(B.st), aAfter = v.billboards.has(A.st), afterB = open();
+              const idsB = openIds(), bOpen = idsB.length >= 1 && !idsB.every((k) => idsA.includes(k)), aAfter = idsA.some((k) => idsB.includes(k)), afterB = open();
               wc.sendInputEvent({ type: "mouseMove", x: -8, y: -8 });
               wc.sendInputEvent({ type: "mouseLeave", x: -8, y: -8 });
               await sleep(1500);
@@ -4778,6 +4806,7 @@ export function makeChecks(env) {
               await sleep(2500);
               const afterTtl = open();
               return { planted: ${planted}, a_opened: aOpen, b_opened: bOpen, a_after_b: aAfter, open_after_b: afterB,
+                       ids_a: idsA.map((k) => k.slice(-50)), ids_b: idsB.map((k) => k.slice(-50)),
                        open_1500_after_leave: at1500, open_after_ttl: afterTtl };
             } finally { v.plantCloseOnLeave = false; v.hoverPanelTtlMs = 60000; }
           })()`, { timeout: 150000 });
@@ -4815,7 +4844,9 @@ export function makeChecks(env) {
               v.zoomState = { zoomedFor: "", zoomedAt: -1e9 };
               const g = v.graph, dist = () => { const c = g.camera().position, t = g.controls().target; return Math.hypot(c.x - t.x, c.y - t.y, c.z - t.z); };
               const f0 = { ...v.focusStats };
-              wc.sendInputEvent({ type: "mouseMove", x: A.x, y: A.y }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: A.x + 1, y: A.y });
+              // CSS px -> the pane's px: sendInputEvent takes the pane's. The scale is the pane's width over the page's innerWidth -- NOT getZoomFactor, which read 0.177 on DuckDuckGo drawn at 0.25 (227 / 909).
+              const az = (await (async (w) => { try { const iw = await w.executeJavaScript("innerWidth"); return iw > 0 ? w.getBoundingClientRect().width / iw : 1; } catch (e) { return 1; } })(b.webview));
+              wc.sendInputEvent({ type: "mouseMove", x: Math.round(A.x * az), y: Math.round(A.y * az) }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: Math.round(A.x * az) + 1, y: Math.round(A.y * az) });
               await sleep(1500);
               const d0 = dist();
               // The reader zooms out: three times as far along the view.
@@ -4823,7 +4854,7 @@ export function makeChecks(env) {
               g.cameraPosition({ x: t.x + (c.x - t.x) * 3, y: t.y + (c.y - t.y) * 3, z: t.z + (c.z - t.z) * 3 }, { x: t.x, y: t.y, z: t.z }, 0);
               await sleep(400);
               const dUser = dist();
-              wc.sendInputEvent({ type: "mouseMove", x: B.x, y: B.y }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: B.x + 1, y: B.y });
+              wc.sendInputEvent({ type: "mouseMove", x: Math.round(B.x * az), y: Math.round(B.y * az) }); await sleep(30); wc.sendInputEvent({ type: "mouseMove", x: Math.round(B.x * az) + 1, y: Math.round(B.y * az) });
               await sleep(1500);
               const d1 = dist();
               return { planted: ${planted}, flown: v.focusStats.flown - f0.flown, zoomed: v.focusStats.zoomed - f0.zoomed,
@@ -5650,9 +5681,12 @@ export function makeChecks(env) {
           // Two arms (2026-09-26: a DOUBLE right-click pins; a single one is
           // the browser's own menu). The single arm must open the menu with
           // the link's items and pin nothing.
+          // CSS px -> the pane's px: sendInputEvent takes the pane's. The scale is the pane's width over the page's innerWidth -- NOT getZoomFactor, which read 0.177 on DuckDuckGo drawn at 0.25 (227 / 909).
+          const z39 = (await (async (w) => { try { const iw = await w.executeJavaScript("innerWidth"); return iw > 0 ? w.getBoundingClientRect().width / iw : 1; } catch (e) { return 1; } })(b.webview));
           const rclick = () => {
-            b.webview.sendInputEvent({ type: "mouseDown", x: at.x, y: at.y, button: "right", clickCount: 1 });
-            b.webview.sendInputEvent({ type: "mouseUp", x: at.x, y: at.y, button: "right", clickCount: 1 });
+            const X = Math.round(at.x * z39), Y = Math.round(at.y * z39);
+            b.webview.sendInputEvent({ type: "mouseDown", x: X, y: Y, button: "right", clickCount: 1 });
+            b.webview.sendInputEvent({ type: "mouseUp", x: X, y: Y, button: "right", clickCount: 1 });
           };
           // Loaded and focused first: a right-click sent while the guest is
           // still loading produced no context-menu event at all (a run on
@@ -5703,8 +5737,17 @@ export function makeChecks(env) {
             ringedAtPin = g0 ? g0.graphData().nodes.filter((n) => n.hovered).length : 0;
           }
           await sleep(1200);
-          const body = b.markdownWrap.querySelector(".domvec-browser-mdbody");
-          const head = b.markdownWrap.querySelector(".domvec-browser-mdhead");
+          // The SLATE (PLUGIN_GOAL 131/132): the pins are one vault note in a
+          // live editor, .domvec-slate-cell; the address is each pin
+          // handle's title. The static card (.domvec-browser-mdbody) is
+          // the planted plantStaticSide form, read when it is the one shown.
+          // Runs 98-99 read only the card and found 0 chars beside a slate.
+          const slate = b.markdownWrap.querySelector(".domvec-slate-cell");
+          const body = slate ? (slate.querySelector(".cm-content") || slate) : b.markdownWrap.querySelector(".domvec-browser-mdbody");
+          const handle = b.markdownWrap.querySelector(".domvec-pin-handle[title]") || b.markdownWrap.querySelector(".domvec-browser-mdhead span[title]");
+          const head = handle ? { textContent: handle.getAttribute("title") } : null;
+          let slateText = "";
+          if (slate) { try { const f = app.vault.getAbstractFileByPath(b.slatePath); if (f) slateText = await app.vault.read(f); } catch (e) {} }
           // Let late input land, then let go of what this check pinned: a
           // right-click delivered after the check ended pinned chunks of the
           // NEXT check's page.
@@ -5727,9 +5770,13 @@ export function makeChecks(env) {
             // Relative targets must have been resolved against the PAGE.
             // Rendered as-written they ask Obsidian for a vault file and
             // come back "could not be found".
-            links: body ? Array.from(body.querySelectorAll("a[href], img[src]"))
-              .map(e => e.getAttribute("href") || e.getAttribute("src"))
-              .slice(0, 4) : [],
+            links: slate
+              ? [...slateText.matchAll(/\\]\\(([^)\\s]+)/g)].map((m) => m[1]).filter((u) => !u.startsWith("#")).slice(0, 6)
+              : body ? Array.from(body.querySelectorAll("a[href], img[src]"))
+                .map(e => e.getAttribute("href") || e.getAttribute("src"))
+                .slice(0, 4) : [],
+            surface: slate ? "slate" : body ? "card" : null,
+            side: { shown: b.markdownWrap.offsetWidth > 0, children: [...b.markdownWrap.children].map((c) => c.className).slice(0, 6), pinned: b.pinnedState().length },
             status: b.status ? b.status.textContent : null,
             // The other half of the correspondence (G-38, as far as it is
             // built): the same chunk is ringed in the projector.
@@ -19617,7 +19664,8 @@ export function makeChecks(env) {
           for (let i = 0; i < 12 && !hover; i++) {
             // Across the page, as G-38 moves: the first moves after a page
             // lands are not always pushed (seen: 2 of 3 points silent).
-            view.webview.sendInputEvent({ type: "mouseMove", x: at.x + (i * 97) % 500, y: at.y + (i % 4) * 45 });
+            // CSS px -> the pane's px: sendInputEvent takes the pane's. The scale is the pane's width over the page's innerWidth -- NOT getZoomFactor, which read 0.177 on DuckDuckGo drawn at 0.25 (227 / 909).
+            { const z = (await (async (w) => { try { const iw = await w.executeJavaScript("innerWidth"); return iw > 0 ? w.getBoundingClientRect().width / iw : 1; } catch (e) { return 1; } })(view.webview)); view.webview.sendInputEvent({ type: "mouseMove", x: Math.round((at.x + (i * 97) % 500) * z), y: Math.round((at.y + (i % 4) * 45) * z) }); }
             await sleep(250);
             hover = view.lastHovered;
           }
