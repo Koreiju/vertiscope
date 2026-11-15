@@ -641,6 +641,24 @@ Open (not started this session):
       seen, index_warm 104.6 s -- throttled; not re-measured since);
     - an edit's render is O(page) in its page-global passes: 62 ms at
       N=1,600, against 9-12 ms on 2026-08-29;
+      re-measured 2026-11-15 15:10 (`--projection --sizes 400,1600,6400`):
+      edit 11.9 / 49.0 / 233.7 ms, linear; redraw 1.1 / 3.9 / 17.9 ms, also
+      linear, because a page-memo hit still CLONES every chunk (19 of 23 ms
+      at 6,400). Per pass on one edit at N=6,400 (wrapped, no profiler):
+      `_descend` ~90 ms (the chunk-boundary ancestor re-runs its merge
+      buffer over all N children), then post-passes over EVERY chunk:
+      `_recut` 35-39, `_carry_affordance` 38-51, `_name_the_collapse` 36,
+      `_fold_structural` 30-36, `_fold_links_into_prose` 30, `_page_facts`
+      16-23, `_tabulate` 8-22, `_table_layouts` 7-12. Two of these
+      (`_fold_links_into_prose`, `_fold_structural`) are pure functions of
+      one chunk's lines, but they read `_tabulate`'s output, whose header
+      layout comes from anywhere on the page. A per-chunk memo therefore has
+      to name that cross-chunk input (CLAUDE.md 5c) before it can be keyed.
+      Making the post-passes O(delta) is a redesign: each pass's inputs
+      written down per chunk, keyed on the descended chunk's identity (a
+      descent memo hit returns the same object) plus the page-wide facts it
+      reads. The descent's own linear term stays until the merge buffer
+      is incremental.
     - tests/test_projection_place.py::test_the_fit_itself_is_unchanged
       fails on HEAD (axis 0 spread to -0.015..1.000), not from this work;
     - tier 1's lexical phase reads 2.6-2.8 s in windows full of capture,

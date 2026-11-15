@@ -3526,7 +3526,7 @@ export function makeChecks(env) {
               for (let i = 0; i < 90 && !(b.pipebox.map.url === PAGE && b.pipebox.map.chunks > 0); i++) await sleep(500);
               await b.webview.executeJavaScript("document.querySelectorAll('tbody tr')[1].scrollIntoView({block:'center'}); 1");
               await sleep(700);
-              const geo = JSON.parse(await b.webview.executeJavaScript("(function(){var r=document.querySelectorAll('tbody tr')[1];var c=r.querySelectorAll('td')[2];var rb=r.getBoundingClientRect(),cb=c.getBoundingClientRect();return JSON.stringify({row_w:rb.width,cx:cb.x+cb.width/2,cy:cb.y+cb.height/2,cell_w:cb.width});})()"));
+              const geo = JSON.parse(await b.webview.executeJavaScript("(function(){var r=document.querySelectorAll('tbody tr')[1];var c=r.querySelectorAll('td')[2];var rb=r.getBoundingClientRect(),cb=c.getBoundingClientRect();return JSON.stringify({row_w:rb.width,row:[rb.x,rb.y,rb.width,rb.height],cell:[cb.x,cb.y,cb.width,cb.height],cx:cb.x+cb.width/2,cy:cb.y+cb.height/2,cell_w:cb.width});})()"));
               // Off the page first: the sensor pushes only when the chunk under
               // the pointer CHANGES, so an arm hovering the point the last arm
               // left the pointer on read that arm's outline (2026-10-10).
@@ -3544,16 +3544,24 @@ export function makeChecks(env) {
               await sleep(300);
               h = b.pipebox.hover;
               return { planted: ${planted}, landed, map_chunks: b.pipebox.map.chunks, row_w: Math.round(geo.row_w), cell_w: Math.round(geo.cell_w),
-                       outline_w: h && h.rect ? Math.round(h.rect.w) : null, stored: h ? (h.stored || null) : null,
+                       outline_w: h && h.rect ? Math.round(h.rect.w) : null, outline: h && h.rect ? [h.rect.x, h.rect.y, h.rect.w, h.rect.h].map(Math.round) : null, row: geo.row.map(Math.round), cell: geo.cell.map(Math.round), stored: h ? (h.stored || null) : null,
                        stored_unit_ms: b.pipebox.storedUnitMs.slice(-3).map(Math.round) };
             } finally { b.pipebox.plantPageUnit = false; }
           })()`, { timeout: 120000 });
           const clean = await arm(false);
           const planted = await arm(true);
-          const unit = (x) => x.outline_w !== null && x.outline_w >= 0.8 * x.row_w;
+          // The outline must COVER the row (2 px of rounding each side), not
+          // merely be as wide: the fixture's third cell is 663 px of a 760 px
+          // row, 0.87, so the old width bar (>= 0.8) read the planted cell as a
+          // row and the arm could not fail (2026-11-15). A cell starts inside
+          // its row; the row's stored unit (one row, or the table holding it)
+          // covers it.
+          const covers = (o, r) => !!o && !!r && o[0] <= r[0] + 2 && o[1] <= r[1] + 2
+            && o[0] + o[2] >= r[0] + r[2] - 2 && o[1] + o[3] >= r[1] + r[3] - 2;
+          const unit = (x) => covers(x.outline, x.row);
           return { pass: unit(clean) && !!clean.stored && !unit(planted),
                    evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin),
-                               bar: "clean: the outline is >= 0.8 of the row's width and names a stored chunk; planted: the cell" } };
+                               bar: "clean: the outline covers the row's box and names a stored chunk; planted: the cell, which does not" } };
         } finally { await fixtures.close(); }
       },
     },
