@@ -26,18 +26,87 @@ worker that holds the store (kuzu graph + vectors), the embedder and the UMAP
 projector. The plugin starts it (the `sidecar` button) and every child process
 is windowless.
 
-### Build and run
+### Install (a new Obsidian user)
 
+You need the Obsidian desktop app (1.4 or later), Python 3.10+, Node 18+ and
+git. A GPU is optional. These steps are run as written, in a clean clone, a
+clean virtual environment and a new vault, by `python -m domvec.obsidian.newuser`
+(see *How it is verified*). That proof has been run on Windows 11 in Git Bash.
+On macOS or Linux, write `.venv/bin/python` where it says `.venv/Scripts/python`.
+
+**1. Get the code and its Python dependencies.**
+
+<!-- proof: install -->
 ```bash
-cd obsidian-plugin && npm install && npm run build
+git clone https://github.com/Koreiju/vertiscope
+cd vertiscope
+python -m venv .venv
+.venv/Scripts/python -m pip install -e ".[obsidian]"
 ```
 
-`npm run build` type-checks, bundles, and installs into the vault's
-`.obsidian/plugins/domvec-bridge/` -- by default this repository, which is
-itself the vault; `DOMVEC_VAULT=<path>` installs elsewhere. Every build says
-where it wrote.
+The `obsidian` extra matters. Plain `pip install -e .` installs without
+error, but the sidecar then dies on its first import. Everything it uses is
+imported lazily, so nothing complains until the sidecar runs.
 
-The sidecar by hand, if you are not using the button:
+With an NVIDIA GPU, install the CUDA builds *before* that last line. PyPI's
+torch on Windows is CPU-only:
+`.venv/Scripts/python -m pip install torch --index-url https://download.pytorch.org/whl/cu124 "gpt4all[cuda]"`.
+On the CPU builds everything works, only slower.
+
+**2. Make the vault.** In Obsidian, *Open folder as vault* on any folder,
+new or existing. That creates the folder's `.obsidian/`, which the build
+installs into.
+
+**3. Build the plugin into it.** Replace the path with your vault's:
+
+<!-- proof: build -->
+```bash
+cd obsidian-plugin
+npm install
+DOMVEC_VAULT="/path/to/your/vault" npm run build
+```
+
+The build ends by printing `deployed main.js, manifest.json, styles.css -> ...`
+with your vault's path. It refuses (`DOMVEC_VAULT is set but no .obsidian/
+under ...`) if step 2 has not happened yet.
+
+**4. Turn it on.** In Obsidian go to *Settings -> Community plugins*, choose
+*Turn on community plugins*, then enable **domvec bridge** in the list.
+
+**5. Start the sidecar once, from the repository root.** After this first
+start the plugin remembers how it was started, and its `sidecar` button
+restarts it.
+
+<!-- proof: sidecar -->
+```bash
+.venv/Scripts/python -m domvec.obsidian supervise --workspace "/path/to/your/vault/.domvec/workspaces/default" --semantic --capture --enact --kernel
+```
+
+It serves on port 8787, which is where the plugin looks. It is up when
+`http://127.0.0.1:8787/health` answers `"backend": "up"`, which took about
+15 s in the proof. The first start downloads the embedding model (nomic,
+about 260 MB) into gpt4all's cache.
+
+### Use
+
+- **Open the 3D graph** with the `domvec 3D graph` ribbon icon (or the
+  command *domvec bridge: Open the 3D graph*). It is empty until something is
+  scanned.
+- **Open the browser cell** with the command *domvec bridge: Open the browser
+  cell*, and browse to a page by typing its address. As it loads, its chunks
+  stream into the store and appear in the 3D graph as nodes.
+- **Search** in the *database retrieval* panel at the bottom of the 3D graph.
+  Type a word from a page you have scanned. The results are listed in the
+  panel, and the top one is flown to and its panel opened.
+- **Gestures**: the `? 2D`, `? 3D` and `? tools` buttons on the graph's bar
+  list every gesture.
+
+### Developing in this repository
+
+This repository is itself a vault, so a plain `npm run build` in
+`obsidian-plugin/` installs into its own `.obsidian/`; `DOMVEC_VAULT=<path>`
+installs elsewhere. Every build says where it wrote. Its store is started
+with an explicit port beside the default:
 
 ```bash
 python -m domvec.obsidian supervise --workspace build/<store> --port 8788 --semantic --capture --enact --kernel
@@ -53,6 +122,17 @@ check that cannot fail is caught. They are run through the project's MCP
 server (`domvec/obsidian/mcp.py`: `confirm`, `pipeline_profile`,
 `app_anomalies`, `hang_watch`, ...), gated on the reader being idle.
 `python -m pytest -q` covers the backend.
+
+The install steps above are proved the same way. `python -m domvec.obsidian.newuser`
+runs the README's own marked blocks in order:
+
+- in a fresh clone, with a fresh venv and a new vault;
+- in an Obsidian on a profile of its own, beside your running one, with
+  nothing it could inherit;
+- then it browses a local page, waits for it to reach the graph, and finds it
+  by search.
+
+Its planted arm puts back `pip install -e .`, and must fail.
 
 ### Where the design lives
 
@@ -335,6 +415,7 @@ results the code cites.
 
 ### Requirements
 
-Python 3.10+, Firefox (for live scans), and `pip install -e .`.
-`kuzu`, `numpy` and `scipy` are required; `gpt4all` for `--semantic`, `pynput`
-only for the physical stage of the mouse probe.
+Python 3.10+ and `pip install -e .` for the distiller and its CLI
+(`kuzu`, `numpy`, `scipy`, `selenium`); Firefox for live scans. The Obsidian
+plugin's sidecar needs `pip install -e ".[obsidian]"` (see *Install* above);
+`pynput` only for the physical stage of the mouse probe.

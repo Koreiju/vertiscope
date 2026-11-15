@@ -444,6 +444,14 @@ TOOLS: List[Dict] = [
         },
     },
     {
+        "name": "readme_proof",
+        "title": "Prove the README's install and usage as a new user",
+        "description": "PLUGIN_GOAL 160. Runs the README's own `proof:` blocks in order in a fresh clone, venv and vault, then opens an Obsidian on a profile of its own (port 9223, beside the reader's app, never touching it). It turns the plugin on as the README says, starts the sidecar from the README's block, browses a local page and finds it by search. `both` also runs the planted arm (`pip install -e .`), which must fail at the sidecar step. Minutes; writes build_analytics/readme_proof.json.",
+        "inputSchema": {"type": "object", "properties": {
+            "both": {"type": "boolean", "description": "clean arm, then the planted one (default true)"},
+            "keep": {"type": "boolean", "description": "keep the clone, venv and vault"}}},
+    },
+    {
         "name": "obsidian_close",
         "title": "Close Obsidian",
         "description": "Terminate any running Obsidian processes cleanly.",
@@ -550,6 +558,10 @@ class DomvecMCP:
                 cdp_port=int(a.get("cdp_port") or 9222),
                 close_existing=bool(a.get("close_existing", True)),
             ),
+            "readme_proof": lambda a: (lambda nu: (lambda rs: {"arms": rs, "report": str(nu.write_report(rs)),
+                "pass": rs[0]["ok"] and (len(rs) < 2 or (not rs[1]["ok"] and rs[1]["failed_at"] == "sidecar"))})(
+                [nu.prove(p, keep=bool(a.get("keep"))) for p in ([None, "base_install"] if a.get("both", True) else [None])]))(
+                __import__("domvec.obsidian.newuser", fromlist=["prove"])),
             "obsidian_close": lambda a: __import__("domvec.obsidian.controls", fromlist=["close_obsidian"]).close_obsidian(),
             "obsidian_eval": lambda a: {
                 "result": self.live().evaluate(str(a["expression"]))
