@@ -35,13 +35,37 @@ FIELDS = ("html", "bg", "color", "font", "elements", "found", "url", "at")
 MAX_BYTES = 2 << 20
 
 
+#: G-145 (2026-11-16): page forms, like pictures (`_MEDIA` below), are written
+#: under a dot-prefixed directory, which Obsidian does not index. With the
+#: media fix live, a 36 s hover sweep still showed Obsidian 18 new
+#: `snapshots/` files, each a `reconcileFileCreation` over 281,623 cached
+#: files. Forms already in `snapshots/` stay there and are still read.
+#: Planted `PLANT_SNAPSHOTS_IN_VAULT`: new forms to `snapshots/`, as before.
+PLANT_SNAPSHOTS_IN_VAULT = [False]
+
+
 def _dir(workspace) -> Optional[Path]:
+    """Where a NEW page form is written."""
     base = getattr(workspace, "path", None)
-    return Path(base) / "snapshots" if base else None
+    if not base:
+        return None
+    return Path(base) / ("snapshots" if PLANT_SNAPSHOTS_IN_VAULT[0] else ".snapshots")
 
 
 def _blob(root: Path, h: str) -> Path:
     return root / h[:2] / (h + ".json.gz")
+
+
+def _saved(workspace, h: str) -> Optional[Path]:
+    """The blob of page form `h`, wherever it was written, or None."""
+    base = getattr(workspace, "path", None)
+    if not base or not h:
+        return None
+    for name in (".snapshots", "snapshots"):
+        path = _blob(Path(base) / name, h)
+        if path.exists():
+            return path
+    return None
 
 
 def save(workspace, items: Iterable[Dict], lock=None) -> Dict:
@@ -74,7 +98,7 @@ def save(workspace, items: Iterable[Dict], lock=None) -> Dict:
             continue
         h = hashlib.sha1(data).hexdigest()
         path = _blob(root, h)
-        if path.exists():
+        if _saved(workspace, h) is not None:
             out["same"] += 1
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -106,8 +130,8 @@ def load(workspace, cid: str) -> Optional[Dict]:
     h = rows[0][0] if rows and rows[0] else None
     if not h:
         return None
-    path = _blob(root, h)
-    if not path.exists():
+    path = _saved(workspace, h)
+    if path is None:
         return None
     try:
         doc = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
@@ -129,8 +153,8 @@ def load_page_forms(workspace, url: str) -> Dict[str, Dict]:
     for cid, h in workspace.store._rows("MATCH (c:Chunk {url: $u}) RETURN c.cid, c.snap", {"u": url}):
         if not h:
             continue
-        path = _blob(root, h)
-        if not path.exists():
+        path = _saved(workspace, h)
+        if path is None:
             continue
         try:
             doc = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))

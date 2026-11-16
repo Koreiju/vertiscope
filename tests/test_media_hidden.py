@@ -59,3 +59,44 @@ def test_an_unknown_key_is_none(tmp_path):
     ws = SimpleNamespace(path=str(tmp_path))
     assert snapshots.load_media(ws, "0" * 40) is None
     assert snapshots.load_media(ws, "../etc") is None
+
+
+# --- page forms, the same way (G-145, live: 18 `snapshots/` creations in 36 s)
+
+HTML = "<html><body><h1>Title</h1>" + "".join(
+    "<p>para %d with enough words to chunk</p>" % i for i in range(40)) + "</body></html>"
+PAGE = "http://a.test/p"
+
+
+def _form(i):
+    return {"html": "<div><p>para %d</p></div>" % i, "bg": "", "color": "", "font": "",
+            "elements": 1, "found": 1, "url": PAGE, "at": 1}
+
+
+@pytest.mark.parametrize("planted", [False, True])
+def test_a_new_page_form_is_written_where_obsidian_does_not_index(tmp_path, monkeypatch, planted):
+    from domvec.workspace import Workspace
+    monkeypatch.setattr(snapshots, "PLANT_SNAPSHOTS_IN_VAULT", [planted])
+    with Workspace(tmp_path / "ws") as ws:
+        ws.index_html(HTML, PAGE)
+        cids = [c for (c,) in ws.store._rows("MATCH (c:Chunk {url: $u}) RETURN c.cid", {"u": PAGE})]
+        got = snapshots.save(ws, [{"cid": c, "snap": _form(i)} for i, c in enumerate(cids)])
+        assert got["written"] == len(cids) >= 2
+        blobs = [p.relative_to(tmp_path) for p in (tmp_path / "ws").rglob("*.json.gz")]
+        assert len(blobs) == len(cids)
+        assert all(_indexed(p) for p in blobs) is planted, blobs
+        assert snapshots.load(ws, cids[0])["html"] == _form(0)["html"]
+        assert len(snapshots.load_page_forms(ws, PAGE)) == len(cids)
+
+
+def test_a_page_form_the_old_code_saved_is_still_read_and_not_written_again(tmp_path, monkeypatch):
+    from domvec.workspace import Workspace
+    with Workspace(tmp_path / "ws") as ws:
+        ws.index_html(HTML, PAGE)
+        cid = ws.store._rows("MATCH (c:Chunk {url: $u}) RETURN c.cid LIMIT 1", {"u": PAGE})[0][0]
+        monkeypatch.setattr(snapshots, "PLANT_SNAPSHOTS_IN_VAULT", [True])     # the old code writes it
+        assert snapshots.save(ws, [{"cid": cid, "snap": _form(0)}])["written"] == 1
+        monkeypatch.setattr(snapshots, "PLANT_SNAPSHOTS_IN_VAULT", [False])
+        assert snapshots.load(ws, cid)["html"] == _form(0)["html"]
+        assert snapshots.save(ws, [{"cid": cid, "snap": _form(0)}])["same"] == 1
+        assert not (tmp_path / "ws" / ".snapshots").exists()
