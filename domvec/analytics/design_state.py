@@ -118,6 +118,27 @@ def _exists(target: str) -> bool:
     return target in _TREE or name in _TREE
 
 
+def contradictions(rows, live_results) -> list:
+    """Rows the DOCUMENT calls working whose own live check last FAILED.
+
+    The status column is computed from the PRD's words, and the live checks
+    from the running app; nothing set one against the other. `D-40` read
+    "Done" for three weeks over its own check's FAIL (2026-10-24), the
+    failure recorded in the very verdict that opened with "Done". A row
+    matches a live result only by its exact id: `G-145p` is not `G-145`.
+    """
+    latest = {r.get("id"): r for r in live_results}
+    out = []
+    for r in rows:
+        if r["status"] not in ("done", "confirm"):
+            continue
+        seen = latest.get(r["tag"])
+        if seen is not None and not seen.get("pass"):
+            out.append({"tag": r["tag"], "status": r["status"], "when": seen.get("when", "?"),
+                        "asks": seen.get("asks", "")})
+    return out
+
+
 def classify(verdict: str) -> str:
     text = verdict.strip()
     for name, openers in STATUSES:
@@ -331,6 +352,20 @@ def main() -> int:
                    r.get("asks", "")[:80], r.get("when", "?"),
                    r.get("store", "?")))
         add("")
+        clash = contradictions(rows, rows_seen)
+        add("### Claimed working, seen failing")
+        add("")
+        if clash:
+            add("**%d rows** read done or confirm while their own live check's "
+                "latest verdict is FAIL. The document and the application "
+                "disagree; the application is the one that is running."
+                % len(clash))
+            add("")
+            for c in clash:
+                add("- `%s` (%s) — FAIL %s: %s" % (c["tag"], c["status"], c["when"], c["asks"][:90]))
+        else:
+            add("None: no row marked done or confirm has a failing live check.")
+        add("")
         have = {r["id"] for r in rows_seen}
         missing = [r for r in rows
                    if r["status"] in ("done", "confirm") and r["tag"] not in have]
@@ -371,6 +406,10 @@ def main() -> int:
                              ", ".join("%s %d" % (k, v)
                                        for k, v in by_status.most_common())))
     print("  %d done rows cite nothing" % len(unevidenced))
+    if live_path.exists():
+        import json as _json
+        _clash = contradictions(rows, _json.loads(live_path.read_text(encoding="utf-8")).get("results", []))
+        print("  %d done/confirm rows whose own live check last FAILED" % len(_clash))
     if dangling:
         print("  %d rows cite something that is not there" % len(dangling))
     return 0
