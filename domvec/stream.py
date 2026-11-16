@@ -149,12 +149,21 @@ class ScanUpdate:
                 f"{'tag':>6} {'trie':>6} {'diff':>6}")
 
 
+#: Planted (D-2, 2026-11-16): the stream renders at the module default, as
+#: before -- the live capture then wrote FOUR-part anchors into a store keyed
+#: at the markdown level (Radix_tree: 634 of 634, read off `/health`).
+PLANT_STREAM_NO_MD_LEVEL = [False]
+
+
 class StreamingScan:
     """Holds the current trie and turns each new snapshot into a delta."""
 
-    def __init__(self, url: str, *, context_window: int = 1200) -> None:
+    def __init__(self, url: str, *, context_window: int = 1200, md_level: Optional[bool] = None) -> None:
         self.url = url
         self.context_window = context_window
+        # The store's key level (D-2), passed by whoever writes the chunks:
+        # `Workspace` renders at it, and the live capture must too.
+        self.md_level = md_level
         self.trie: Optional[AddressTrie] = None
         self.updates: List[ScanUpdate] = []
         # (xpath, subtree hash) -> that subtree's detections, from the last
@@ -388,7 +397,8 @@ class StreamingScan:
         # 6,400 lines -- and both are page properties that cannot be decided
         # from one chunk.
         chunks = render_trie(update.trie, context_window=self.context_window,
-                             memo=self.render_memo)
+                             memo=self.render_memo,
+                             md_level=None if PLANT_STREAM_NO_MD_LEVEL[0] else self.md_level)
         # D-2: an anchor at the markdown level is its LEAF for what a delta touched.
         dirty = [c for c in chunks if touched.intersection(c.anchors) or touched.intersection(c.covered)]
         update.all_chunks = chunks

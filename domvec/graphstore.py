@@ -3416,7 +3416,7 @@ class GraphStore:
                 self._write_dups(elsewhere)
         return len(cids)
 
-    def anchor_levels(self) -> Dict[str, object]:
+    def anchor_levels(self, top: int = 0) -> Dict[str, object]:
         """How many anchors are keyed at the MARKDOWN level (D-2: five parts,
         url | xpath | md | tag | accessor) and how many are not (four).
 
@@ -3431,7 +3431,19 @@ class GraphStore:
                           "RETURN count(r)")[0][0]
         four = self._rows("MATCH ()-[r:Anchors]->(a:Address) WHERE a.md IS NULL OR a.md = '' "
                           "RETURN count(r)")[0][0]
-        return {"md_level": True, "five": int(five), "four": int(four)}
+        out = {"md_level": True, "five": int(five), "four": int(four)}
+        if four and top:
+            # WHERE the four-part ones are: a page re-captured since the
+            # migration writes five-part keys, so a page holding both is a
+            # writer that lost the level; one holding only four-part is
+            # residue the migration refused (`scripts/migrate_d2.py`).
+            rows = self._rows(
+                "MATCH (c:Chunk)-[r:Anchors]->(a:Address) "
+                "WITH c.url AS u, sum(CASE WHEN a.md IS NULL OR a.md = '' THEN 1 ELSE 0 END) AS f, count(r) AS n "
+                "WHERE f > 0 RETURN u, f, n ORDER BY f DESC LIMIT $k", {"k": int(top)})
+            out["pages_with_four"] = [{"url": u, "four": int(f), "of": int(n)} for u, f, n in rows]
+            out["mixed_pages"] = sum(1 for _u, f, n in rows if f < n)
+        return out
 
     def version_cids(self, url: str) -> List[str]:
         """The kept versions of a page (G-253): the chunks filed under its

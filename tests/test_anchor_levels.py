@@ -28,3 +28,13 @@ def test_every_captured_anchor_is_keyed_at_the_markdown_level(tmp_path, planted)
             store._execute("MATCH ()-[r:Anchors]->(a:Address) WITH a LIMIT 1 SET a.md = ''")
             again = store.anchor_levels()
             assert again["four"] >= 1 and again["five"] == got["five"] - again["four"], again
+
+
+def test_the_breakdown_names_the_page_holding_four_part_anchors(tmp_path):
+    with Workspace(tmp_path / "ws", embedder=_StubEmbedder()) as w:
+        w.index_html(PAGE, "https://radix.test/")
+        w.index_html(PAGE.replace("Radix", "Trie"), "https://trie.test/")
+        w.store._execute("MATCH (c:Chunk)-[:Anchors]->(a:Address) WHERE c.url = 'https://trie.test/' SET a.md = ''")
+        got = w.store.anchor_levels(top=5)
+    assert [p["url"] for p in got["pages_with_four"]] == ["https://trie.test/"], got
+    assert got["pages_with_four"][0]["four"] == got["pages_with_four"][0]["of"] and got["mixed_pages"] == 0

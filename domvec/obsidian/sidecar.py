@@ -4071,7 +4071,8 @@ class _Handler(BaseHTTPRequestHandler):
             session = {
                 "sensor": Sensor(None, url),
                 "spine": StreamingScan(
-                    url, context_window=self.workspace.context_window),
+                    url, context_window=self.workspace.context_window,
+                    md_level=getattr(self.workspace.store, "md_level", False)),
                 "passno": 0,
                 # Chunks captured but not yet vectorised. Retried on every
                 # later drain, so a chunk whose vector arrives while the
@@ -4561,7 +4562,7 @@ class _Handler(BaseHTTPRequestHandler):
                     return None
             def _levels():
                 try:
-                    return self.workspace.store.anchor_levels()
+                    return self.workspace.store.anchor_levels(top=12)
                 except Exception:               # noqa: BLE001
                     return None
             def _health_body():
