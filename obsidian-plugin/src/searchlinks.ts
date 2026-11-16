@@ -41,7 +41,7 @@ export interface SearchLinkSource {
 export class SearchLinks {
   /** Planted: the search shows its results and draws no link. */
   plantNoLinks = false;
-  stats = { frames: 0, out: 0, in: 0, offscreen: 0, cleared: 0, last_cids: [] as string[], ref_in: "" };
+  stats = { frames: 0, out: 0, in: 0, offscreen: 0, cleared: 0, last_cids: [] as string[], ref_in: "", in_keys: [] as string[] };
   private svg: SVGSVGElement | null = null;
   private frame = 0;
   private live = false;
@@ -105,8 +105,10 @@ export class SearchLinks {
       const r = i.el.getBoundingClientRect();
       if (!r.width || !r.height) continue;
       // From the input card's edge nearest the port.
-      const cx = Math.max(r.left, Math.min(port.x + cv.left, r.right)) - cv.left;
-      const cy = Math.max(r.top, Math.min(port.y + cv.top, r.bottom)) - cv.top;
+      // Clamped to the canvas: an input in another pane (the browser cell)
+      // is linked to the canvas edge that faces it.
+      const cx = Math.max(0, Math.min(cv.width, Math.max(r.left, Math.min(port.x + cv.left, r.right)) - cv.left));
+      const cy = Math.max(0, Math.min(cv.height, Math.max(r.top, Math.min(port.y + cv.top, r.bottom)) - cv.top));
       want.push({ key: "in:" + i.key, x1: cx, y1: cy, x2: port.x, y2: port.y, cls: "is-in" });
     }
     const ri = this.src.refInput ? this.src.refInput() : null;
@@ -141,5 +143,6 @@ export class SearchLinks {
     this.stats.in = want.length - this.stats.out;
     this.stats.offscreen = off;
     this.stats.last_cids = want.filter((w) => w.cid).map((w) => w.cid!) ;
+    this.stats.in_keys = want.filter((w) => w.cls === "is-in").map((w) => w.key.slice(3));
   }
 }

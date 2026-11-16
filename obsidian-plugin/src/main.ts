@@ -616,10 +616,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // A query from the 3D search field also searches the web in the
         // browser cell (PLUGIN_GOAL 85), when the setting allows it.
         view.onWebSearch = (query: string) => {
-          if (!this.settings.webSearch) return;
+          if (!this.settings.webSearch) return false;
           const l = { view: this.activeBrowser() } as any;
           const browser = l?.view as BrowserView | undefined;
-          if (browser && typeof browser.searchWeb === "function") void browser.searchWeb(query);
+          if (!browser || typeof browser.searchWeb !== "function") return false;
+          void browser.searchWeb(query);
+          return true;
         };
         view.onSidecarTrigger = () => this.sidecarTrigger();
         view.onWorkspaceMenu = (e, b) => this.workspaceMenu(e, b);
@@ -1105,6 +1107,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       const browser = this.activeBrowser() as BrowserView | undefined;
       if (!browser || typeof browser.searchWeb !== "function") return false;
       void browser.searchWeb(q);
+      // The slate's web branch: the browser cell is an input of the search node (G-372).
+      const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;
+      if (g) g.webInputFor = q;
       return true;
     },
   });

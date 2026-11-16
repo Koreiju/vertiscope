@@ -11240,6 +11240,53 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-372c",
+      asks: "the browser cell is an INPUT of the search node while a query is sent to the web (G-372, item 164: \"the browser cell when web is on\"): pressing search draws a link from the canvas edge facing the browser cell to the retrieval cell; a typed query that never reached the web draws none; planted (plantNoWebInput): no web link",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.searchField); i++) await sleep(500);
+          if (!v.searchField) return { planted: ${planted}, error: "no retrieval cell" };
+          const f = v.searchField;
+          // The web branch stood in for: the link is what is measured here,
+          // not the navigation (which has its own checks), and the reader's
+          // browser cell is left on its page.
+          const was = v.onWebSearch;
+          let sent = 0;
+          v.onWebSearch = () => { sent++; return true; };
+          v.plantNoWebInput = ${planted};
+          try {
+            f.input.value = "patricia trie radix lookup";
+            await f.run();
+            for (let i = 0; i < 40 && !(v.searchState && v.searchState.targets.length); i++) await sleep(250);
+            await sleep(300);
+            const typed = { web: v.searchLinks.stats.in_keys.includes("web"), keys: v.searchLinks.stats.in_keys.slice() };
+            await f.submit();
+            await sleep(500);
+            const keys = v.searchLinks.stats.in_keys.slice();
+            const line = Array.from(document.querySelectorAll(".domvec-search-links line.is-in")).find((l) => l.dataset.key === "in:web");
+            const leaf = app.workspace.getLeavesOfType("domvec-browser-view").find((l) => l.view.containerEl.getBoundingClientRect().width > 0);
+            const cv = v.canvasEl.getBoundingClientRect(), br = leaf ? leaf.view.containerEl.getBoundingClientRect() : null;
+            // The line starts on the canvas edge that faces the browser cell.
+            let faces = null;
+            if (line && br) {
+              const x1 = +line.getAttribute("x1");
+              faces = br.left >= cv.right - 2 ? Math.abs(x1 - cv.width) < 1.5 : br.right <= cv.left + 2 ? Math.abs(x1) < 1.5 : true;
+            }
+            f.input.value = ""; await f.run(); await sleep(200);
+            return { planted: ${planted}, sent, typed, keys, web_line: !!line, faces, browser_on_screen: !!br, after_clear: v.webInputFor === "" && document.querySelectorAll(".domvec-search-links line").length === 0 };
+          } finally {
+            v.onWebSearch = was; v.plantNoWebInput = false;
+          }
+        })()`);
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (r) => !r.error && r.sent === 1 && !r.typed.web && r.keys.includes("web") && r.web_line && r.faces === true && r.after_clear;
+        return { pass: ok(clean) && !ok(planted) && planted.sent === 1 && !planted.web_line, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-368",
       asks: "a page's fit sent by the projector is where the page is drawn, even if an earlier parting pass had moved it aside (G-94 run 130: an online update moved Radix_tree's fit ~34 units, its chunks followed, the page went back to the old fit); planted (plantStaleHomeFit): the parting pass's old home restored over the new fit",
       async run() {

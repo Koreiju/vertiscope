@@ -710,7 +710,13 @@ export class GraphView extends ItemView {
                                        (hits, d, soft) => this.showSearch(hits, d, soft), () => this.clearSearch());
     // The web half on the search BUTTON (and Enter) only -- typing never
     // reaches the browser cell (item 107).
-    this.searchField.onSubmit = (q) => { this.searchStats.web_asked++; this.onWebSearch(q); this.followStore(q); };
+    this.searchField.onSubmit = (q) => {
+      this.searchStats.web_asked++;
+      // The browser cell is an INPUT of the search node while this query
+      // stands (G-372: "the browser cell when web is on").
+      if (this.onWebSearch(q) !== false) this.webInputFor = q;
+      this.followStore(q);
+    };
     // Per query, on BOTH paths (tiered and single): counted, the store
     // followed, and the plants applied where the field really asks.
     this.searchField.onAsked = (q) => {
@@ -6406,12 +6412,23 @@ export class GraphView extends ItemView {
     inputs: () => {
       const desk: any = (window as any).__domvecPlane;
       const card: HTMLElement | undefined = desk?.panelOf?.("domvec/ego.md")?.card;
-      if (!card || !card.isConnected) return [];
       // The slate's own `search` field when it is drawn as a graph (its node
       // is the input the query comes from); the card in text form.
-      const node = card.querySelector('circle[data-key="search"]');
-      const r = node ? node.getBoundingClientRect() : null;
-      return [{ key: "cockpit", el: node && r && r.width ? node : card }];
+      const out: { key: string; el: Element }[] = [];
+      if (card && card.isConnected) {
+        const node = card.querySelector('circle[data-key="search"]');
+        const r = node ? node.getBoundingClientRect() : null;
+        out.push({ key: "cockpit", el: node && r && r.width ? node : card });
+      }
+      // The browser cell, while the standing query is the one it was sent.
+      const st = this.searchState;
+      if (st && this.webInputFor && st.query === this.webInputFor && !this.plantNoWebInput) {
+        const leaf = this.app.workspace.getLeavesOfType("domvec-browser-view")
+          .find((l: any) => { const r = l.view?.containerEl?.getBoundingClientRect(); return r && r.width > 0 && r.height > 0; });
+        const el = (leaf?.view as any)?.containerEl;
+        if (el) out.push({ key: "web", el });
+      }
+      return out;
     },
     // "Similar": the result the node is keyed by is an input too.
     refInput: () => {
@@ -6440,7 +6457,12 @@ export class GraphView extends ItemView {
   plantNoScrollFlight = false;
 
   /** Told the plugin, which tells the browser cell: search the web too (item 85). */
-  onWebSearch: (query: string) => void = () => {};
+  /** False when no browser cell took the query. */
+  onWebSearch: (query: string) => boolean | void = () => {};
+  /** The query the browser cell is searching the web for, if any (G-372). */
+  webInputFor = "";
+  /** Planted: the web branch runs, the browser cell drawn as no input. */
+  plantNoWebInput = false;
   private webTimer = 0;
   private followQuery = "";
   private followQuiet = 0;
@@ -6842,6 +6864,7 @@ export class GraphView extends ItemView {
     this.followQuery = "";
     this.flownFor = ""; this.flownTop = ""; this.flightOpened = "";
     this.searchState = null;
+    this.webInputFor = "";
     this.searchLinks.stop();
     this.batch?.setLights([], 1);
     this.searchStats.shown = 0; this.searchStats.lights = 0;
