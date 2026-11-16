@@ -11287,6 +11287,53 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-94h",
+      asks: "a hole in the room (PLUGIN_GOAL 165): every open page's chunks sit outside the page's drawn sphere -- each moved out along its own fit direction by the page's drawn radius plus its own, so directions and the order by distance are the fit's -- and the open page keeps its full size; planted (plantNoHole): chunks inside the disc, as before",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !v.graph; i++) await sleep(500);
+          v.plantNoHole = ${planted};
+          try {
+            // The pass that places open pages, run now under this arm.
+            v.fitChunkSizes(v.graph.graphData());
+            await sleep(800);
+            const ns = v.graph.graphData().nodes;
+            const pages = new Map(ns.filter((n) => !n.force && n.level === "page" && n.url).map((p) => [p.url, p]));
+            const byUrl = new Map();
+            for (const c of ns) { if (c.force || c.level === "page" || !c.url || !Number.isFinite(c.x) || !Number.isFinite(c.fitX) || !pages.has(c.url)) continue;
+              (byUrl.get(c.url) || byUrl.set(c.url, []).get(c.url)).push(c); }
+            let open = 0, chunks = 0, inside = 0, offDir = 0, inversions = 0, fullSize = 0;
+            for (const [url, cs] of byUrl) {
+              const p = pages.get(url); open++;
+              if (p.fullVal === undefined || Math.abs(p.val - p.fullVal) <= 1e-6 * Math.max(1, p.fullVal)) fullSize++;
+              const rp = v.drawnRadiusOf(p);
+              const rows = [];
+              for (const c of cs) {
+                chunks++;
+                const d = [c.x - p.x, c.y - p.y, (c.z || 0) - (p.z || 0)], f = [c.fitX - p.x, c.fitY - p.y, (c.fitZ || 0) - (p.z || 0)];
+                const dn = Math.hypot(...d), fn = Math.hypot(...f);
+                if (dn < rp + v.drawnRadiusOf(c) - 1e-3) inside++;
+                if (fn > 1e-6 && dn > 1e-6 && (d[0] * f[0] + d[1] * f[1] + d[2] * f[2]) / (dn * fn) < 0.999) offDir++;
+                rows.push([fn, dn]);
+              }
+              rows.sort((a, b) => a[0] - b[0]);
+              for (let i = 1; i < rows.length; i++) if (rows[i][0] > rows[i - 1][0] + 1e-6 && rows[i][1] < rows[i - 1][1] - 1e-3) inversions++;
+            }
+            return { planted: ${planted}, open_pages: open, chunks, inside, off_direction: offDir, order_inversions: inversions, pages_full_size: fullSize, stats: v.holeStats };
+          } finally {
+            v.plantNoHole = false;
+            v.fitChunkSizes(v.graph.graphData());
+          }
+        })()`);
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (r) => r.open_pages >= 1 && r.chunks >= 5 && r.inside === 0 && r.off_direction === 0 && r.order_inversions === 0 && r.pages_full_size === r.open_pages;
+        return { pass: ok(clean) && !ok(planted) && planted.inside > 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-368",
       asks: "a page's fit sent by the projector is where the page is drawn, even if an earlier parting pass had moved it aside (G-94 run 130: an online update moved Radix_tree's fit ~34 units, its chunks followed, the page went back to the old fit); planted (plantStaleHomeFit): the parting pass's old home restored over the new fit",
       async run() {

@@ -4545,6 +4545,21 @@ export class GraphView extends ItemView {
   plantLoadPileUp = false;
   /** Telescope passes run and skipped (their inputs unchanged), for the harness. */
   teleRan = 0;
+  /**
+   * **A hole in the room** (G-94, PLUGIN_GOAL 165: "Leave a gap of the page's
+   * drawn radius at the centre of its chunk cloud; chunks keep their UMAP
+   * layout, pushed just outside the disc"). Measured before: Radix_tree's
+   * page drew at ~3.4 units against a room of 3.26, so every chunk sat inside
+   * its disc. Each chunk of an open page moves outward along its own
+   * direction from the page by the page's drawn radius plus its own -- the
+   * same shift for the whole cloud, so directions and the order by distance
+   * are the fit's -- and the page keeps its full size. Planted `plantNoHole`:
+   * the chunks at their raw fit and the page shrunk to its nearest chunks,
+   * as before.
+   */
+  plantNoHole = false;
+  holeStats = { pages: 0, chunks: 0, inside_before: 0, inside_after: 0 };
+  private holeOn(): boolean { return this.umapAuthority() && !this.plantNoHole && this.level !== "chunk" && !this.scaledMode; }
   teleSkipped = 0;
   /** Planted (D-40): every open page re-telescoped on every pass, as before. */
   plantRetelescopeAll = false;
@@ -4756,8 +4771,13 @@ export class GraphView extends ItemView {
         const ps = this.plantSmallPages ? 1 : Math.min(this.pageScale, 1.4);
         const rp = drawnRadius({ ...page, val: page.fullVal }, relSize, media) * this.nodeScale * ps;
         const was = page.val;
-        page.val = rp > reach ? page.fullVal * Math.pow(reach / rp, 3) : page.fullVal;
+        page.val = this.holeOn() ? page.fullVal : (rp > reach ? page.fullVal * Math.pow(reach / rp, 3) : page.fullVal);
         if (was && Math.abs(was - page.val) > 0.05 * page.val) this.rescaleObject(page, was);
+      }
+      if (this.holeOn()) this.holeRoom(page, chunks, [px, py, pz], relSize, media);
+      else for (const c of chunks) {
+        // The hole switched off: what it moved goes back to the fit.
+        if (c.__holed && Number.isFinite(c.fitX)) { c.__holed = false; this.glide(c, [c.fitX, c.fitY, c.fitZ ?? 0]); }
       }
     }
     // A page with no chunks drawn is closed: its node back to full size.
@@ -4767,6 +4787,35 @@ export class GraphView extends ItemView {
       q.val = q.fullVal;
       this.rescaleObject(q, was);
     }
+  }
+
+  /** Every chunk of an open page shifted out by the page's drawn radius plus its own (G-94). */
+  private holeRoom(page: any, chunks: any[], at: number[], relSize: number, media: boolean): void {
+    const [px, py, pz] = at;
+    const rp = this.drawnRadiusOf ? this.drawnRadiusOf(page) : drawnRadius(page, relSize, media);
+    // ONE shift for the whole cloud -- the page's radius plus its largest
+    // chunk's -- so the order by distance is the fit's exactly (a per-chunk
+    // shift swapped 9 near neighbours on Radix_tree, run 7).
+    let rcMax = 0;
+    for (const c of chunks) if (!c.force && c.level !== "page") rcMax = Math.max(rcMax, this.drawnRadiusOf ? this.drawnRadiusOf(c) : drawnRadius(c, relSize, media));
+    const hole = rp + rcMax;
+    let n = 0, inB = 0, inA = 0;
+    for (const c of chunks) {
+      if (c.force || !Number.isFinite(c.fitX) || c.level === "page") continue;
+      const fx = c.fitX, fy = c.fitY, fz = c.fitZ ?? 0;
+      let dx = fx - px, dy = fy - py, dz = fz - pz;
+      let r = Math.hypot(dx, dy, dz);
+      if (r < 1e-9) { dx = 1; dy = 0; dz = 0; r = 1e-9; }
+      const rc = this.drawnRadiusOf ? this.drawnRadiusOf(c) : drawnRadius(c, relSize, media);
+      if (r < rp + rc) inB++;
+      const f = (r + hole) / Math.max(r, 1e-9);
+      const to = [px + dx * f, py + dy * f, pz + dz * f];
+      if (Math.hypot(to[0] - px, to[1] - py, to[2] - pz) < rp + rc - 1e-6) inA++;
+      c.__holed = true;
+      if (Math.abs((c.x ?? 0) - to[0]) + Math.abs((c.y ?? 0) - to[1]) + Math.abs((c.z ?? 0) - to[2]) > 1e-6) this.glide(c, to);
+      n++;
+    }
+    this.holeStats = { pages: this.holeStats.pages + 1, chunks: n, inside_before: inB, inside_after: inA };
   }
 
   /** Planted: projector moves glide to the raw fit, never re-telescoped (the drift after every update). */
