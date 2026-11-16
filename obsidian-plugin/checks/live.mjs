@@ -9349,6 +9349,70 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "T-13",
+      asks: "a notebook cell's OUTPUT is retrievable in the ego scope only (PLUGIN_GOAL 145), however short the note: a computation-graph note holding a heading, a python cell and its stored nb-output block -- small enough that the chunker would merge all three -- is found at its /output address by a where=ego search for the output's words, and a where=all search for them returns nothing from that note; planted (no-output-boundary) the output shares the cell's chunk and the all search finds the note",
+      async run() {
+        // 2026-11-15: `search_payload` reads T-13 off the CHUNK's xpath, and
+        // `render_trie` merged a short note's heading, source and output into
+        // ONE chunk at `/` -- the rule never fired. `markdown._holds_state`
+        // now splits at `output` on vault pages. The output's words share
+        // nothing with the source or the heading, so any hit on them is the
+        // output or a chunk it was merged into.
+        const SIDE0 = SIDECAR;
+        const plant = (on) => fetch(SIDE0 + "/plant", { method: "POST",
+          headers: { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
+          body: JSON.stringify({ name: "no-output-boundary", on }) });
+        const arm = async (planted) => {
+          await plant(planted);
+          try {
+            return await evaluate(`(async () => {
+              const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+              const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 500) await sleep(500); return !!(await ok()); };
+              const plugin = app.plugins.getPlugin("domvec-bridge");
+              const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+              const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+              const d = window.__domvecPlane, c = window.__domvecCraft;
+              if (!d || !c) return { error: "no plane or craft" };
+              const stamp = Date.now() + (${planted} ? "p" : "c"), NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+              const words = "quasicrystal penrose tiling aperiodic";
+              const path = "domvec/graph/t13 output " + stamp + ".md";
+              const text = "# Cell" + NL + NL + F + "python" + NL + "print(zircon_lattice_constant())" + NL + F + NL
+                + "<!-- nb-output hash=t13" + stamp + " count=1 status=ok format=text -->" + NL
+                + F + "\`text" + NL + words + NL + F + "\`" + NL + "<!-- /nb-output -->" + NL;
+              const search = async (where) => (await (await fetch(SIDE + "/search?q=" + encodeURIComponent(words) + "&k=12&where=" + where, { headers: H })).json());
+              const mine = (r) => (r.hits || []).filter((h) => String(h.url).includes("t13 output " + stamp) || String(h.url).includes("t13%20output%20" + stamp));
+              const out = { planted: ${planted} };
+              try {
+                await d.create("notebook", { path, text });
+                c.dirty();
+                out.ego_ready = await until(async () => mine(await search("ego")).length >= 1, 60000);
+                const ego = mine(await search("ego"));
+                out.ego = ego.map((h) => ({ xpath: h.xpath, preview: String(h.preview || "").slice(0, 80) }));
+                out.ego_at_output = ego.some((h) => String(h.xpath).includes("/output"));
+                out.ego_output_alone = ego.some((h) => String(h.xpath).includes("/output") && !String(h.preview || "").includes("zircon"));
+                const all = mine(await search("all"));
+                out.all = all.map((h) => ({ xpath: h.xpath, preview: String(h.preview || "").slice(0, 80) }));
+                return out;
+              } finally {
+                try { await d.trash(path); } catch (e) { /* gone */ }
+                c.dirty();
+              }
+            })()`, { timeout: 120000 });
+          } finally {
+            await plant(false);
+          }
+        };
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const c = clean || {};
+        return {
+          pass: !!c.ego_ready && c.ego_at_output && c.ego_output_alone && Array.isArray(c.all) && c.all.length === 0
+                && !!planted && !!planted.ego_ready && Array.isArray(planted.all) && planted.all.length >= 1,
+          evidence: { clean, planted },
+        };
+      },
+    },
+    {
       id: "G-309",
       asks: "the halo that slides, 2D only and ego only (PLUGIN_GOAL 81-84): a click on a plane panel's header node opens its halo -- the ego's retrieval for that note, cut to what fits the ring, laid out in polar coordinates: radius larger as similarity to the focus falls, angle by the results' similarity to one another (angular neighbours more alike than any two); the pointer moving outside the panel slides a cursor over the layout -- the result nearest it lit, a shortest path traced back to the focus; moving back the same way retraces; a fast short stroke travels at least 60% of a slow stroke three times longer; a click sticks the lit note on the plane; Escape closes it; planted (plantRankAngles) the angles are the retrieval's rank order",
       async run() {

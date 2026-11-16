@@ -455,6 +455,16 @@ export class Verifier {
       await this.ensurePanes();
       // The page the reader had open, to go back to afterwards.
       readerPage = this.browserUrl();
+      // In memory ONLY: a save during the run (a check, a pane) wrote the
+      // test port to `data.json`, the teardown restored memory alone, and the
+      // next plugin load read 8790 back -- the app talked to a stopped
+      // sidecar for hours (2026-11-15, after fresh run 136). Every save while
+      // switched writes the WORKING address.
+      if (plugin && !Object.prototype.hasOwnProperty.call(plugin, "saveSettings")) {
+        plugin.saveSettings = async function (this: any) {
+          await this.saveData({ ...this.settings, sidecar: working });
+        };
+      }
       plugin.settings.sidecar = testUrl;
       this.resetGraphs("switched to a fresh store");
       await this.redrawGraphs();
@@ -537,6 +547,7 @@ export class Verifier {
     } finally {
       // 6. Back on the working store, whatever happened.
       if (plugin?.settings) plugin.settings.sidecar = working;
+      if (plugin && Object.prototype.hasOwnProperty.call(plugin, "saveSettings")) delete plugin.saveSettings;
       this.resetGraphs("back on the working store");
       // And the browser cell back on the reader's page, freshly loaded: a page
       // left open across the switch kept a sensor whose dictionary the

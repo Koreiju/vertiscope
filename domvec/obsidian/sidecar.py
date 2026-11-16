@@ -831,6 +831,7 @@ _PLANTABLE = {
     "replace-unchanged": ("domvec.obsidian.projector", "PLANT_REPLACE_UNCHANGED"),  # hover jump
     "purge-keeps-projected": ("domvec.obsidian.sidecar", "PLANT_PURGE_KEEPS_PROJECTED"),  # G-270
     "outputs-everywhere": ("domvec.obsidian.sidecar", "PLANT_OUTPUTS_EVERYWHERE"),  # T-13
+    "no-output-boundary": ("domvec.markdown", "PLANT_NO_OUTPUT_BOUNDARY"),       # T-13, short notes
     "aggregate-mid-stream": ("domvec.obsidian.sidecar", "PLANT_AGGREGATE_MID_STREAM"),  # 137(20)
     "furniture-is-content": ("domvec.markdown", "PLANT_FURNITURE_IS_CONTENT"),  # 137(3)       # chunk view, 2026-10-24
     "fixed-batch": ("domvec.obsidian.projector", "PLANT_FIXED_BATCH"),      # G-13, 2026-10-24
