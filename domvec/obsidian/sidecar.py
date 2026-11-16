@@ -4559,6 +4559,11 @@ class _Handler(BaseHTTPRequestHandler):
                     return self.workspace.store._rows(q)[0][0]
                 except Exception:               # noqa: BLE001
                     return None
+            def _levels():
+                try:
+                    return self.workspace.store.anchor_levels()
+                except Exception:               # noqa: BLE001
+                    return None
             def _health_body():
                 return {"ok": True,
                              "pages": len(self.workspace.pages()),
@@ -4576,6 +4581,9 @@ class _Handler(BaseHTTPRequestHandler):
                                  "MATCH ()-[r:Anchors]->(a:Address) "
                                  "WHERE a.akey IS NULL OR a.akey = '' "
                                  "RETURN count(r)"),
+                             # D-2 on the store itself: anchors keyed at the
+                             # markdown level (five parts) and not (four).
+                             "anchor_levels": _levels(),
                              "addresses_blank_key": _one(
                                  "MATCH (a:Address) "
                                  "WHERE a.akey IS NULL OR a.akey = '' "

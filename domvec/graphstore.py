@@ -3416,6 +3416,23 @@ class GraphStore:
                 self._write_dups(elsewhere)
         return len(cids)
 
+    def anchor_levels(self) -> Dict[str, object]:
+        """How many anchors are keyed at the MARKDOWN level (D-2: five parts,
+        url | xpath | md | tag | accessor) and how many are not (four).
+
+        D-2's verdict read off the store rather than a document: the copy was
+        re-keyed on 2026-11-14 and every capture since writes the md column,
+        so a four-part anchor is either pre-migration residue or a writer that
+        lost the level. A store without the column has no five-part anchors."""
+        if not getattr(self, "md_level", False):
+            n = self._rows("MATCH ()-[r:Anchors]->(:Address) RETURN count(r)")[0][0]
+            return {"md_level": False, "five": 0, "four": int(n)}
+        five = self._rows("MATCH ()-[r:Anchors]->(a:Address) WHERE a.md IS NOT NULL AND a.md <> '' "
+                          "RETURN count(r)")[0][0]
+        four = self._rows("MATCH ()-[r:Anchors]->(a:Address) WHERE a.md IS NULL OR a.md = '' "
+                          "RETURN count(r)")[0][0]
+        return {"md_level": True, "five": int(five), "four": int(four)}
+
     def version_cids(self, url: str) -> List[str]:
         """The kept versions of a page (G-253): the chunks filed under its
         marked url. The page itself is not touched."""
