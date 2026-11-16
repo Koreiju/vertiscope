@@ -362,6 +362,116 @@ export async function mouse(actions) {
   }
 }
 
+/**
+ * A TRUSTED hover sweep over the 3D graph's picture nodes (G-145).
+ *
+ *   node cdp.mjs --hover-sweep [count] [dwellMs] [--off] [--profile]
+ *
+ * Script-dispatched pointer events light a node's glow but never reach the
+ * graph's own hover -- its tooltip and the image path the reader reported
+ * freezing ("frozen again and image hovering stops working in chunk view").
+ * `Input.dispatchMouseEvent` enters the input pipeline as a real mouse does.
+ * The page records frame gaps, long tasks, tooltips seen and pictures loaded
+ * while the sweep runs. `--off` is the null arm: the same moves 40 px outside
+ * the canvas, which must register no hover at all. Refuses on a minimised
+ * window, where rAF runs at 1 Hz and every timing is the window's.
+ */
+export async function hoverSweep({ count = 40, dwell = 400, off = false, profile = false } = {}) {
+  const plan = JSON.parse(await evaluate(`(() => {
+    const w = require("@electron/remote").getCurrentWindow();
+    if (w.isMinimized()) return JSON.stringify({ refused: "window minimised" });
+    const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+    if (!v || !v.graph) return JSON.stringify({ refused: "no graph view" });
+    const g = v.graph, el = v.canvasEl || g.renderer().domElement, r = el.getBoundingClientRect();
+    const pts = [];
+    for (const n of g.graphData().nodes) {
+      if (!n.image || !Number.isFinite(n.x)) continue;
+      const s = g.graph2ScreenCoords(n.x, n.y, n.z || 0);
+      if (s.x > 40 && s.y > 40 && s.x < r.width - 40 && s.y < r.height - 160) pts.push([Math.round(r.left + s.x), Math.round(r.top + s.y)]);
+      if (pts.length > 4000) break;
+    }
+    const pick = [];
+    for (let i = 0; i < ${count} && pts.length; i++) pick.push(pts[(i * 7919) % pts.length]);
+    const rec = window.__domvecHoverSweep = { gaps: [], tasks: [], tips: new Set(), pics: new Set(), run: true, last: performance.now(),
+      img0: g.graphData().nodes.filter((n) => n.imgLoaded).length, glow0: v.glowLatency.length };
+    rec.obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) rec.tasks.push(Math.round(e.duration)); });
+    rec.obs.observe({ entryTypes: ["longtask"] });
+    // The hover's PICTURES are drawn on the K nodes nearest the pointer's
+    // ray (item 112, \`refreshDetail\`), not in the tooltip: counted per frame.
+    rec.revealed = new Set(); rec.revealedLoaded = new Set(); rec.detail0 = v.detailStats.computes;
+    rec.loads0 = v.batch && v.batch.loadStats ? v.batch.loadStats.started : null;
+    const loop = () => { const now = performance.now(); rec.gaps.push(now - rec.last); rec.last = now;
+      for (const n of (v.lastRevealed || [])) { if (n && n.image) { rec.revealed.add(n.id); if (n.__bpic) rec.revealedLoaded.add(n.id); } }
+      const t = document.querySelector(".scene-tooltip, .float-tooltip-kap");
+      const txt = t && t.offsetParent !== null ? (t.innerText || "").trim() : "";
+      if (txt) { rec.tips.add(txt.slice(0, 80)); const im = t.querySelector("img, canvas");
+        if (im) rec.pics.add(txt.slice(0, 80) + "|" + (im.complete === false ? "loading" : im.naturalWidth > 0 || im.tagName === "CANVAS" ? "drawn" : "broken")); }
+      if (rec.run) requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+    return JSON.stringify({ nodes: g.graphData().nodes.length, level: v.level || "pages", pictures: pts.length, pick,
+                            canvas: [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)] });
+  })()`));
+  if (plan.refused) return plan;
+  const moves = [];
+  for (const [x, y] of plan.pick) {
+    const at = off ? [plan.canvas[0] - 40, y] : [x, y];
+    moves.push({ type: "mouseMoved", x: at[0], y: at[1], buttons: 0, pause: Math.round(dwell / 2) });
+    moves.push({ type: "mouseMoved", x: at[0] + 1, y: at[1], buttons: 0, pause: Math.round(dwell / 2) });
+  }
+  // `--profile`: V8 samples the main thread for the length of the moves --
+  // WHICH function each long task is, where the gaps only say how long.
+  const prof = profile ? await session({ emulate: false }) : null;
+  if (prof) { await prof.send("Profiler.enable"); await prof.send("Profiler.setSamplingInterval", { interval: 250 }); await prof.send("Profiler.start"); }
+  await mouse(moves);
+  let hot = null;
+  if (prof) {
+    try { hot = profileTop((await prof.send("Profiler.stop")).profile); }
+    finally { try { await prof.send("Profiler.disable"); } catch {} prof.close(); }
+  }
+  const got = JSON.parse(await evaluate(`(() => {
+    const rec = window.__domvecHoverSweep, v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+    rec.run = false; rec.obs.disconnect();
+    const g = rec.gaps.slice(1).sort((a, b) => a - b), q = (f) => g.length ? Math.round(g[Math.min(g.length - 1, Math.floor(g.length * f))]) : null;
+    return JSON.stringify({ frames: g.length, gap_p50: q(0.5), gap_p99: q(0.99), worst: q(1),
+      over_200: g.filter((x) => x > 200).length, over_1s: g.filter((x) => x > 1000).length,
+      longtasks: rec.tasks.length, longtask_ms: rec.tasks.reduce((a, b) => a + b, 0), top: rec.tasks.sort((a, b) => b - a).slice(0, 6),
+      detail_computes: v.detailStats.computes - rec.detail0, pictures_revealed: rec.revealed.size, pictures_revealed_drawn: rec.revealedLoaded.size,
+      decodes_started: rec.loads0 === null ? null : v.batch.loadStats.started - rec.loads0,
+      tooltips: rec.tips.size, tooltips_with_picture: rec.pics.size,
+      picture_states: [...rec.pics].reduce((o, k) => { const s = k.split("|").pop(); o[s] = (o[s] || 0) + 1; return o; }, {}), glows: v.glowLatency.length - rec.glow0,
+      pictures_loaded: v.graph.graphData().nodes.filter((n) => n.imgLoaded).length - rec.img0 });
+  })()`));
+  return { off, count: plan.pick.length, dwell, nodes: plan.nodes, level: plan.level, pictures_on_screen: plan.pictures, ...got,
+           ...(hot ? { profile: hot } : {}) };
+}
+
+/**
+ * A V8 CPU profile reduced to where the time went: self ms and inclusive ms
+ * per function (`name @ file:line`), the top `k` of each. Inclusive counts
+ * a frame once per sample however often it recurs on that stack.
+ */
+export function profileTop(profile, k = 14) {
+  const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+  const parent = new Map();
+  for (const n of profile.nodes) for (const c of n.children || []) parent.set(c, n.id);
+  const key = (n) => { const f = n.callFrame; return `${f.functionName || "(anon)"} @ ${String(f.url).split("/").pop()}:${f.lineNumber + 1}`; };
+  const self = new Map(), incl = new Map();
+  let total = 0;
+  profile.samples.forEach((id, i) => {
+    const dt = (profile.timeDeltas[i] || 0) / 1000;
+    total += dt;
+    const n = byId.get(id); if (!n) return;
+    const k0 = key(n); self.set(k0, (self.get(k0) || 0) + dt);
+    const seen = new Set();
+    for (let at = id; at !== undefined; at = parent.get(at)) {
+      const kk = key(byId.get(at)); if (seen.has(kk)) continue; seen.add(kk);
+      incl.set(kk, (incl.get(kk) || 0) + dt);
+    }
+  });
+  const top = (m) => [...m].filter(([kk]) => !/^\((root|program|idle)\)/.test(kk)).sort((a, b) => b[1] - a[1]).slice(0, k).map(([kk, ms]) => [kk, Math.round(ms)]);
+  return { sampled_ms: Math.round(total), idle_ms: Math.round(self.get("(idle) @ :0") || 0), self: top(self), inclusive: top(incl) };
+}
+
 /** A trusted click: move there first, so hover state is real. */
 export const click = (x, y) => mouse([
   { type: "mouseMoved", x, y, buttons: 0, pause: 60 },
@@ -482,6 +592,12 @@ if (process.argv[1] &&
     const rest = args.slice(1).filter((a) => a !== "--boxes");
     console.log(await axTree(rest[0] || "",
                              { boxes: args.includes("--boxes") }));
+    process.exit(0);
+  }
+  if (args[0] === "--hover-sweep") {
+    const nums = args.slice(1).filter((x) => /^\d+$/.test(x)).map(Number);
+    console.log(JSON.stringify(await hoverSweep({ count: nums[0] || 40, dwell: nums[1] || 400, off: args.includes("--off"),
+                                                       profile: args.includes("--profile") }), null, 1));
     process.exit(0);
   }
   if (args[0] === "--watch-hang") {

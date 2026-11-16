@@ -159,9 +159,40 @@ MEDIA_MAX = 8 << 20
 _MEDIA_TYPES = ("image/", "video/", "audio/")
 
 
+#: G-145 (2026-11-16): new pictures go to a HIDDEN directory. The workspace
+#: sits inside the Obsidian vault, and Obsidian indexes every path that has no
+#: dot-prefixed segment -- 263,697 of the vault's 280,907 files were the
+#: store's. Each new file there cost Obsidian a `reconcileFileCreation` over
+#: all of them (~150-350 ms on the renderer's main thread), and a hover
+#: fetched pictures three files at a time (.tmp, .bin, .ct): a trusted sweep
+#: at 65,131 nodes spent 5.5 s there and froze in long tasks. Obsidian indexes
+#: no dot-prefixed path, so `.media` costs it nothing. Pictures already in
+#: `media/` stay there and are still read -- nothing in the vault moves.
+#: Planted `PLANT_MEDIA_IN_VAULT`: new pictures to `media/`, as before.
+PLANT_MEDIA_IN_VAULT = [False]
+_MEDIA = ".media"
+_LEGACY_MEDIA = "media"
+
+
 def _media_dir(workspace) -> Optional[Path]:
     base = getattr(workspace, "path", None)
-    return Path(base) / "media" if base else None
+    if not base:
+        return None
+    return Path(base) / (_LEGACY_MEDIA if PLANT_MEDIA_IN_VAULT[0] else _MEDIA)
+
+
+def _media_dirs(workspace):
+    """Where a saved picture may be: the hidden directory, then the old one."""
+    base = getattr(workspace, "path", None)
+    return [Path(base) / _MEDIA, Path(base) / _LEGACY_MEDIA] if base else []
+
+
+def _media_file(workspace, h: str) -> Optional[Path]:
+    for root in _media_dirs(workspace):
+        path = root / h[:2] / (h + ".bin")
+        if path.exists():
+            return path
+    return None
 
 
 def media_key(url: str) -> str:
@@ -179,7 +210,7 @@ def save_media(workspace, url: str, data: bytes, content_type: str) -> Dict:
         return {"saved": False, "why": "too large: %d" % len(data)}
     h = media_key(url)
     path = root / h[:2] / (h + ".bin")
-    if path.exists():
+    if _media_file(workspace, h) is not None:
         return {"saved": True, "same": True, "key": h}
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
@@ -191,23 +222,18 @@ def save_media(workspace, url: str, data: bytes, content_type: str) -> Dict:
 
 def load_media(workspace, key: str):
     """(bytes, content type) of a saved picture, or None."""
-    root = _media_dir(workspace)
-    if root is None or not key or not all(c in "0123456789abcdef" for c in key):
+    if not key or not all(c in "0123456789abcdef" for c in key):
         return None
-    path = root / key[:2] / (key + ".bin")
-    if not path.exists():
+    path = _media_file(workspace, key)
+    if path is None:
         return None
-    ct_path = root / key[:2] / (key + ".ct")
+    ct_path = path.with_suffix(".ct")
     ct = ct_path.read_text(encoding="utf-8") if ct_path.exists() else "application/octet-stream"
     return path.read_bytes(), ct
 
 
 def has_media(workspace, url: str) -> bool:
-    root = _media_dir(workspace)
-    if root is None:
-        return False
-    h = media_key(url)
-    return (root / h[:2] / (h + ".bin")).exists()
+    return _media_file(workspace, media_key(url)) is not None
 
 
 def localize(workspace, doc: Dict, sidecar_base: str) -> Dict:

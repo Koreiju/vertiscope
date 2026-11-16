@@ -21,7 +21,7 @@ import * as THREE from "three";
 
 const ATLAS = 4096;
 const CELL = 128;
-const PER_ROW = ATLAS / CELL;               // 64 cells a row, 4,096 in the page
+const PER_ROW = ATLAS / CELL;               // 32 cells a row, 1,024 in the page
 /** Pictures decoded at once. Unbounded, 23k nodes asked for every picture in
  *  the corpus in one frame and Obsidian froze (2026-10-11). */
 const MAX_LOADS = 4;
@@ -311,6 +311,20 @@ export class SceneBatch {
   private atlas: THREE.DataTexture;
   private atlasReady = false;
   private cells = new Map<string, number>();       // src -> cell index
+  /**
+   * The atlas is 1,024 cells and nothing ever gave one back (G-145,
+   * 2026-11-16): chunk view holds 4,001 pictures on screen, so after 1,024
+   * distinct ones every hover asked for a cell, was refused (`atlasFull`
+   * 2,653) and stayed a glass orb -- "image hovering stops working". A cell is
+   * now HELD by every drawn node writing its uv (`hold`), and a full atlas
+   * takes back the least recently asked-for cell that no drawn node holds. A
+   * held cell is never reused, so no node can draw another node's picture.
+   * Planted `plantNoEvict`: full is full, as before.
+   */
+  private holders = new Map<string, number>();     // src -> drawn nodes holding its cell
+  private recent = new Map<string, number>();      // src -> cell, least recently asked first
+  private holdGen = 0;
+  plantNoEvict = false;
   private pending = new Set<string>();              // src queued or being decoded
   /** Pictures that would not load: never asked for again (2026-10-11, the
    *  freeze -- every frame re-requested every failed picture). */
@@ -349,7 +363,18 @@ export class SceneBatch {
   plantSphereFallback = false;
   /** Planted: a mesh change defers to a full sync, as before. */
   plantNoMove = false;
-  loadStats = { started: 0, placed: 0, failed: 0, maxInFlight: 0 };
+  /** G-145: the incremental patch looks pictures up without starting a decode. */
+  plantPatchNoDecode = false;
+  /** G-145: a patch re-sends whole instance buffers. */
+  plantFullUpload = false;
+  /** Instance attributes with a whole-buffer upload not yet drawn. */
+  private fullPend = new Set<THREE.BufferAttribute>();
+  uploadStats = { ranges: 0, partPatches: 0, fullPatches: 0 };
+  loadStats = { started: 0, placed: 0, failed: 0, maxInFlight: 0, evicted: 0, dropped: 0 };
+  /** Atlas occupancy: cells used, cells some drawn node holds. */
+  atlasStats(): { cells: number; held: number; recent: number } {
+    return { cells: this.cells.size, held: this.holders.size, recent: this.recent.size };
+  }
   /** Told when a picture lands in the atlas: what is drawn has changed. */
   onPlaced: ((src: string) => void) | null = null;
   private nextCell = 0;
@@ -552,7 +577,34 @@ export class SceneBatch {
     m.mesh.renderOrder = glass ? 3 : translucent ? 2 : 1;
     (m.mesh as any).__batch = true;          // not a node: never picked
     m.mesh.raycast = () => {};
+    // Drawn: whatever full upload was pending has gone to the GPU.
+    m.mesh.onAfterRender = () => { for (const a of [m.offset, m.size, m.color, m.uv]) this.fullPend.delete(a); };
     return m;
+  }
+
+  /**
+   * Every instance of `a` to the GPU. Any slot ranges a patch left are
+   * dropped first: three uploads ONLY the ranges when there are some.
+   */
+  private full(a: THREE.BufferAttribute): void {
+    a.clearUpdateRanges();
+    a.needsUpdate = true;
+    this.fullPend.add(a);
+  }
+
+  /**
+   * Only the slots a patch wrote (G-145, 2026-11-16). The patch flagged all
+   * four attributes of every touched mesh, and of ALL THREE meshes whenever a
+   * node moved: each picture landing re-sent ~65k instances, and a trusted
+   * hover sweep at 65,131 nodes spent 5.1 s in `bufferSubData`. Under a full
+   * upload still pending the slots ride along with it. Planted
+   * `plantFullUpload`: whole buffers, as before.
+   */
+  private part(a: THREE.BufferAttribute, slots: number[]): void {
+    if (this.plantFullUpload || this.fullPend.has(a) || slots.length > 4096) { this.full(a); return; }
+    for (const i of slots) a.addUpdateRange(i * a.itemSize, a.itemSize);
+    a.needsUpdate = true;
+    this.uploadStats.ranges += slots.length;
   }
 
   private grow(m: Mesh, need: number): void {
@@ -619,7 +671,10 @@ export class SceneBatch {
   /** The cell a picture occupies, starting its decode if it has none yet. */
   private cellOf(src: string): number | undefined {
     const c = this.cells.get(src);
-    if (c !== undefined) return c;
+    if (c !== undefined) {
+      if (!this.plantNoEvict) { this.recent.delete(src); this.recent.set(src, c); }
+      return c;
+    }
     if (this.pending.has(src)) {
       // Asked for again while still queued: to the TOP of the stack, so the
       // picture under the pointer now is not buried under the sweep that
@@ -631,11 +686,35 @@ export class SceneBatch {
       return undefined;
     }
     if (this.failed.has(src) && !this.plantUnthrottled) return undefined;
-    if (this.nextCell >= PER_ROW * PER_ROW) { this.lastStats.atlasFull++; return undefined; }
+    if (this.nextCell >= PER_ROW * PER_ROW && (this.plantNoEvict || this.cells.size <= this.holders.size)) {
+      this.lastStats.atlasFull++; return undefined;   // every cell is drawn: nothing to take back
+    }
     this.pending.add(src);
     this.queue.push(src);
     this.pump();
     return undefined;
+  }
+
+  /** Take back the least recently asked-for cell no drawn node holds. */
+  private evict(): number | undefined {
+    for (const [src, cell] of this.recent) {
+      if (this.holders.get(src)) continue;
+      this.recent.delete(src);
+      this.cells.delete(src);
+      this.loadStats.evicted++;
+      return cell;
+    }
+    return undefined;
+  }
+
+  /** Node `n` now draws `src`'s cell (or none): the holder counts follow. */
+  private hold(n: any, src: string | undefined): void {
+    if (n.__bgen === this.holdGen && n.__bsrc) {
+      const k = (this.holders.get(n.__bsrc) || 0) - 1;
+      if (k > 0) this.holders.set(n.__bsrc, k); else this.holders.delete(n.__bsrc);
+    }
+    n.__bsrc = src; n.__bgen = this.holdGen;
+    if (src) this.holders.set(src, (this.holders.get(src) || 0) + 1);
   }
 
   /** Start queued decodes up to `MAX_LOADS` at once. */
@@ -663,9 +742,11 @@ export class SceneBatch {
     this.pending.delete(src);
     try {
       if (!img) { this.failed.add(src); this.loadStats.failed++; return; }
-      if (this.nextCell >= PER_ROW * PER_ROW) return;
+      let cell: number | undefined;
+      if (this.nextCell < PER_ROW * PER_ROW) cell = this.nextCell++;
+      else if (!this.plantNoEvict) cell = this.evict();
+      if (cell === undefined) { this.loadStats.dropped++; return; }
       this.ensureAtlas();
-      const cell = this.nextCell++;
       // Fit the picture into its cell, aspect kept, on a small canvas the
       // GPU copies into the atlas page (never a re-upload of the page).
       const cv = document.createElement("canvas");
@@ -684,6 +765,7 @@ export class SceneBatch {
       catch { /* context lost: the cell stays a sphere */ }
       small.dispose();
       this.cells.set(src, cell);
+      this.recent.set(src, cell);
       this.loadStats.placed++;
       this.onPlaced?.(src);
     } finally {
@@ -701,6 +783,8 @@ export class SceneBatch {
     this.grow(this.glass, nodes.length);
     let no = 0, nt = 0, ng = 0, spheres = 0, pendingPics = 0;
     this.slots = [[], [], []];
+    // A full sync rewrites every slot: the holder counts start again.
+    this.holdGen++; this.holders.clear();
     this.syncedNodes = nodes; this.syncedCount = nodes.length;
     const drawn: any[] = [];
     for (const n of nodes) {
@@ -718,6 +802,7 @@ export class SceneBatch {
       const m = toGlass ? this.glass : lk.translucent ? this.clear : this.opaque;
       const i = toGlass ? ng++ : lk.translucent ? nt++ : no++;
       n.__bm = toGlass ? 2 : lk.translucent ? 1 : 0; n.__bi = i; n.__bpic = cell !== undefined;
+      this.hold(n, cell !== undefined ? lk.picture : undefined);
       this.slots[n.__bm][i] = n;
       m.offset.setXYZ(i, n.x, n.y, n.z || 0);
       m.size.setX(i, lk.half);
@@ -738,7 +823,7 @@ export class SceneBatch {
     }
     for (const [m, count] of [[this.opaque, no], [this.clear, nt], [this.glass, ng]] as [Mesh, number][]) {
       m.geo.instanceCount = count;
-      m.offset.needsUpdate = true; m.size.needsUpdate = true; m.color.needsUpdate = true; m.uv.needsUpdate = true;
+      this.full(m.offset); this.full(m.size); this.full(m.color); this.full(m.uv);
     }
     // Edges.
     if (links.length > this.lineCap) {
@@ -856,7 +941,7 @@ export class SceneBatch {
       else { lp[o + 3] = t.x; lp[o + 4] = t.y; lp[o + 5] = t.z || 0; }
     }
     this.linkStats = { drawn: links.length - hidden, hidden, cap: Math.round(cap * 10) / 10 };
-    for (const m of [this.opaque, this.clear, this.glass]) m.offset.needsUpdate = true;
+    for (const m of [this.opaque, this.clear, this.glass]) this.full(m.offset);
     this.linePos.needsUpdate = true;
     this.positionStats = { runs: this.positionStats.runs + 1, refused: this.positionStats.refused, nodes: k,
                            last_ms: Math.round((performance.now() - t0) * 100) / 100 };
@@ -928,6 +1013,13 @@ export class SceneBatch {
       m.color.setXYZW(i, col.r, col.g, col.b, pending ? 1 : lk.alpha);
     }
   }
+  /** The slots this patch wrote, per mesh (null outside a patch). */
+  private dirty: Map<Mesh, number[]> | null = null;
+  private mark(m: Mesh, i: number): void {
+    if (!this.dirty) return;
+    const l = this.dirty.get(m);
+    if (l) l.push(i); else this.dirty.set(m, [i]);
+  }
   /** Move a node's instance to another mesh: swap-remove, then append. */
   private moveSlot(n: any, to: number): boolean {
     const from = this.meshOf(n.__bm), dst = this.meshOf(to);
@@ -939,6 +1031,7 @@ export class SceneBatch {
         for (let c = 0; c < a.itemSize; c++) (a.array as Float32Array)[i * a.itemSize + c] = (a.array as Float32Array)[last * a.itemSize + c];
       }
       this.slots[n.__bm][i] = other; if (other) other.__bi = i;
+      this.mark(from, i);
     }
     // (A full destination was refused above: `grow` reallocates WITHOUT
     // copying -- it precedes a full sync -- so that is the full sync's job.)
@@ -953,18 +1046,22 @@ export class SceneBatch {
   patch(nodes: Iterable<any>, look: (n: any) => NodeLook | null): number {
     const t0 = performance.now();
     let done = 0, deferred = 0, moved = 0;
-    const touched = new Set<Mesh>([this.opaque, this.clear, this.glass].filter(() => false));
+    this.dirty = new Map();
     for (const n of nodes) {
       if (n.__bi === undefined) { deferred++; continue; }
       const lk = look(n);
       if (!lk) { deferred++; continue; }
-      const cell = lk.picture ? this.cells.get(lk.picture) : undefined;
+      // `cellOf`, not `cells.get` (G-145, 2026-11-16): a picture revealed by
+      // the hover reaches the batch only through this patch, and `cells.get`
+      // never queues its decode -- a trusted 40-move sweep at 65,132 nodes
+      // revealed 2,189 pictures and started 0 decodes, so every one stayed a
+      // glass orb. Planted `plantPatchNoDecode`: as before.
+      const cell = lk.picture ? (this.plantPatchNoDecode ? this.cells.get(lk.picture) : this.cellOf(lk.picture)) : undefined;
       const pending = !!lk.picture && cell === undefined && !lk.translucent && !this.plantSphereFallback;
       const want = (lk.glass || pending) ? 2 : lk.translucent ? 1 : 0;
       if (want !== n.__bm) {
         // Revealed or hidden picture, hover in or out: the node changes mesh.
         if (this.plantNoMove || !this.moveSlot(n, want)) { deferred++; continue; }
-        touched.add(this.meshOf(want)); touched.add(this.meshOf(n.__bm === want ? want : n.__bm));
         moved++;
       }
       const m = this.meshOf(want);
@@ -972,11 +1069,17 @@ export class SceneBatch {
       if (i >= m.geo.instanceCount) { deferred++; continue; }
       this.writeSlot(m, i, n, lk, cell, pending);
       n.__bpic = cell !== undefined;
-      touched.add(m);
+      this.hold(n, cell !== undefined ? lk.picture : undefined);
+      this.mark(m, i);
       done++;
     }
-    if (moved) { touched.add(this.opaque); touched.add(this.clear); touched.add(this.glass); }
-    for (const m of touched) { m.offset.needsUpdate = true; m.color.needsUpdate = true; m.uv.needsUpdate = true; m.size.needsUpdate = true; }
+    // Planted: as before, a move re-sends every mesh, touched or not.
+    if (this.plantFullUpload && moved) for (const m of [this.opaque, this.clear, this.glass]) if (!this.dirty.has(m)) this.dirty.set(m, []);
+    for (const [m, slots] of this.dirty) {
+      for (const a of [m.offset, m.size, m.color, m.uv]) this.part(a, slots);
+      if (this.plantFullUpload || slots.length > 4096) this.uploadStats.fullPatches++; else this.uploadStats.partPatches++;
+    }
+    this.dirty = null;
     this.patchStats = { patches: this.patchStats.patches + 1, nodes: this.patchStats.nodes + done,
                         deferred: this.patchStats.deferred + deferred, moved: this.patchStats.moved + moved,
                         last_ms: Math.round((performance.now() - t0) * 100) / 100 };
