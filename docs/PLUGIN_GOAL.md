@@ -5775,3 +5775,32 @@ PreToolUse guard hook, unpacked Chromium extensions through ublockshim.ts, the
 craft.ts drag-vs-shift interaction, the UNIQUENESS_AND_VERSIONS keep/fade
 decision). That review is material to follow up, not the reader's words; it
 is not transcribed here as requirement.*
+
+### 164. (2026-11-15) The search graph, simplified: one retrieval node, its inputs and outputs as hard links
+
+*Answers to three questions about `docs/SEARCH_GRAPH_DESIGN.md` §6
+(AskUserQuestion). The first and third chose an offered option; the second
+was answered in the reader's own words, and it changes the design.*
+
+- *When you press "similar" on a result, should it use all three factors or
+  embedding meaning only?* -- **"All three factors (Recommended)"**: "The
+  result's own frequency row and embedding both drive the search; only
+  results sharing its words can match (the lexical gate stays). One graph
+  for typed queries and clicks."
+- *The panel that compares the word-frequency ranking with the embedding
+  ranking -- where should it sit on the plane?* -- the reader's own words:
+
+> this might be overcomplicating things on second thought. A high-level retrieval mechanism that integrates cleanly with its input and output artifacts, in that all its inputs and outputs are shown as hard links, is there
+
+- *Should each search's full trace be kept, or only the live search's?* --
+  **"Live search only (Recommended)"**: "The graph always shows the current
+  query; nothing new is stored."
+
+*Read as (164): the twelve stage panels of the design are withdrawn as the
+plane's view. The search is ONE high-level retrieval node; what it reads
+(the query, its toggles, the stores it ranks) and what it returns (the
+results) are its INPUT and OUTPUT ARTIFACTS, each drawn as a HARD LINK to
+that node. The per-stage trace stays available as data (G-372 step 1) but
+is not drawn as panels. Whether "is there" means the mechanism should
+already be that, or that it is what is wanted, is the reader's to say; this
+reads it as the target either way.*

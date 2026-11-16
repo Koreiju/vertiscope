@@ -1,7 +1,45 @@
 # The search as a computation graph on the 2D plane
 
-Design before code, for PLUGIN_GOAL item 163 (2026-11-15). Nothing here is
-built yet. Section 6 lists what the user still has to decide.
+Design before code, for PLUGIN_GOAL items 163 and 164 (2026-11-15).
+
+## Revision (item 164, the same day) -- this section supersedes §2-§4's drawing
+
+The reader, on the twelve-panel plane: "this might be overcomplicating
+things on second thought. A high-level retrieval mechanism that integrates
+cleanly with its input and output artifacts, in that all its inputs and
+outputs are shown as hard links, is there". So:
+
+- **One node.** The search is ONE retrieval node on the plane -- the ego
+  slate's search cell (`ego.md`, `/cell/state`), not twelve stage panels.
+- **Its inputs, as hard links:** the artifacts it reads -- the slate it is
+  typed into (query, `db`, `duckduckgo`, `where`, `k`), and, when
+  `duckduckgo` is on, the browser cell that runs the web branch.
+- **Its outputs, as hard links:** each returned result, linked to the node
+  that draws that chunk (the `{results}` braces of RESERVOIR item 34 made
+  visible as edges). The links change when the results do; nothing is kept
+  per search (item 164: "Live search only").
+- **"Similar"** on a result re-enters the same node with the result as its
+  query, keyed by its stored rows, all three factors (item 164).
+- **The per-stage trace stays as DATA** (§5 step 1, `?trace=k`, built): it
+  is what answers "why did this rank", and an unnest may show it later, but
+  it is not drawn by default.
+
+Observed in the running app before this revision (2026-11-15 20:55, MCP):
+the ego plane holds 12 pages (the ego slate, browser slates, notebooks,
+chat cells, an outline), its graph data holds NO links among them and no
+search node. So the target is not yet built.
+
+**Steps, revised.** (1) the trace -- built. (2) ref queries: `query` accepts
+a cid. (3) the search node and its hard links on the plane: inputs from the
+slate (and the browser cell when web is on), outputs to each result's node;
+live check: one search node, its out-links = the hits shown, in-links = its
+input artifacts; planted, the links withheld. (4) `similar` on a result =
+(2) through that node.
+
+---
+
+*The original design follows. Its component table (§2) still names what
+the node is made of; its drawing (§3) is withdrawn by item 164.*
 
 ## 0. What was asked, and what this reads it as
 
