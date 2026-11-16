@@ -237,6 +237,80 @@ def _inline(text: str, block: str, addr: "_Addresser",
                               source_attr="md_wikilink", sub=f"[{i}]"))
 
 
+#: A slate note (`domvec: slate`, G-278): structure is text, tabs and
+#: newlines the only markup (`docs/RESERVOIR_DESIGN.md`).
+_SLATE = re.compile(r"(?m)^\s*domvec\s*:\s*slate\s*$")
+
+#: Planted: a slate read as paragraphs, as before 2026-11-15 -- the `ego`
+#: slate was ONE address, its search's query and results inside it, and every
+#: search found its own query there.
+PLANT_SLATE_AS_PARAGRAPH = [False]
+
+
+def _depth(line: str) -> int:
+    return len(line) - len(line.lstrip("\t"))
+
+
+def _tag_slate(lines: List[str], i: int, addr: "_Addresser", mark) -> List[ContentTag]:
+    """A slate's body, addressed by its indentation tree.
+
+    Each top-level line and its indented descendants is one cell
+    (`/cell[k]`). A `search` subtree -- a node with a `query` child, the
+    search cell of RESERVOIR_DESIGN §4 -- is that search's STATE, written
+    both ways by the cockpit (the query typed, the results it read out), and
+    is addressed apart under a `state` step: `/cell[k]/state[j]`. The search
+    route keeps a vault chunk under `/state` (or `/output`, T-13) to the ego
+    scope, so a search no longer ranks the slate holding its own query.
+    """
+    out: List[ContentTag] = []
+    n = len(lines)
+    while i < n:
+        if not lines[i].strip():
+            i += 1
+            continue
+        start = i
+        i += 1
+        while i < n and (not lines[i].strip() or _depth(lines[i]) > 0):
+            i += 1
+        block = list(range(start, i))
+        cell = addr.step("cell")
+        # Search subtrees inside this cell: a line whose first child is
+        # `query`, with everything indented under it.
+        states: List[Tuple[int, int]] = []
+        k = 0
+        while k < len(block):
+            ln = lines[block[k]]
+            d = _depth(ln)
+            j = k + 1
+            while j < len(block) and (not lines[block[j]].strip() or _depth(lines[block[j]]) > d):
+                j += 1
+            kids = [lines[block[m]].strip().split("\t", 1)[0] for m in range(k + 1, j)
+                    if lines[block[m]].strip() and _depth(lines[block[m]]) == d + 1]
+            if kids and "query" in kids and k > 0:
+                states.append((k, j))
+                k = j
+                continue
+            k += 1
+        inside = set()
+        for a, b in states:
+            inside.update(range(a, b))
+        rest = [lines[block[m]] for m in range(len(block)) if m not in inside]
+        value = "\n".join(rest).strip()
+        if value:
+            mark(cell, block[0], block[-1])
+            out.append(ContentTag(xpath=cell, category="text", subcategory="visible",
+                                  value=value, source_attr="slate"))
+        for a, b in states:
+            body = "\n".join(lines[block[m]] for m in range(a, b)).strip()
+            if not body:
+                continue
+            xp = addr.step("state", cell)
+            mark(xp, block[a], block[b - 1])
+            out.append(ContentTag(xpath=xp, category="text", subcategory="output",
+                                  value=body, source_attr="slate-state"))
+    return out
+
+
 def tag_note(text: str, *,
              lines_at: Optional[Dict[str, Tuple[int, int]]] = None,
              ) -> List[ContentTag]:
@@ -283,6 +357,10 @@ def tag_note(text: str, *,
                                       category="text", subcategory="metadata",
                                       value=body, source_attr="yaml"))
             i = j + 1
+
+    if out and out[0].subcategory == "metadata" and _SLATE.search(out[0].value) and not PLANT_SLATE_AS_PARAGRAPH[0]:
+        out.extend(_tag_slate(lines, i, addr, mark))
+        return out
 
     para: List[str] = []
     #: Source line the buffered paragraph began on. A paragraph is the one

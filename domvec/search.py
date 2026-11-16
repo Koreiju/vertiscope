@@ -83,7 +83,19 @@ CONTENT_FLOOR = 0.1
 #: Content is its share SQUARED, as G-294 found it must be: at 0.15 linear a
 #: results page echoing "okapi" (share 0.78) outranked the article (0.92) --
 #: 0.661 to 0.652, measured 2026-11-01 -- and squared at 0.25 it does not.
-ADDITIVE_WEIGHTS = {"lexical": 0.30, "semantic": 0.35, "pagerank": 0.10, "content": 0.25}
+#:
+#: 2026-11-15 (PLUGIN_GOAL 163, the reader's screenshot): content is no longer
+#: a fourth TERM here but the same floored WEIGHT every other fuse applies.
+#: As a term it could cost a chunk at most 0.25, so a search engine's results
+#: page echoing the query (share 0.0) topped both lexical and semantic and
+#: scored 0.61, above the code that defines `unionRect`. Item 59 asks for
+#: boilerplate to be EXCLUDED, and a term only ever subtracts a share. The
+#: three relevance terms keep their ratios (0.30 : 0.35 : 0.10).
+#: Planted `PLANT_ADDITIVE_CONTENT_TERM`: the 0.25 term, as before.
+ADDITIVE_WEIGHTS = {"lexical": 0.30 / 0.75, "semantic": 0.35 / 0.75, "pagerank": 0.10 / 0.75}
+PLANT_ADDITIVE_CONTENT_TERM = [False]
+#: The weights the planted arm restores.
+_ADDITIVE_WITH_TERM = {"lexical": 0.30, "semantic": 0.35, "pagerank": 0.10, "content": 0.25}
 #: The default fuse. Planted (`PLANT_PRODUCT_FUSE`): the triple product, as before.
 DEFAULT_FUSE = ["additive"]
 PLANT_PRODUCT_FUSE = [False]
@@ -509,7 +521,7 @@ class ThreeFormIndex:
         if fuse == "additive":
             # Each term on 0..1, summed (PLUGIN_GOAL 85); the lexical gate
             # decides what matches, the terms decide the order.
-            w = ADDITIVE_WEIGHTS
+            w = _ADDITIVE_WITH_TERM if PLANT_ADDITIVE_CONTENT_TERM[0] else ADDITIVE_WEIGHTS
             share = (_fit(self._content, rows).astype(np.float64)
                      if self._content is not None and not PLANT_NO_CONTENT_FACTOR[0]
                      else np.ones(rows, dtype=np.float64))
@@ -522,7 +534,7 @@ class ThreeFormIndex:
                 pr_term = np.maximum(pr_term, code_vec)
             score = (w["lexical"] * _unit(lexical)
                      + w["pagerank"] * pr_term
-                     + w["content"] * np.clip(share, 0.0, 1.0) ** 2)
+                     + w.get("content", 0.0) * np.clip(share, 0.0, 1.0) ** 2)
             if available:
                 score = score + w["semantic"] * _unit(semantic)
             # The lexical gate, softened only when a floor is asked for (as
@@ -552,7 +564,8 @@ class ThreeFormIndex:
         # What the page SAYS before what it offers to click (PLUGIN_GOAL 59): a
         # fourth factor, the chunk's content share (squared), floored so
         # boilerplate is weighed down -- up to tenfold -- and never vetoed.
-        if fuse != "additive" and self._content is not None and not PLANT_NO_CONTENT_FACTOR[0]:
+        if ((fuse != "additive" or not PLANT_ADDITIVE_CONTENT_TERM[0])
+                and self._content is not None and not PLANT_NO_CONTENT_FACTOR[0]):
             share = _fit(self._content, rows).astype(np.float64)
             # Squared: a search form around the query (share 0.25) kept a third
             # of its score linearly and still ranked first for "okapi"; squared

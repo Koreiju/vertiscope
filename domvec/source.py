@@ -74,6 +74,17 @@ from .core.content_tagger import ContentTag
 #: It gets COMMENTS, not structure -- see :func:`_js_comments`.
 SOURCE_SUFFIXES = (".py", ".js")
 
+#: The plugin's own source (`obsidian-plugin/src`, root ``plugin``). TypeScript
+#: is read the way `.js` is -- comments plus code pieces, no structural parse
+#: -- and is walked ONLY under that root: an installed package's `.ts` (a
+#: `.d.ts` in a wheel) is not this codebase. Retrieval, 2026-11-15: a search
+#: for `unionRect` (in `pipelinebox.ts`) could only ever return echoes of the
+#: query, because no TypeScript was in the corpus at all.
+PLUGIN_SUFFIXES = (".ts",)
+
+#: Read as JavaScript: comments, then the code in pieces.
+JS_LIKE = (".js", ".ts")
+
 #: Directories never descended. Not a style preference: `build/` here holds
 #: multi-gigabyte kuzu stores, and `__pycache__` holds compiled copies of the
 #: very files being indexed, so both would double-count the corpus.
@@ -84,7 +95,7 @@ SKIP_DIRS = frozenset({
 })
 
 
-def iter_sources(root):
+def iter_sources(root, suffixes=SOURCE_SUFFIXES):
     """Every source file under `root`, as ``(path, relative_posix_path)``.
 
     Skips `SKIP_DIRS` by NAME at any depth rather than by prefix: a nested
@@ -94,7 +105,7 @@ def iter_sources(root):
     """
     base = pathlib.Path(root).resolve()
     for path in sorted(base.rglob("*")):
-        if path.suffix not in SOURCE_SUFFIXES or not path.is_file():
+        if path.suffix not in suffixes or path.name.endswith(".d.ts") or not path.is_file():
             continue
         rel = path.relative_to(base)
         if any(part in SKIP_DIRS for part in rel.parts[:-1]):
@@ -388,7 +399,7 @@ def tag_source(text: str, *,
                               source_attr="source"))
 
     lines = text.splitlines()
-    if str(rel_path).endswith(".js"):
+    if str(rel_path).endswith(JS_LIKE):
         # Comments and the file itself. No structural parse: see
         # `_js_comments` for what that costs and why it is the honest
         # trade.

@@ -30,7 +30,7 @@ def test_a_missing_term_costs_its_share_not_the_hit():
     # text match is not zeroed, as the product zeroes it.
     w = ADDITIVE_WEIGHTS
     lex, sem, pr, con = _unit(np.array([1.0, 0.5])), _unit(np.array([0.9, 0.8])), np.array([0.0, 1.0]), np.array([1.0, 1.0])
-    additive = w["lexical"] * lex + w["semantic"] * sem + w["pagerank"] * pr + w["content"] * con
+    additive = (w["lexical"] * lex + w["semantic"] * sem + w["pagerank"] * pr) * con
     product = np.array([1.0, 0.5]) * np.array([0.9, 0.8]) * np.array([0.0, 1.0])
     assert additive[0] > additive[1]          # the better match leads
     assert product[0] == 0.0                   # the product vetoed it

@@ -1202,6 +1202,10 @@ _CODE_SYNC_STATE = {"running": False, "done": 0, "total": 0, "current": "", "sta
 #: the work lock, as before.
 PLANT_CODE_SYNC_PREPARE_LOCKED = [False]
 
+#: Planted: the plugin's TypeScript is not walked (`code://repo/` only), as
+#: before 2026-11-15.
+PLANT_NO_PLUGIN_SOURCE = [False]
+
 
 def _sync_code(workspace, *, limit: Optional[int] = None, forget=()) -> Dict:
     """The codebase into the trie, as it is on disk NOW (PLUGIN_GOAL 159: "the
@@ -1222,7 +1226,7 @@ def _sync_code(workspace, *, limit: Optional[int] = None, forget=()) -> Dict:
     foreground work between files. A module deleted from disk is REPORTED
     (`gone`), never purged: removing pages is not this loop's call."""
     import hashlib
-    from ..source import iter_sources, source_url
+    from ..source import PLUGIN_SUFFIXES, iter_sources, source_url
     out = {"files": 0, "indexed": 0, "unchanged": 0, "failed": 0, "gone": 0, "ms": 0, "planted": bool(PLANT_NO_CODE_SYNC[0])}
     if PLANT_NO_CODE_SYNC[0] or workspace is None or getattr(workspace, "read_only", False):
         return out
@@ -1245,10 +1249,16 @@ def _sync_code(workspace, *, limit: Optional[int] = None, forget=()) -> Dict:
         seen = set()
         done_now: List[str] = []
         file_ms: List[float] = []
-        todo = list(iter_sources(base))
+        # Two roots: this package (`code://repo/`) and the plugin's own
+        # TypeScript (`code://plugin/`), which draws the panels the reader is
+        # looking at. Planted `PLANT_NO_PLUGIN_SOURCE`: the package only.
+        todo = [("repo", p, r) for p, r in iter_sources(base)]
+        plugin_src = base.parent / "obsidian-plugin" / "src"
+        if plugin_src.is_dir() and not PLANT_NO_PLUGIN_SOURCE[0]:
+            todo += [("plugin", p, r) for p, r in iter_sources(plugin_src, PLUGIN_SUFFIXES)]
         _CODE_SYNC_STATE.update(running=True, done=0, total=len(todo), current="", started=time.time())
-        for path, rel in todo:
-            url = source_url("repo", rel)
+        for root, path, rel in todo:
+            url = source_url(root, rel)
             seen.add(url)
             out["files"] += 1
             _CODE_SYNC_STATE["done"] = out["files"]
@@ -1272,11 +1282,11 @@ def _sync_code(workspace, *, limit: Optional[int] = None, forget=()) -> Dict:
                 # Planted PLANT_CODE_SYNC_PREPARE_LOCKED: all of it held.
                 if PLANT_CODE_SYNC_PREPARE_LOCKED[0]:
                     with _WORK_LOCK:
-                        workspace.index_source(text, rel, root="repo")
+                        workspace.index_source(text, rel, root=root)
                 else:
-                    prep = workspace.prepare_source(text, rel, root="repo")
+                    prep = workspace.prepare_source(text, rel, root=root)
                     with _WORK_LOCK:
-                        workspace.index_source(text, rel, root="repo", prepared=prep)
+                        workspace.index_source(text, rel, root=root, prepared=prep)
                 out.setdefault("file_phases", {})[url] = dict(getattr(workspace, "last_source_ms", {}) or {})
                 _project_page(workspace, url)
                 ledger[url] = h
@@ -1291,7 +1301,7 @@ def _sync_code(workspace, *, limit: Optional[int] = None, forget=()) -> Dict:
                     pass
             except Exception:                       # noqa: BLE001
                 out["failed"] += 1
-        out["gone"] = sum(1 for u in ledger if u.startswith("code://repo/") and u not in seen)
+        out["gone"] = sum(1 for u in ledger if u.startswith(("code://repo/", "code://plugin/")) and u not in seen)
         try:
             ledger_path.write_text(json.dumps(ledger, sort_keys=True), encoding="utf-8")
         except OSError:
@@ -2079,6 +2089,10 @@ def _ego_hits(workspace, query: str, want: int) -> list:
     return hits[:want]
 
 
+#: A slate's search state (`vault._tag_slate`): `/state`, `/state[2]`, at any depth.
+_STATE_STEP = re.compile(r"/state(\[\d+\])?(/|$)")
+
+
 def _in_ego(stored) -> bool:
     return stored.cid in EGO["cids"] or stored.url in EGO["urls"]
 
@@ -2172,7 +2186,7 @@ def search_payload(workspace, query: str, k: int = 8, *,
             # it at an `output` step, so the rule reads the trie, not the text.
             # Planted PLANT_OUTPUTS_EVERYWHERE: outputs in every scope.
             if (where != "ego" and not PLANT_OUTPUTS_EVERYWHERE[0] and str(stored.url).startswith("vault://")
-                    and "/output" in str(stored.xpath or "")):
+                    and ("/output" in str(stored.xpath or "") or _STATE_STEP.search(str(stored.xpath or "")))):
                 continue
             if where and not PLANT_NO_WHERE[0]:
                 ego_load(workspace)
