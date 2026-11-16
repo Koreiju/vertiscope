@@ -21,6 +21,9 @@ process dying. Arms:
 
   split    -- the sidecar as shipped: a second read connection beside the writer
   shared   -- `DOMVEC_SHARED_READS=1`: one connection for reads and writes
+  chunk, chunk_md -- the same, plus a re-index's Chunk rewrite of one page per
+              batch: every column SET (the ingest's statement) / the markdown
+              and its derived columns only
   capture, capture_shared -- the same, plus a re-capture's Address MERGE ... SET
               of every string column on one page's addresses per batch (the
               statement 55 of the 115 logged crashes were in)
@@ -80,7 +83,9 @@ def _child(store_path: str, seconds: float, arm: str, seed: int) -> None:
     th.start()
     t_end = time.time() + seconds
     capture = arm.startswith("capture")
+    chunk_arm = arm in ("chunk", "chunk_md")
     counts["address_rows"] = 0
+    counts["chunk_rows"] = 0
     while time.time() < t_end:
         if capture:
             # A re-capture: one page's addresses MERGEd again with every
@@ -102,6 +107,28 @@ def _child(store_path: str, seconds: float, arm: str, seed: int) -> None:
                               "SET a.akey = r.akey, a.url = r.url, a.xpath = r.xp, a.tag = r.tag, "
                               "a.accessor = r.acc, a.value = r.val, a.content_hash = r.ch", rows)
                 counts["address_rows"] += len(rows)
+        if chunk_arm:
+            # A re-index: one page's chunks rewritten in place, their markdown
+            # changed -- `chunk` with the ingest's own SET of every column,
+            # `chunk_md` with the markdown and its derived columns only
+            # (url|xpath|part IS the cid, so they never change for a held one).
+            u = urls[int(rng.integers(len(urls)))]
+            got = gs._rows("MATCH (c:Chunk) WHERE c.url = $u RETURN c.cid, c.url, c.xpath, c.part, c.md, "
+                           "c.dup_of, c.asig, c.mdkey LIMIT 200", {"u": u})
+            if got:
+                tick = counts["writes"]
+                rows = [{"cid": r[0], "url": r[1] or "", "xp": r[2] or "", "part": int(r[3] or 0),
+                         "md": ((r[4] or "") + " ~%d" % tick)[:4000], "chars": len(r[4] or "") + 4,
+                         "lines": (r[4] or "").count(chr(10)) + 1, "dup": r[5] or "", "asig": r[6] or "",
+                         "mdkey": "%s~%d" % ((r[7] or "")[:24], tick)} for r in got]
+                if arm == "chunk_md":
+                    gs._batch("UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) "
+                              "SET c.md = r.md, c.chars = r.chars, c.line_count = r.lines, c.mdkey = r.mdkey", rows)
+                else:
+                    gs._batch("UNWIND $rows AS r MERGE (c:Chunk {cid: r.cid}) "
+                              "SET c.url = r.url, c.xpath = r.xp, c.part = r.part, c.md = r.md, c.chars = r.chars, "
+                              "c.line_count = r.lines, c.dup_of = r.dup, c.asig = r.asig, c.mdkey = r.mdkey", rows)
+                counts["chunk_rows"] += len(rows)
         pick = rng.choice(len(cids), size=min(100, len(cids)), replace=False)
         rows = [{"cid": cids[i], "emb": rng.normal(size=EMBED_DIM).astype("float32").tolist()} for i in pick]
         gs._batch("UNWIND $rows AS r MATCH (c:Chunk {cid: r.cid}) SET c.embedding = r.emb", rows)
@@ -160,7 +187,7 @@ def run_arm(source: Path, scratch: Path, arm: str, seconds: float, seed: int = 0
            "ran_s": round(time.time() - started, 1), "checkpoints": len(cps),
            "grew_mb": [round(e["after_mb"] - e["before_mb"], 1) for e in cps],
            "writes": last.get("writes"), "reads": last.get("reads"), "read_errors": last.get("read_errors"),
-           "address_rows": last.get("address_rows"),
+           "address_rows": last.get("address_rows"), "chunk_rows": last.get("chunk_rows"),
            "stderr_tail": p.stderr[-1500:] if p.returncode not in (0,) else ""}
     if arm != "planted":
         for f in (dest, Path(str(dest) + ".wal")):
