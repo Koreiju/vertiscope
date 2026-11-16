@@ -92,6 +92,10 @@ PLANT_FIXED_BATCH = [False]
 #: unchanged -- a hover's re-ask moves it.
 PLANT_REPLACE_UNCHANGED = [False]
 PLANT_NO_RECONCILE = [False]
+#: Planted (2026-11-15, "the 3D map keeps changing its layout"): the fit is
+#: saved after a FULL fit only, as before -- every online update since is
+#: lost at a restart, and the reload re-trains them in a new order.
+PLANT_NO_ONLINE_SAVE = [False]
 PLANT_WINDOW_ALWAYS = [False]
 #: Planted (G-80): a hovered chunk found without its vector is DROPPED from
 #: the queue like any other, as before -- and lost to a race (below).
@@ -799,6 +803,8 @@ class ChunkProjector:
                     self.cost_ms = round(ms if self.cost_ms is None else 0.7 * self.cost_ms + 0.3 * ms, 2)
                     self.window_stats["drains"] += 1
                     self.window_stats["placed"] += int(got.get("placed") or 0)
+                    if got.get("placed") or got.get("gone"):
+                        self.mark_dirty()
                     # Let a waiting request in between batches. Releasing the
                     # work lock and taking it straight back starves every
                     # request thread -- Python's locks are not FIFO: a 5,132-
@@ -816,6 +822,10 @@ class ChunkProjector:
                         self.reconcile_drawable(workspace)
                     except Exception:               # noqa: BLE001
                         pass
+                try:
+                    self.save_if_dirty(workspace)
+                except Exception:                   # noqa: BLE001
+                    pass
                 if time.monotonic() - checked > 5.0:
                     checked = time.monotonic()
                     try:
@@ -893,6 +903,42 @@ class ChunkProjector:
         except Exception as exc:                    # noqa: BLE001
             self.fit_error = "save failed: %s: %s" % (type(exc).__name__, exc)
             return False
+
+    #: The online state kept across a restart (2026-11-15). Measured live: a
+    #: sidecar restart moved 1,012 of 1,039 pages (median 38 units, p90 83,
+    #: max 333; a link is ~62), against 0 of 1,039 over two idle minutes with
+    #: no restart. `projector.pkl` was written by full fits only, so a restart
+    #: reloaded a fit weeks old, queued every page changed since (59,261
+    #: positions) and re-trained them online in a new order, each update
+    #: sampling its own landmarks. Saved instead once the online work has
+    #: been quiet `SAVE_QUIET_S`, at most every `SAVE_MIN_S`.
+    SAVE_QUIET_S = 20.0
+    SAVE_MIN_S = 120.0
+    _dirty_at = 0.0
+    _saved_at = 0.0
+    save_stats: Dict = {}
+
+    def mark_dirty(self) -> None:
+        self._dirty_at = time.monotonic()
+
+    def save_if_dirty(self, workspace, force: bool = False) -> bool:
+        """Persist the projector once its online work has gone quiet."""
+        if PLANT_NO_ONLINE_SAVE[0] or not self._dirty_at:
+            return False
+        now = time.monotonic()
+        if not force and (self.fitting or self.queue or getattr(self, "_pending_online", None)
+                          or now - self._dirty_at < self.SAVE_QUIET_S
+                          or now - self._saved_at < self.SAVE_MIN_S):
+            return False
+        dirty = self._dirty_at
+        t = time.perf_counter()
+        ok = self.save(workspace)
+        self._saved_at = time.monotonic()
+        if ok and self._dirty_at == dirty:
+            self._dirty_at = 0.0
+        self.save_stats = {"ok": ok, "ms": round((time.perf_counter() - t) * 1000, 1),
+                           "at": round(time.time(), 3), "pages": len(getattr(self, "page_pos", {}) or {})}
+        return ok
 
     #: Seconds between idle reconciles of held vs drawable (G-270).
     RECONCILE_S = 180.0
@@ -1485,6 +1531,7 @@ class PageProjector(ChunkProjector):
                       "device": model.stats.get("device"), "at": round(time.time(), 3)}
             self.online_updates.append(record)
             del self.online_updates[:-20]
+            self.mark_dirty()
             if self.on_batch:
                 try:
                     self.on_batch(dict(record, kind="online"))
@@ -2354,6 +2401,7 @@ class PageProjector(ChunkProjector):
                     "chunks_held": len(self.vec), "centroid_ms": dict(self.centroid_ms),
                     "engine": self.engine, "trained_pages": len(self.trained),
                     "pending_online": len(self._pending_online),
+                    "saved": dict(self.save_stats or {}),
                     "last_online": self.online_updates[-1] if self.online_updates else None,
                     "scope": self.scope, "scope_why": self.scope_record.get("why"),
                     "scope_decision": {k: v for k, v in self.scope_record.items() if k != "why"},
@@ -2392,10 +2440,17 @@ class PageProjector(ChunkProjector):
                      "trained": set(self.trained), "trained_chunks": set(self.trained_chunks),
                      "rows": self.rows if self.scope == "global" else None,
                      "refit_cost": list(self.refit_cost.observed)}
+            # Serialised under the lock: the online worker and the drain mutate
+            # these dicts in place, and a save now runs while they may be live.
+            try:
+                blob = pickle.dumps(state, protocol=pickle.HIGHEST_PROTOCOL)
+            except Exception as exc:                # noqa: BLE001
+                self.fit_error = "save failed: %s: %s" % (type(exc).__name__, exc)
+                return False
         try:
             tmp = path.with_suffix(".tmp")
             with open(tmp, "wb") as fh:
-                pickle.dump(state, fh, protocol=pickle.HIGHEST_PROTOCOL)
+                fh.write(blob)
             tmp.replace(path)
             return True
         except Exception as exc:                    # noqa: BLE001
