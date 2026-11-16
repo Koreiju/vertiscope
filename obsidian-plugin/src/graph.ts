@@ -6406,7 +6406,12 @@ export class GraphView extends ItemView {
     inputs: () => {
       const desk: any = (window as any).__domvecPlane;
       const card: HTMLElement | undefined = desk?.panelOf?.("domvec/ego.md")?.card;
-      return card && card.isConnected ? [{ key: "cockpit", el: card }] : [];
+      if (!card || !card.isConnected) return [];
+      // The slate's own `search` field when it is drawn as a graph (its node
+      // is the input the query comes from); the card in text form.
+      const node = card.querySelector('circle[data-key="search"]');
+      const r = node ? node.getBoundingClientRect() : null;
+      return [{ key: "cockpit", el: node && r && r.width ? node : card }];
     },
     toScreen: (x, y, z) => (this.graph ? (this.graph as any).graph2ScreenCoords(x, y, z) : null),
   });

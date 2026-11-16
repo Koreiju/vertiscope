@@ -754,3 +754,5 @@ Open (not started this session):
 - Lag between node form and panel form: LIVE-CONFIRMED (G-356, run 41):
   the node follows its card every frame of a drag -- 85% of its travel
   covered halfway through; planted (on release only): 0%.
+
+- **Renderer hang, unexplained (2026-11-15 ~21:25).** Right after a plugin build carrying the G-372 search links (input anchored on the slate's `search` node) was loaded by `confirm`, Obsidian's renderer stopped answering `1+1` for 60+ s; the sidecar stayed healthy. A wedged renderer cannot be paused, so no stack. Relaunched with `hang_watch` attached: 90 s of start-up and two runs of the same check (watched 150 s and 120 s) -- no hang. Cause unknown; the search-links frame loop is a suspect only by timing (it runs one querySelector and a handful of `graph2ScreenCoords` per frame while a search is live). Watch for a repeat with `hang_watch` attached BEFORE a check.

@@ -20,7 +20,7 @@
  * a line fixed at draw time would point where the node used to be.
  */
 
-export interface SearchLinkInput { key: string; el: HTMLElement }
+export interface SearchLinkInput { key: string; el: Element }
 export interface SearchLinkOutput { cid: string; rank: number; x: number; y: number; z: number }
 
 export interface SearchLinkSource {

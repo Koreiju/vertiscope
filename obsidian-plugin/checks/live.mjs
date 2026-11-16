@@ -11122,7 +11122,11 @@ export function makeChecks(env) {
           const desk = window.__domvecPlane;
           const wasOpen = !!(desk && desk.panelOf && desk.panelOf("domvec/ego.md"));
           const egoFile = app.vault.getAbstractFileByPath("domvec/ego.md");
-          if (!wasOpen && desk && egoFile) { try { await desk.open(egoFile); } catch (e) {} await sleep(800); }
+          if (!wasOpen && desk && egoFile) { try { await desk.open(egoFile); } catch (e) {} }
+          // Opening a panel is not instant (just after a launch it took
+          // longer than 800 ms): wait for the card itself.
+          for (let i = 0; i < 40 && desk && !(desk.panelOf("domvec/ego.md") && desk.panelOf("domvec/ego.md").card.isConnected); i++) await sleep(250);
+          await sleep(400);
           try {
             v.searchField.input.value = "unionRect xpaths sensor resolver shadow roots";
             await v.searchField.run();
@@ -11154,10 +11158,20 @@ export function makeChecks(env) {
               if (Math.hypot(+l.getAttribute("x2") - at.x, +l.getAttribute("y2") - at.y) <= 3) ends++;
             }
             const inputs = document.querySelectorAll(".domvec-search-links line.is-in").length;
+            // In graph form the in-line starts ON the slate's own search node.
+            const card = desk && desk.panelOf && desk.panelOf("domvec/ego.md") && desk.panelOf("domvec/ego.md").card;
+            const sNode = card && card.querySelector('circle[data-key="search"]');
+            let inAtSearchNode = null;
+            const inLine = document.querySelector(".domvec-search-links line.is-in");
+            if (sNode && inLine) {
+              const r = sNode.getBoundingClientRect();
+              const x = +inLine.getAttribute("x1") + cv.left, y = +inLine.getAttribute("y1") + cv.top;
+              inAtSearchNode = r.width > 0 && x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 4;
+            }
             const stats = { ...v.searchLinks.stats, last_cids: undefined };
             v.searchField.input.value = ""; await v.searchField.run(); await sleep(300);
             const afterClear = document.querySelectorAll(".domvec-search-links line").length;
-            return { planted: ${planted}, shown, on_screen: onScreen.length, drawn: drawn.length, named, ends, inputs, after_clear: afterClear,
+            return { planted: ${planted}, shown, on_screen: onScreen.length, drawn: drawn.length, named, ends, inputs, in_at_search_node: inAtSearchNode, after_clear: afterClear,
                      cockpit_open: !!(window.__domvecPlane && window.__domvecPlane.panelOf && window.__domvecPlane.panelOf("domvec/ego.md")), stats };
           } finally {
             v.searchLinks.plantNoLinks = false;
@@ -11167,7 +11181,7 @@ export function makeChecks(env) {
         const clean = await arm(false);
         const planted = await arm(true);
         const ok = (r) => !r.error && r.shown >= 3 && r.on_screen > 0 && r.drawn === r.on_screen && r.named === r.drawn && r.ends === r.drawn
-          && r.after_clear === 0 && r.cockpit_open && r.inputs === 1;
+          && r.after_clear === 0 && r.cockpit_open && r.inputs === 1 && r.in_at_search_node !== false;
         return { pass: ok(clean) && !ok(planted) && planted.drawn === 0 && planted.inputs === 0 && planted.shown >= 3, evidence: { clean, planted } };
       },
     },
