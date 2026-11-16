@@ -5804,3 +5804,20 @@ that node. The per-stage trace stays available as data (G-372 step 1) but
 is not drawn as panels. Whether "is there" means the mechanism should
 already be that, or that it is what is wanted, is the reader's to say; this
 reads it as the target either way.*
+
+*Answers (2026-11-16), (165), chosen in the question dialog -- four rulings the
+open rows were waiting on:*
+
+- *G-94: an open page's drawn disc (~3.4 units) is larger than the room its
+  chunks get (3.26), so its chunks always overlap it. Which layout change?* --
+  **"Hole in the room (Recommended)"**: "Leave a gap of the page's drawn
+  radius at the centre of its chunk cloud; chunks keep their UMAP layout,
+  pushed just outside the disc".
+- *G-96: refit the UMAP over the whole store, re-projecting every stored
+  chunk?* -- **"Refit now (Recommended)"**: "Run the full refit on the
+  working store now and measure that every stored chunk was re-projected".
+- *G-237 to G-240: download three local quantized models?* -- **"Not now
+  (Recommended)"**: "No downloads; those four rows stay Open".
+- *D-2: should the in-memory trie gain the markdown level too?* -- **"Store
+  only (Recommended)"**: "The store's five-part keys satisfy D-2; the
+  in-memory trie keeps its shape (the markdown is a projection of it)".
