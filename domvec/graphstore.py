@@ -3416,6 +3416,30 @@ class GraphStore:
                 self._write_dups(elsewhere)
         return len(cids)
 
+    def version_cids(self, url: str) -> List[str]:
+        """The kept versions of a page (G-253): the chunks filed under its
+        marked url. The page itself is not touched."""
+        return [r[0] for r in self._rows(
+            "MATCH (c:Chunk {url: $u}) RETURN c.cid", {"u": url + VERSION_SUFFIX})]
+
+    def purge_versions(self, url: str) -> int:
+        """Remove a page's kept versions and nothing else: its chunks,
+        addresses and anchors stay. Returns versions removed.
+
+        2026-11-15: the search slate (`ego.md`) is rewritten by every search,
+        and each rewrite kept the slate's earlier text as a version; written
+        under the one-chunk addressing, 31 of the top 40 hits for a query were
+        the slate's own old queries."""
+        cids = self.version_cids(url)
+        if not cids:
+            return 0
+        self._execute("MATCH (c:Chunk {url: $u}) DETACH DELETE c", {"u": url + VERSION_SUFFIX})
+        if not PLANT_PAGE_SCOPED_DEDUP[0]:
+            _c, _n, elsewhere = self._assign_content([], cids)
+            if elsewhere:
+                self._write_dups(elsewhere)
+        return len(cids)
+
 
 def _with_line_rows(addresses, chunks):
     """Every line's address gets an Address row, or its anchor has nothing to

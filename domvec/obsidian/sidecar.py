@@ -3590,6 +3590,43 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"url": url, "chunks_removed": removed, "projected_retired": retired})
             return
 
+        if route == "purge_versions":
+            # A page's kept versions only (G-253); the page stays. Gated as
+            # `/purge` is: it writes the workspace.
+            if not self.capture_allowed:
+                self._send(403, {"error": "purge is off", "why": "the sidecar holds this workspace read-only."})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            url = (body or {}).get("url") or ""
+            if not url or url.endswith("#~v"):
+                self._send(400, {"error": "a page url (not its versions' url)"})
+                return
+            try:
+                with _foreground(), _WORK_LOCK:
+                    out = self.workspace.purge_versions(url)
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+                return
+            # Their projected nodes leave now, as `/purge` does: the drain
+            # finds each cid gone from the store and reports it in the delta.
+            retired = 0
+            cids = out.pop("cids", [])
+            try:
+                from .projector import projector as _get
+                got = _get()
+                if got is not None and cids:
+                    retired = got.enqueue(cids)
+            except Exception:                       # noqa: BLE001
+                pass
+            out["projected_retired"] = retired
+            self._send(200, out)
+            return
+
         if route == "capture":
             if not self.capture_allowed:
                 # Named, because the alternative is what actually happened:

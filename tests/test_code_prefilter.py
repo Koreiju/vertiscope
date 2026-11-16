@@ -78,3 +78,24 @@ def test_planted_no_prefilter_ranks_every_partition(ws):
     hits = ws.search("guitar astronomy cooking finance weather", k=50, diagnostics=diag)
     assert diag.code_partitions is None
     assert len(_roots(hits)) >= 3
+
+
+@pytest.mark.parametrize("planted", [False, True])
+def test_the_root_holding_the_word_is_kept(ws, planted, monkeypatch):
+    """Live 2026-11-15: an identifier's own file was masked because its
+    root's centroid was not among the 3 nearest. A word only one root holds
+    keeps that root; planted `PLANT_PREFILTER_IGNORES_LEXICAL`: masked."""
+    ws.index_source('"""Cooking module."""\n\ndef zanthoxylum():\n    """zanthoxylum peppercorn."""\n', "pkg/zx.py",
+                    root="pypi/kitchen")
+    ws.flush_vectors()
+    ws._index = None
+    monkeypatch.setattr(type(ws.index), "PLANT_PREFILTER_IGNORES_LEXICAL", [planted])
+    ws.index.code_partitions = 1
+    diag = SearchDiagnostics()
+    hits = ws.search("guitar zanthoxylum", k=50, diagnostics=diag)
+    kitchen = [h for h in hits if h.url.startswith("code://pypi/kitchen/")]
+    if planted:
+        assert not kitchen and diag.code_partitions["kept_names"] == ["code://pypi/strings"], diag.code_partitions
+    else:
+        assert any(h.url.endswith("/zx.py") for h in kitchen), (diag.code_partitions, [h.url for h in hits])
+        assert diag.code_partitions["kept_by_word"] == "code://pypi/kitchen"

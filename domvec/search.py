@@ -600,7 +600,7 @@ class ThreeFormIndex:
         # vault rows are untouched, and it is a mask inside THIS ranking: the
         # filter is not a second interface.
         if available and self.code_partitions > 0 and not scope_url:
-            score = self._prefilter_code(score, rows, diag)
+            score = self._prefilter_code(score, rows, diag, lexical=lexical)
 
         _lap("scope_and_code")
         diag.survivors = int(np.sum(score > 0))
@@ -705,7 +705,19 @@ class ThreeFormIndex:
         self._code_parts = (key, part, names, cents)
         return part, names, cents
 
-    def _prefilter_code(self, score: np.ndarray, rows: int, diag) -> np.ndarray:
+    #: Planted: the centroid filter alone decides, as before 2026-11-15.
+    PLANT_PREFILTER_IGNORES_LEXICAL = [False]
+
+    def _prefilter_code(self, score: np.ndarray, rows: int, diag, lexical=None) -> np.ndarray:
+        """Keep the `code_partitions` code roots nearest the query vector --
+        AND the root holding the best lexical match among code rows.
+
+        Live 2026-11-15: `unionRect` (an identifier, defined in
+        `code://plugin/pipelinebox.ts`) kept repo, pypi/urllib and pypi/html
+        by centroid and masked 3,336 code rows, every plugin row among them,
+        so the file defining the word could not be returned. R-6 was measured
+        on prose queries; an identifier's nearness to a centroid says little,
+        while the root its exact match is in says where it lives."""
         part, names, cents = self._code_partitions(rows)
         qv = getattr(self, "_last_query_vector", None)
         if cents is None or qv is None or len(names) <= self.code_partitions:
@@ -715,11 +727,19 @@ class ThreeFormIndex:
         q = q / max(np.linalg.norm(q), 1e-12)
         sims = cents @ q
         keep = set(np.argsort(-sims)[: self.code_partitions].tolist())
+        by_word = None
+        if lexical is not None and not self.PLANT_PREFILTER_IGNORES_LEXICAL[0]:
+            lex = np.where(part >= 0, np.asarray(lexical, dtype=np.float64)[:rows], 0.0)
+            best = int(np.argmax(lex)) if lex.size else -1
+            if best >= 0 and lex[best] > 0:
+                by_word = int(part[best])
+                keep.add(by_word)
         mask = np.ones(rows, dtype=np.float32)
         drop = (part >= 0) & ~np.isin(part, list(keep))
         mask[drop] = 0.0
         diag.code_partitions = {"total": len(names), "kept": len(keep),
                                 "kept_names": [names[i] for i in sorted(keep)],
+                                "kept_by_word": names[by_word] if by_word is not None else None,
                                 "rows_masked": int(np.sum(drop))}
         return score * mask
 

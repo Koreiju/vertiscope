@@ -498,6 +498,18 @@ export class Sidecar {
     }
   }
 
+  /** A page's kept versions only (G-253, `POST /purge_versions`); the page stays. */
+  async purgeVersions(url: string): Promise<{ url: string; versions_removed: number; projected_retired: number } | null> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/purge_versions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
   async purge(url: string): Promise<any | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base) return null;

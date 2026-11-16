@@ -1888,6 +1888,30 @@ class Workspace:
         stats["path"] = str(self.path)
         return stats
 
+    #: Planted: the versions leave the graph only -- their frequency and
+    #: semantic rows stay, and the search keeps ranking what is gone.
+    PLANT_PURGE_VERSIONS_GRAPH_ONLY = [False]
+
+    def purge_versions(self, url: str) -> dict:
+        """Remove a page's kept versions (G-253) everywhere they are recorded,
+        and leave the page: the frequency rows, the semantic rows, the queue,
+        the search index, then the graph -- in `purge`'s order, rows retired
+        while the graph can still say which they were."""
+        url = self.page_url(url) or url
+        cids = self.store.version_cids(url)
+        if self.PLANT_PURGE_VERSIONS_GRAPH_ONLY[0]:
+            return {"url": url, "versions_removed": self.store.purge_versions(url), "cids": cids}
+        for cid in cids:
+            self.freq.remove(cid)
+        if self.embeddings is not None and cids:
+            self.embeddings.forget(cids)
+        self.vectors.forget(cids)
+        removed = self.store.purge_versions(url)
+        if cids:
+            self._index_changed(cids)
+            self.freq.save(self.path / "freq")
+        return {"url": url, "versions_removed": removed, "cids": cids}
+
     def purge(self, url: str = "") -> None:
         """Unrecord a page, everywhere it is recorded.
 
