@@ -936,6 +936,8 @@ button.domvec-run-fence:hover {
 .domvec-search3d-item:hover { border-color: var(--text-accent); opacity: 1 !important; }
 .domvec-search3d-item-rank { color: var(--text-faint); }
 .domvec-search3d-item-label { overflow: hidden; text-overflow: ellipsis; }
+.domvec-search3d-item-similar { margin-left: 4px; padding: 0 3px; opacity: 0.45; cursor: pointer; border-radius: 3px; }
+.domvec-search3d-item-similar:hover { opacity: 1; background: rgba(127, 208, 255, 0.18); color: #7fd0ff; }
 
 /* G-243: a hover preview never blocks the pointer from the graph beneath.
    Its title bar stays live, so the reader can still grab it (a drag keeps

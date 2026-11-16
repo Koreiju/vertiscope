@@ -159,7 +159,34 @@ export class SearchField {
   private diffTimer = 0;
   private totalTimer = 0;
 
-  private ask: (query: string, total: number) => Promise<FieldAnswer | null>;
+  private ask: (query: string, total: number, ref?: string) => Promise<FieldAnswer | null>;
+  /**
+   * "Similar" (G-372 step 4, item 164): the same field keyed by a RESULT --
+   * its cid -- instead of a string. The input shows `≈ <its label>` so the
+   * reader sees what the node is keyed by; the address is held here. Typing
+   * anything else drops it. Planted `plantSimilarAsText`: the label is
+   * searched as a string (the encoder called, the ref lost).
+   */
+  ref = "";
+  /** The ref's page, so its input link can stand on the page node when the chunk is not drawn. */
+  refUrl = "";
+  private refText = "";
+  plantSimilarAsText = false;
+  similarStats = { asked: 0, by_ref: 0, last_ref: "" };
+  similar(h: FieldHit): void {
+    this.similarStats.asked++;
+    this.ref = h.cid;
+    this.refUrl = h.url;
+    this.refText = "≈ " + this.labelOf(h);
+    this.input.value = this.refText;
+    void this.run();
+  }
+  /** The ref the current input is keyed by, or "" once the reader has typed over it. */
+  private refFor(q: string): string {
+    if (!this.ref) return "";
+    if (q !== this.refText.trim()) { this.ref = ""; this.refUrl = ""; this.refText = ""; return ""; }
+    return this.plantSimilarAsText ? "" : this.ref;
+  }
   private onShow: (hits: FieldHit[], shown: number, soft: number) => void;
   private onClear: () => void;
   /** Told when the reader presses search: the web half (item 107). */
@@ -361,7 +388,7 @@ export class SearchField {
   }
 
   constructor(host: HTMLElement,
-              ask: (query: string, total: number) => Promise<FieldAnswer | null>,
+              ask: (query: string, total: number, ref?: string) => Promise<FieldAnswer | null>,
               onShow: (hits: FieldHit[], shown: number, soft: number) => void,
               onClear: () => void) {
     this.ask = ask; this.onShow = onShow; this.onClear = onClear;
@@ -521,13 +548,17 @@ export class SearchField {
     }
     this.stats.queries++;
     const t0 = performance.now();
-    this.onAsked(q);
-    if (this.tiers && !this.plantSingleTier) {
+    // A ref query is the same node keyed by an address: no tiers (they rank
+    // pages by the string), no store-following (there is no string to follow).
+    const ref = this.refFor(q);
+    if (ref) { this.similarStats.by_ref++; this.similarStats.last_ref = ref; }
+    else this.onAsked(q);
+    if (!ref && this.tiers && !this.plantSingleTier) {
       const done = await this.tiered(q, seq, false);
       if (seq !== this.seq) return;
       if (done) { await this.onAnswered(q, this.hits); this.stats.answered++; this.stats.lastMs = Math.round(performance.now() - t0); return; }
     }
-    const got = await this.ask(q, this.total);
+    const got = await this.ask(q, this.total, ref || undefined);
     this.tierStats.single_ms = Math.round(performance.now() - t0);
     if (seq !== this.seq) return;                 // a newer query is in flight
     this.stats.lastMs = Math.round(performance.now() - t0);
@@ -548,6 +579,7 @@ export class SearchField {
     const q = this.input.value.trim();
     if (q && q !== this.query) await this.run();
     if (!q) { await this.run(); return; }
+    if (this.refFor(q)) return;                   // a result's neighbours: nothing to send to the web
     this.stats.submitted++;
     this.onSubmit(q);
   }
@@ -562,7 +594,8 @@ export class SearchField {
     const q = this.query;
     if (!q) return null;
     const seq = this.seq;
-    if (this.tiers && !this.plantSingleTier) {
+    const ref = this.refFor(q);
+    if (!ref && this.tiers && !this.plantSingleTier) {
       // The update, tiered too: new url nodes retrieved and re-ranked, then
       // their chunks -- the reader's scroll kept throughout.
       const was = this.hits;
@@ -573,7 +606,7 @@ export class SearchField {
       if (d.added || d.removed || d.moved) { this.stats.changed++; this.stats.lastDiff = d; }
       return d;
     }
-    const got = await this.ask(q, this.total);
+    const got = await this.ask(q, this.total, ref || undefined);
     if (!got || seq !== this.seq || q !== this.query) return null;
     const now = got.hits.slice(0, this.total);
     const d = rankDiff(this.hits, now);
@@ -634,6 +667,11 @@ export class SearchField {
         const it = this.strip.createDiv({ cls: "domvec-search3d-item" });
         it.createSpan({ cls: "domvec-search3d-item-rank", text: String(i + 1) });
         it.createSpan({ cls: "domvec-search3d-item-label", text: this.labelOf(h) });
+        // "Similar": this result as the node's query (G-372 step 4). A field on
+        // the result, not a verb to type.
+        const sim = it.createSpan({ cls: "domvec-search3d-item-similar", text: "≈" });
+        sim.title = "similar to this result";
+        sim.addEventListener("click", (e) => { e.stopPropagation(); this.similar(h); });
         it.title = h.url;
         it.addEventListener("mouseenter", () => { this.stripStats.hovers++; this.onHoverHit(h); });
         it.addEventListener("mouseleave", () => this.onHoverHit(null));

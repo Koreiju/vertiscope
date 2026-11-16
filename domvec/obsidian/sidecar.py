@@ -2099,7 +2099,8 @@ def _in_ego(stored) -> bool:
 
 def search_payload(workspace, query: str, k: int = 8, *,
                    offset: int = 0, url: str = "",
-                   coarse: bool = True, budget: int = 0, where: str = "", trace: int = 0) -> Dict:
+                   coarse: bool = True, budget: int = 0, where: str = "", trace: int = 0,
+                   ref: str = "") -> Dict:
     """Ranked chunks for the overlay (`G-63`, `G-64`, `G-69`, `G-70`).
 
     Ranking is the store's own three-form retrieval; this adds nothing to it
@@ -2124,6 +2125,10 @@ def search_payload(workspace, query: str, k: int = 8, *,
     **Inside a budget** (`G-64`). `budget` in link-free tokens: results are
     taken until the next one would not fit, so a list handed to a model is a
     list that can be handed to a model.
+
+    **Keyed by a chunk** (`ref`, G-372 step 2): "similar" on a result -- the
+    same ranking, its lexical and semantic factors read from that chunk's
+    stored rows, no encoder call. `query` is then only the label echoed back.
     """
     want = max(1, offset + k)
     _ensure_code_rank(workspace)
@@ -2147,7 +2152,7 @@ def search_payload(workspace, query: str, k: int = 8, *,
         # The search's own computation graph, per stage (G-372): asked by
         # `?trace=k`, recorded by the ranking, never by a second search.
         diag.want_trace = max(0, min(int(trace or 0), 200))
-        if where == "ego" and not url and not PLANT_NO_WHERE[0]:
+        if where == "ego" and not url and not ref and not PLANT_NO_WHERE[0]:
             # The EGO ranked over its own pages only (item 78): a scoped
             # ranking per ego page, merged by score -- a filter over the whole
             # corpus's ranking refilled to k=4096 on every call, a few ego
@@ -2155,7 +2160,8 @@ def search_payload(workspace, query: str, k: int = 8, *,
             hits = _ego_hits(workspace, query, want)
         else:
             try:
-                hits = workspace.search(query, k=want, scope_url=url or "", diagnostics=diag)
+                hits = workspace.search(query, k=want, scope_url=url or "", diagnostics=diag,
+                                        **({"ref": ref} if ref else {}))
             except TypeError:                   # an index without diagnostics
                 hits = workspace.search(query, k=want, scope_url=url or "")
         import time as _time
@@ -2258,6 +2264,7 @@ def search_payload(workspace, query: str, k: int = 8, *,
             "more": len(hits) >= want,
             "n": int(getattr(diag, "survivors", 0) or 0),
             "code_partitions": getattr(diag, "code_partitions", None),
+            **({"ref": ref, "encoder_calls": int(getattr(diag, "encoder_calls", 0) or 0)} if ref else {}),
             **({"trace": dict(diag.trace, shape=[r["cid"] for r in out], survivors=int(getattr(diag, "survivors", 0) or 0),
                               laps=dict(getattr(diag, "ms", None) or {}))}
                if getattr(diag, "trace", None) else {}),
@@ -5961,7 +5968,8 @@ class _Handler(BaseHTTPRequestHandler):
                 budget = int((params.get("budget") or ["0"])[0])
             except ValueError:
                 budget = 0
-            if not query:
+            ref = (params.get("ref") or [""])[0]
+            if not query and not ref:
                 self._send(400, {"error": "missing q"})
             else:
                 # Foreground: background training and embedding stand aside
@@ -5973,7 +5981,7 @@ class _Handler(BaseHTTPRequestHandler):
                         trace = 0
                     got = search_payload(
                         self.workspace, query, k, offset=offset,
-                        url=scope, coarse=coarse, budget=budget, where=where, trace=trace)
+                        url=scope, coarse=coarse, budget=budget, where=where, trace=trace, ref=ref)
                 self._send(200, got)
             return
 

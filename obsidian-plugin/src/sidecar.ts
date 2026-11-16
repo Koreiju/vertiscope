@@ -410,9 +410,12 @@ export class Sidecar {
     coarse?: boolean; budget?: number; where?: string;
     /** The search's own computation graph, per stage, k rows each (G-372). */
     trace?: number;
+    /** Keyed by a chunk instead of the string: "similar" (G-372 step 2). */
+    ref?: string;
   } = {}): Promise<SearchResults | null> {
-    if (!query.trim()) return null;
+    if (!query.trim() && !options.ref) return null;
     const q = new URLSearchParams({ q: query });
+    if (options.ref) q.set("ref", options.ref);
     if (options.k) q.set("k", String(options.k));
     if (options.offset) q.set("offset", String(options.offset));
     if (options.url) q.set("url", options.url);

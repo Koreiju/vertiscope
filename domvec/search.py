@@ -101,6 +101,9 @@ DEFAULT_FUSE = ["additive"]
 PLANT_PRODUCT_FUSE = [False]
 #: Planted (PLUGIN_GOAL 93): the code graph's PageRank not used.
 PLANT_NO_CODEGRAPH = [False]
+#: Planted (G-372 step 2): a ref query re-encodes the ref's terms through the
+#: encoder instead of reading its stored embedding -- the call it exists to save.
+PLANT_REF_REENCODES = [False]
 
 
 def _unit(v: np.ndarray) -> np.ndarray:
@@ -194,6 +197,10 @@ class SearchDiagnostics:
     #: lexical/semantic overlap. 0 = not asked, nothing recorded.
     want_trace: int = 0
     trace: Optional[dict] = None
+    #: The cid a ref query was keyed by (G-372 step 2), and the encoder calls
+    #: this search made: 0 for a ref query, which reads stored rows only.
+    ref: str = ""
+    encoder_calls: int = 0
 
     def summary(self) -> Dict[str, object]:
         return {
@@ -454,8 +461,16 @@ class ThreeFormIndex:
         fuse: str = "",
         scope_url: str = "",
         count_only: bool = False,
+        ref: str = "",
     ) -> List[Hit]:
         """Rank chunks by the triple product.
+
+        ``ref`` keys the search by a chunk instead of a string (G-372 step 2,
+        `docs/SEARCH_GRAPH_DESIGN.md` §4): lexical is that chunk's stored
+        frequency row against every row, semantic its stored embedding --
+        no tokenizing, no encoder call -- and every factor after them is
+        unchanged. "Similar" on a result is this call. An unknown ref
+        returns nothing.
 
         ``count_only`` stops once the corpus-wide match count is known
         (``diagnostics.survivors``) and reads no chunk: tier 1 of a tiered
@@ -494,16 +509,25 @@ class ThreeFormIndex:
         # recomputes (CLAUDE.md 5c).
         emb_n = int(self.embeddings.matrix.shape[0]) if (self.embeddings is not None
                                                           and self.embeddings.matrix is not None) else 0
-        fkey = (query, rows, getattr(self.freq, "version", 0), emb_n, id(self.embedder))
+        fkey = (query, ref, rows, getattr(self.freq, "version", 0), emb_n, id(self.embedder))
+        diag.ref = ref
         memo = getattr(self, "_factor_memo", None)
         if memo is not None and memo[0] == fkey and not getattr(self, "plant_no_factor_memo", False):
             lexical, semantic, available = memo[1]
             ms["memo"] = 1
+        elif ref:
+            got = self._ref_factors(ref, rows, diag)
+            if got is None:
+                diag.candidates = 0
+                return []
+            lexical, semantic, available = got
+            _lap("lexical")
+            self._factor_memo = (fkey, (lexical, semantic, available))
         else:
             lexical = self.freq.similarities(query)
             lexical = _fit(lexical, rows)
             _lap("lexical")
-            semantic, available = self._semantic(query, rows)
+            semantic, available = self._semantic(query, rows, diag)
             self._factor_memo = (fkey, (lexical, semantic, available))
         diag.semantic_available = available
         _lap("semantic")
@@ -803,7 +827,35 @@ class ThreeFormIndex:
                                 "rows_masked": int(np.sum(drop))}
         return score * mask
 
-    def _semantic(self, query: str, rows: int) -> Tuple[np.ndarray, bool]:
+    def _ref_factors(self, ref: str, rows: int, diag) -> Optional[Tuple[np.ndarray, np.ndarray, bool]]:
+        """A ref query's lexical and semantic factors, from the ref's stored
+        rows. Lexical: its tf-idf row against the corpus (the same weighting a
+        string query gets, from counts already held). Semantic: its stored
+        embedding against the matrix, joined on cid; a ref not yet embedded
+        has no semantic factor, reported as unavailable rather than zeros."""
+        r = self.freq.row_of(ref)
+        if r is None or r >= rows:
+            return None
+        tf = self.freq.tfidf()
+        if r >= tf.shape[0]:
+            return None
+        lexical = _fit(np.asarray((tf @ tf[r].T).todense()).ravel(), rows)
+        if self.embeddings is None or self.embedder is None:
+            return lexical, np.zeros(rows, dtype=np.float32), False
+        if PLANT_REF_REENCODES[0]:
+            vocab = getattr(self.freq, "vocab", {}) or {}
+            cols = set(tf[r].indices.tolist())
+            text = " ".join(t for t, c in vocab.items() if c in cols)
+            semantic, available = self._semantic(text, rows, diag)
+            return lexical, semantic, available
+        e = self.embeddings.row_of(ref)
+        if e is None or e >= self.embeddings.matrix.shape[0]:
+            return lexical, np.zeros(rows, dtype=np.float32), False
+        vector = np.array(self.embeddings.matrix[e], dtype=np.float32)
+        self._last_query_vector = vector
+        return lexical, self._join_semantic(self.embeddings.similarities(vector), rows), True
+
+    def _semantic(self, query: str, rows: int, diag=None) -> Tuple[np.ndarray, bool]:
         """Semantic similarities, and whether they are real.
 
         Returns ``available=False`` rather than a plausible-looking array of
@@ -818,8 +870,13 @@ class ThreeFormIndex:
             vector = self.embedder.embed_query(query)
         except Exception:
             return np.zeros(rows, dtype=np.float32), False
+        if diag is not None:
+            diag.encoder_calls += 1
         self._last_query_vector = vector
-        sims = self.embeddings.similarities(vector)
+        return self._join_semantic(self.embeddings.similarities(vector), rows), True
+
+    def _join_semantic(self, sims: np.ndarray, rows: int) -> np.ndarray:
+        """Embedding-matrix similarities in frequency-row order."""
         # **Joined on cid, not on row number.** `similarities` answers in
         # the EMBEDDING matrix's row order -- the order vectors arrived in --
         # and every other factor here is in FREQUENCY-row order. They agree
@@ -838,7 +895,7 @@ class ThreeFormIndex:
         # than nothing", it is opposition, and raising a negative to a
         # fractional exponent is undefined. Clamp at zero and let the veto
         # apply.
-        return np.maximum(out, 0.0), True
+        return np.maximum(out, 0.0)
 
     def _embedding_rows(self, rows: int) -> np.ndarray:
         """For each frequency row, its row in the embedding matrix, or -1.

@@ -11186,6 +11186,60 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-372b",
+      asks: "\"similar\" on a result re-enters the ONE search node keyed by that result (PLUGIN_GOAL 164, G-372 steps 2 and 4): clicking a strip item's similar field sends its cid as the query, the sidecar ranks from that chunk's stored rows and calls no encoder, the result itself ranks first, the field shows what it is keyed by, and the result is drawn as an input link when its node is drawn; planted (searchField.plantSimilarAsText): the label is searched as a string",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.searchField); i++) await sleep(500);
+          if (!v.searchField) return { planted: ${planted}, error: "no retrieval cell" };
+          const f = v.searchField;
+          f.plantSimilarAsText = ${planted};
+          try {
+            f.input.value = "unionRect xpaths sensor resolver shadow roots";
+            await f.run();
+            for (let i = 0; i < 40 && !(v.searchState && v.searchState.targets.length); i++) await sleep(250);
+            const sim = f.el.querySelector(".domvec-search3d-item .domvec-search3d-item-similar");
+            if (!sim) return { planted: ${planted}, error: "no similar field on a strip item", hits: f.hits.length };
+            const before = { by_ref: f.similarStats.by_ref, asked: f.similarStats.asked };
+            v.similarEncoderCalls = -1;
+            sim.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            const ref = f.ref || f.similarStats.last_ref;
+            for (let i = 0; i < 40 && !(f.query.startsWith("≈") && f.hits.length && v.searchState && v.searchState.query === f.query); i++) await sleep(250);
+            await sleep(400);
+            const top = f.hits[0] ? f.hits[0].cid : "";
+            // The same ranking asked of the sidecar directly, by the ref.
+            const direct = ref ? await v.sidecar.search("", { k: 5, ref }) : null;
+            const directTop = direct && direct.hits && direct.hits[0] ? String(direct.hits[0].cid) : "";
+            // Drawn as a result is resolved: its chunk, else its page.
+            const page = String(f.refUrl || "").split("#")[0];
+            const refDrawn = !!(v.graph && v.graph.graphData().nodes.find((n) => Number.isFinite(n.x)
+              && (String(n.id) === ref || (page && n.level === "page" && !n.force && n.url && String(n.url).split("#")[0] === page))));
+            const out = { planted: ${planted}, ref, input: f.input.value.slice(0, 40), top, direct_top: directTop,
+                          direct_encoder_calls: direct ? direct.encoder_calls : null,
+                          asked: f.similarStats.asked - before.asked, by_ref: f.similarStats.by_ref - before.by_ref,
+                          field_encoder_calls: v.similarEncoderCalls, hits: f.hits.length,
+                          ref_drawn: refDrawn, ref_in: v.searchLinks.stats.ref_in,
+                          in_lines: document.querySelectorAll(".domvec-search-links line.is-in").length };
+            // Typing over it drops the ref.
+            f.input.value = "orchid"; await f.run(); await sleep(300);
+            out.ref_after_typing = f.ref;
+            return out;
+          } finally {
+            f.plantSimilarAsText = false;
+            f.input.value = ""; await f.run();
+          }
+        })()`);
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (r) => !r.error && r.asked === 1 && r.by_ref === 1 && r.field_encoder_calls === 0 && r.direct_encoder_calls === 0
+          && !!r.ref && r.top === r.ref && r.direct_top === r.ref && r.input.startsWith("≈") && r.hits >= 3
+          && (!r.ref_drawn || r.ref_in === "ref:" + r.ref) && r.ref_after_typing === "";
+        return { pass: ok(clean) && !ok(planted) && planted.by_ref === 0 && planted.field_encoder_calls === -1, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-368",
       asks: "a page's fit sent by the projector is where the page is drawn, even if an earlier parting pass had moved it aside (G-94 run 130: an online update moved Radix_tree's fit ~34 units, its chunks followed, the page went back to the old fit); planted (plantStaleHomeFit): the parting pass's old home restored over the new fit",
       async run() {

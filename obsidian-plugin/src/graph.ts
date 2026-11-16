@@ -706,7 +706,7 @@ export class GraphView extends ItemView {
       this.agent.keyUp(e);
     });
     // The naked search field, middle-bottom of the 3D panel (PLUGIN_GOAL 84).
-    this.searchField = new SearchField(canvas, (q, k) => this.searchAsk(q, k),
+    this.searchField = new SearchField(canvas, (q, k, ref) => this.searchAsk(q, k, ref),
                                        (hits, d, soft) => this.showSearch(hits, d, soft), () => this.clearSearch());
     // The web half on the search BUTTON (and Enter) only -- typing never
     // reaches the browser cell (item 107).
@@ -6413,6 +6413,17 @@ export class GraphView extends ItemView {
       const r = node ? node.getBoundingClientRect() : null;
       return [{ key: "cockpit", el: node && r && r.width ? node : card }];
     },
+    // "Similar": the result the node is keyed by is an input too.
+    refInput: () => {
+      const ref = this.searchField?.ref;
+      if (!ref || !this.graph) return null;
+      // Resolved as a result is (`resolveSearch`): its chunk, else its page.
+      const ns = (this.graph.graphData() as any).nodes as any[];
+      const page = String(this.searchField?.refUrl || "").split("#")[0];
+      const n: any = ns.find((x: any) => String(x.id) === ref)
+        || (page ? ns.find((x: any) => x.level === "page" && !x.force && x.url && String(x.url).split("#")[0] === page) : null);
+      return n && Number.isFinite(n.x) ? { key: "ref:" + ref, x: n.x, y: n.y, z: n.z || 0 } : null;
+    },
     toScreen: (x, y, z) => (this.graph ? (this.graph as any).graph2ScreenCoords(x, y, z) : null),
   });
   /** Planted (item 88): results shown, but nothing turned to glass and no lights. */
@@ -6651,12 +6662,17 @@ export class GraphView extends ItemView {
     return true;
   }
 
-  private async searchAsk(query: string, total: number): Promise<FieldAnswer | null> {
+  /** The last ref search's encoder calls, as the sidecar reported them (0 = stored rows only). */
+  similarEncoderCalls = -1;
+  private async searchAsk(query: string, total: number, ref?: string): Promise<FieldAnswer | null> {
     const t0 = performance.now();
     // Counting, store-following and the plants are the field's onAsked /
     // onAnswered now, which both of its paths call.
-    const got: any = await this.sidecar.search(query, { k: total, where: this.searchWhere });
+    const got: any = ref
+      ? await this.sidecar.search("", { k: total, ref })
+      : await this.sidecar.search(query, { k: total, where: this.searchWhere });
     if (!got) return null;
+    if (ref) this.similarEncoderCalls = Number(got.encoder_calls ?? -1);
     const hits: FieldHit[] = (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || "") }));
     this.searchStats.last_ms = Math.round(performance.now() - t0);
     return { hits, n: Number(got.n || hits.length) };

@@ -32,6 +32,8 @@ export interface SearchLinkSource {
   outputs(): SearchLinkOutput[];
   /** The artifacts the search reads that are on screen. */
   inputs(): SearchLinkInput[];
+  /** The result a "similar" search is keyed by, where its node is (G-372 step 4). */
+  refInput?(): { key: string; x: number; y: number; z: number } | null;
   /** World to canvas pixels. */
   toScreen(x: number, y: number, z: number): { x: number; y: number } | null;
 }
@@ -39,7 +41,7 @@ export interface SearchLinkSource {
 export class SearchLinks {
   /** Planted: the search shows its results and draws no link. */
   plantNoLinks = false;
-  stats = { frames: 0, out: 0, in: 0, offscreen: 0, cleared: 0, last_cids: [] as string[] };
+  stats = { frames: 0, out: 0, in: 0, offscreen: 0, cleared: 0, last_cids: [] as string[], ref_in: "" };
   private svg: SVGSVGElement | null = null;
   private frame = 0;
   private live = false;
@@ -106,6 +108,15 @@ export class SearchLinks {
       const cx = Math.max(r.left, Math.min(port.x + cv.left, r.right)) - cv.left;
       const cy = Math.max(r.top, Math.min(port.y + cv.top, r.bottom)) - cv.top;
       want.push({ key: "in:" + i.key, x1: cx, y1: cy, x2: port.x, y2: port.y, cls: "is-in" });
+    }
+    const ri = this.src.refInput ? this.src.refInput() : null;
+    this.stats.ref_in = "";
+    if (ri) {
+      const at = this.src.toScreen(ri.x, ri.y, ri.z);
+      if (at && Number.isFinite(at.x) && Number.isFinite(at.y)) {
+        want.push({ key: "in:" + ri.key, x1: at.x, y1: at.y, x2: port.x, y2: port.y, cls: "is-in" });
+        this.stats.ref_in = ri.key;
+      }
     }
 
     const keep = new Set(want.map((w) => w.key));
