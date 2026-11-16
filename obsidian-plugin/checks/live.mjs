@@ -8349,9 +8349,30 @@ export function makeChecks(env) {
             await until(() => app.workspace.getLeavesOfType("domvec-code-view").some((l) => l.view.cell && l.view.cell.path === path && l.view.editor), 8000);
             const cv = app.workspace.getLeavesOfType("domvec-code-view").map((l) => l.view).find((v) => v.cell && v.cell.path === path);
             if (!cv) return { error: "the cell did not open in the code artifact panel" };
-            await until(() => cv.contentEl.querySelectorAll(".domvec-code-chunk").length > 0, 8000);
-            out.opened = { type: cv.getViewType(), url: cv.url, editable: cv.editable, source: cv.text(),
-                           trie: Array.from(cv.contentEl.querySelectorAll(".domvec-code-xpath")).map((e) => e.textContent) };
+            // The trie side as DRAWN. Since 2026-11-07 (PLUGIN_GOAL 133, one
+            // markdown panel) it is one Obsidian editor over a note of the
+            // cell's chunks, each a cid comment then its address in
+            // backticks; the per-chunk boxes this read before are drawn only
+            // under plantStaticCodeChunks, so it read [] in both arms.
+            const drawnTrie = () => {
+              const boxes = Array.from(cv.contentEl.querySelectorAll(".domvec-code-xpath")).map((e) => e.textContent);
+              if (boxes.length) return boxes;
+              const ed = cv.trieLeaf && cv.trieLeaf.view && cv.trieLeaf.view.editor;
+              if (!ed || !cv.contentEl.contains(cv.trieLeaf.containerEl)) return [];
+              const ls = ed.getValue().split(NL), got = [];
+              for (let k = 0; k + 1 < ls.length; k++) {
+                const m = /^\\x60([^\\x60]+)\\x60$/.exec(ls[k + 1].trim());
+                if (/^<!--\\s*cid:/.test(ls[k].trim()) && m) got.push(m[1]);
+              }
+              return got;
+            };
+            await until(() => drawnTrie().length > 0, 8000);
+            out.opened = { type: cv.getViewType(), url: cv.url, editable: cv.editable, source: cv.text(), trie: drawnTrie() };
+            // Where an empty trie side comes from: no chunks read, or read and not drawn.
+            const tl = cv.trieLeaf, ted = tl && tl.view && tl.view.editor;
+            out.trie_side = { chunks: (cv.chunks || []).map((c) => c.xpath), trie_path: cv.triePath || "",
+                              leaf: !!tl, attached: !!tl && cv.contentEl.contains(tl.containerEl),
+                              editor_head: ted ? ted.getValue().slice(0, 160) : null };
             // Edited in the panel, saved back into the fence.
             const t = cv.text(), i = t.indexOf("40");
             cv.editor.dispatch({ changes: { from: i, to: i + 2, insert: "41" } });
