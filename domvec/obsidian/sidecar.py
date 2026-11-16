@@ -292,6 +292,47 @@ _HEALTH_CACHE: Dict[str, object] = {}
 #: idle reconcile finds them.
 PLANT_PURGE_KEEPS_PROJECTED = [False]
 PLANT_OUTPUTS_EVERYWHERE = [False]
+#: Planted (2026-11-15): a results page's echo of the query is kept.
+PLANT_NO_ECHO_RULE = [False]
+#: The share of a chunk's words that are its page's own query words, at or
+#: above which it is the page saying the query back. Live: DuckDuckGo's "No
+#: more results found for ..." box (with its "Check spelling", "Ask Duck.ai"
+#: suggestions) is 18 of 46 words, 0.39; a result snippet quoting the
+#: phrase is ~0.01.
+ECHO_SHARE = 0.3
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def _echoes(stored, query: str) -> bool:
+    """Is this chunk a results page repeating the query back?
+
+    Live 2026-11-15: DuckDuckGo's "No more results found for <query>" ranked
+    first for the query it repeats -- nearest in words AND meaning (lexical
+    0.47, semantic 0.78), and its page's content share (0.64) too high for
+    the content factor to sink it. Three conditions, all read from the trie's
+    own address and the chunk's text, none from a site list:
+    the page was MADE from the query (each query word begins a word of its
+    url's query string -- the field searches as the reader types, so the last
+    word is often a prefix: "unionRect xpa" against q=unionRect+xpaths+...);
+    the chunk says the query as a phrase (the same prefix rule); and it is
+    mostly the query -- at least `ECHO_SHARE` of its words are the url's own
+    query words. A result snippet quoting the phrase is not, and stays."""
+    from urllib.parse import urlsplit, parse_qsl
+    q = _WORD.findall(query.lower())
+    if not q:
+        return False
+    try:
+        params = " ".join(v for _k, v in parse_qsl(urlsplit(str(stored.url)).query))
+    except ValueError:
+        return False
+    made = set(_WORD.findall(params.lower()))
+    if not all(any(m.startswith(w) for m in made) for w in q):
+        return False
+    words = _WORD.findall(tokens.for_model(stored.md or "").lower())
+    if not words or sum(1 for x in words if x in made) < ECHO_SHARE * len(words):
+        return False
+    n = len(q)
+    return any(all(words[i + j].startswith(q[j]) for j in range(n)) for i in range(len(words) - n + 1))
 #: Set while a thread recomputes the health counts (one at a time).
 _HEALTH_REFRESHING = threading.Event()
 
@@ -2168,6 +2209,7 @@ def search_payload(workspace, query: str, k: int = 8, *,
         _t_shape = _time.perf_counter()
         out = []
         spent = 0
+        echoes = 0
         seen_groups = set()
         # One read for every hit (it was one query per hit, after the ranking had
         # already read them all once: 9-10 s cold, 2026-10-17).
@@ -2196,6 +2238,11 @@ def search_payload(workspace, query: str, k: int = 8, *,
             # Planted PLANT_OUTPUTS_EVERYWHERE: outputs in every scope.
             if (where != "ego" and not PLANT_OUTPUTS_EVERYWHERE[0] and str(stored.url).startswith("vault://")
                     and ("/output" in str(stored.xpath or "") or _STATE_STEP.search(str(stored.xpath or "")))):
+                continue
+            # A results page saying the query back (`_echoes`): it was made
+            # from the query, so matching it says nothing about the corpus.
+            if query and not ref and not PLANT_NO_ECHO_RULE[0] and _echoes(stored, query):
+                echoes += 1
                 continue
             if where and not PLANT_NO_WHERE[0]:
                 ego_load(workspace)
@@ -2264,6 +2311,7 @@ def search_payload(workspace, query: str, k: int = 8, *,
             "more": len(hits) >= want,
             "n": int(getattr(diag, "survivors", 0) or 0),
             "code_partitions": getattr(diag, "code_partitions", None),
+            "echoes": echoes,
             **({"ref": ref, "encoder_calls": int(getattr(diag, "encoder_calls", 0) or 0)} if ref else {}),
             **({"trace": dict(diag.trace, shape=[r["cid"] for r in out], survivors=int(getattr(diag, "survivors", 0) or 0),
                               laps=dict(getattr(diag, "ms", None) or {}))}
