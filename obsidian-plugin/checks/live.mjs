@@ -11107,6 +11107,71 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-372",
+      asks: "the search is ONE node with its inputs and outputs as hard links (PLUGIN_GOAL 164): a query in the retrieval cell draws a line from the cell to the drawn node of every shown result that is on screen, each line naming that result's id; clearing the search removes them; planted (searchLinks.plantNoLinks): results shown, no line",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          // sleep comes from PREP.
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.searchField); i++) await sleep(500);
+          if (!v.searchField) return { planted: ${planted}, error: "no retrieval cell" };
+          v.searchLinks.plantNoLinks = ${planted};
+          // The input: the cockpit slate the query is bound to, open on the
+          // plane (opened here if it was not, and closed again after).
+          const desk = window.__domvecPlane;
+          const wasOpen = !!(desk && desk.panelOf && desk.panelOf("domvec/ego.md"));
+          const egoFile = app.vault.getAbstractFileByPath("domvec/ego.md");
+          if (!wasOpen && desk && egoFile) { try { await desk.open(egoFile); } catch (e) {} await sleep(800); }
+          try {
+            v.searchField.input.value = "unionRect xpaths sensor resolver shadow roots";
+            await v.searchField.run();
+            for (let i = 0; i < 40 && !(v.searchState && v.searchState.targets.length); i++) await sleep(250);
+            // Every result shown: the strip scrolled to its right end.
+            const sc = v.searchField.scroller;
+            sc.scrollLeft = sc.scrollWidth; sc.dispatchEvent(new Event("scroll"));
+            await sleep(600);
+            const st = v.searchState;
+            const cv = v.canvasEl.getBoundingClientRect();
+            const shown = st ? Math.min(st.shown, st.targets.length) : 0;
+            const ids = new Set(), onScreen = [];
+            for (let i = 0; i < shown; i++) {
+              const n = st.targets[i];
+              if (!n || !Number.isFinite(n.x) || ids.has(String(n.id))) continue;
+              ids.add(String(n.id));
+              const at = v.graph.graph2ScreenCoords(n.x, n.y, n.z || 0);
+              if (at.x >= 0 && at.y >= 0 && at.x <= cv.width && at.y <= cv.height) onScreen.push(String(n.id));
+            }
+            const lines = Array.from(document.querySelectorAll(".domvec-search-links line.is-out"));
+            const drawn = lines.map((l) => l.dataset.cid);
+            const named = drawn.filter((c) => ids.has(c)).length;
+            // Each out-line ends where its node is now (within 3 px).
+            let ends = 0;
+            for (const l of lines) {
+              const n = st.targets.find((t) => t && String(t.id) === l.dataset.cid);
+              if (!n) continue;
+              const at = v.graph.graph2ScreenCoords(n.x, n.y, n.z || 0);
+              if (Math.hypot(+l.getAttribute("x2") - at.x, +l.getAttribute("y2") - at.y) <= 3) ends++;
+            }
+            const inputs = document.querySelectorAll(".domvec-search-links line.is-in").length;
+            const stats = { ...v.searchLinks.stats, last_cids: undefined };
+            v.searchField.input.value = ""; await v.searchField.run(); await sleep(300);
+            const afterClear = document.querySelectorAll(".domvec-search-links line").length;
+            return { planted: ${planted}, shown, on_screen: onScreen.length, drawn: drawn.length, named, ends, inputs, after_clear: afterClear,
+                     cockpit_open: !!(window.__domvecPlane && window.__domvecPlane.panelOf && window.__domvecPlane.panelOf("domvec/ego.md")), stats };
+          } finally {
+            v.searchLinks.plantNoLinks = false;
+            if (!wasOpen && desk && desk.closePath) desk.closePath("domvec/ego.md");
+          }
+        })()`);
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (r) => !r.error && r.shown >= 3 && r.on_screen > 0 && r.drawn === r.on_screen && r.named === r.drawn && r.ends === r.drawn
+          && r.after_clear === 0 && r.cockpit_open && r.inputs === 1;
+        return { pass: ok(clean) && !ok(planted) && planted.drawn === 0 && planted.inputs === 0 && planted.shown >= 3, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-368",
       asks: "a page's fit sent by the projector is where the page is drawn, even if an earlier parting pass had moved it aside (G-94 run 130: an online update moved Radix_tree's fit ~34 units, its chunks followed, the page went back to the old fit); planted (plantStaleHomeFit): the parting pass's old home restored over the new fit",
       async run() {

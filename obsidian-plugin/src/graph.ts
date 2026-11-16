@@ -46,6 +46,7 @@ import { edgeResizable } from "./edgeresize";
 import { mdTitle, escapeHtml } from "./titles";
 import { helpButton, GESTURES_2D, GESTURES_3D_MOUSE, readmeTools } from "./help";
 import { CAPS } from "./useragent";
+import { SearchLinks } from "./searchlinks";
 
 export const GRAPH_VIEW = "domvec-graph-view";
 
@@ -6383,6 +6384,32 @@ export class GraphView extends ItemView {
   /** The ranked results, how many are shown, and the drawn node each resolves to. */
   searchState: { query: string; hits: FieldHit[]; shown: number; soft: number; at: number; minHalf: number;
                  ranks: Map<string, number>; targets: (any | null)[] } | null = null;
+  /** The search as ONE node with its inputs and outputs as hard links
+   *  (PLUGIN_GOAL 164, G-372 step 3): the retrieval cell to each shown
+   *  result's node; the cockpit slate on the plane to the cell. */
+  searchLinks = new SearchLinks({
+    canvas: () => this.canvasEl,
+    cell: () => (this.searchField && this.searchField.el.isConnected ? this.searchField.el : null),
+    outputs: () => {
+      const st = this.searchState;
+      if (!st) return [];
+      const out: { cid: string; rank: number; x: number; y: number; z: number }[] = [];
+      const seen = new Set<string>();
+      for (let i = 0; i < Math.min(st.shown, st.targets.length); i++) {
+        const n = st.targets[i];
+        if (!n || !Number.isFinite(n.x) || seen.has(String(n.id))) continue;
+        seen.add(String(n.id));
+        out.push({ cid: String(n.id), rank: i, x: n.x, y: n.y, z: n.z || 0 });
+      }
+      return out;
+    },
+    inputs: () => {
+      const desk: any = (window as any).__domvecPlane;
+      const card: HTMLElement | undefined = desk?.panelOf?.("domvec/ego.md")?.card;
+      return card && card.isConnected ? [{ key: "cockpit", el: card }] : [];
+    },
+    toScreen: (x, y, z) => (this.graph ? (this.graph as any).graph2ScreenCoords(x, y, z) : null),
+  });
   /** Planted (item 88): results shown, but nothing turned to glass and no lights. */
   plantNoGlass = false;
   /** Planted (item 96): the first version -- undrawn results PLACED in the scene. */
@@ -6679,6 +6706,7 @@ export class GraphView extends ItemView {
     this.resolveSearch();
     this.searchStats.shown = shown;
     this.updateSearchLights();
+    this.searchLinks.start();
     this.batchDirty = true;
     // A NEW query's top result is flown to and, when it is a chunk, its panel
     // opened -- the hover's own path (focusOn, hoverPanel), so the same
@@ -6793,6 +6821,7 @@ export class GraphView extends ItemView {
     this.followQuery = "";
     this.flownFor = ""; this.flownTop = ""; this.flightOpened = "";
     this.searchState = null;
+    this.searchLinks.stop();
     this.batch?.setLights([], 1);
     this.searchStats.shown = 0; this.searchStats.lights = 0;
     this.batchDirty = true;

@@ -1360,6 +1360,13 @@ body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) 
 .domvec-memory-links { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 3; overflow: visible; }
 .domvec-memory-links line { stroke: #e8e8e8; stroke-width: 3; pointer-events: stroke; cursor: context-menu; }
 
+/* G-372 (PLUGIN_GOAL 164): the search node's hard links -- the retrieval
+   cell to each shown result (out), the slate it reads to the cell (in).
+   The lit signal colour (DESIGN.md: agent-active); no new colour. */
+.domvec-search-links { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 2; overflow: visible; }
+.domvec-search-links line { stroke: #7fd0ff; stroke-width: 1; stroke-opacity: 0.5; }
+.domvec-search-links line.is-in { stroke-dasharray: 4 3; stroke-opacity: 0.7; }
+
 /* PLUGIN_GOAL 150: no text caret over a slate shown in its graph form. */
 .domvec-plane-card:has(.domvec-slate-graph) .cm-cursorLayer,
 .domvec-plane-card:has(.domvec-slate-graph) .cm-selectionLayer { display: none !important; }
