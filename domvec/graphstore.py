@@ -641,6 +641,15 @@ def _nearest_enclosing(nodes, order=None) -> List[Tuple[str, str]]:
 #: Planted (137 (20)): anchor edges by the two-MATCH statement, as before.
 PLANT_EDGE_TWO_MATCH = [False]
 
+#: Planted: an address whose content moved has every string column SET again,
+#: as before 2026-11-15. `domvec.analytics.store_crash` on a copy of the grown
+#: store, 15 min an arm: SET of all eight string columns grew the file
+#: 0.5-1.7 GB at EVERY checkpoint of an ~8 MB WAL (capture, capture_shared);
+#: SET of the value alone grew it 0-1.9 MB at 18 of 20 checkpoints and ~530 MB
+#: at two (capture_value). The live crash rate was 1.00/h while the store was
+#: grown against 0.01/h clean.
+PLANT_ADDRESS_FULL_SET = [False]
+
 class GraphStore:
     """Kuzu-backed unified store. Use as ``with GraphStore(path) as gs:``."""
 
@@ -948,6 +957,13 @@ class GraphStore:
             unchanged_addresses = {
                 aid for aid, (ch, key) in wanted.items()
                 if aid in held and held[aid][0] == ch and held[aid][1] == key}
+            # Held under the same key, content moved: the key's four columns
+            # (url, xpath, tag, accessor -- `akey` spells them) are already
+            # what they would be set to, so only the value columns are.
+            value_only = set() if PLANT_ADDRESS_FULL_SET[0] else {
+                aid for aid, (ch, key) in wanted.items()
+                if aid in held and held[aid][1] == key and held[aid][0] != ch}
+            counts["addresses_value_only"] = len(value_only)
             counts["addresses_unchanged"] = len(unchanged_addresses)
             # Reported so a corpus repairing itself is visible rather than
             # inferred from a timing that got slower.
@@ -956,6 +972,7 @@ class GraphStore:
                 if aid in held and held[aid][0] == ch and held[aid][1] != key)
         else:
             unchanged_addresses = set()
+            value_only = set()
 
         counts["ms_prequery"] = round((time.perf_counter() - _t_pre) * 1000, 1)
         _t = time.perf_counter()
@@ -1128,6 +1145,26 @@ class GraphStore:
                 edge_rows.append({"cid": h[0], "aid": row["aid"], "ord": h[1]})
 
         _tb = time.perf_counter()
+        # The value-only rows go first, in their own statements; the rest
+        # (new addresses, re-keyed ones) keep the full SET below.
+        fused_value = [r for r in fused_rows if r["aid"] in value_only]
+        plain_value = [r for r in plain_rows if r["aid"] in value_only]
+        if fused_value:
+            fused_rows = [r for r in fused_rows if r["aid"] not in value_only]
+            self._batch(
+                "UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) "
+                "SET a.value = r.val, " + _MD_SET[self.md_level] + "a.content_hash = r.ch "
+                "WITH a, r MATCH (c:Chunk {cid: r.cid}) "
+                "CREATE (c)-[:Anchors {ord: r.ord}]->(a)",
+                fused_value,
+            )
+        if plain_value:
+            plain_rows = [r for r in plain_rows if r["aid"] not in value_only]
+            self._batch(
+                "UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) "
+                "SET a.value = r.val, " + _MD_SET[self.md_level] + "a.content_hash = r.ch",
+                plain_value,
+            )
         if fused_rows:
             self._batch(
                 "UNWIND $rows AS r MERGE (a:Address {aid: r.aid}) "

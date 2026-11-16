@@ -135,3 +135,58 @@ def test_a_changed_page_still_rewrites_what_moved(workspace):
     workspace.index_html(changed, URL)
     after = _anchors(workspace.store, URL)
     assert after != before, "an edited page produced identical anchors"
+
+
+SMALL = ("<html><body><main><h2>Orchids</h2><p>Orchid pollen is carried by bees in spring.</p>"
+         "<p>Basalt cools into columns.</p></main></body></html>")
+
+
+@pytest.mark.parametrize("planted", [False, True])
+def test_a_moved_value_rewrites_only_the_value_columns(workspace, monkeypatch, planted):
+    """2026-11-15, the native store crash: SET of every string column on an
+    address whose content moved grew the store 0.5-1.7 GB per checkpoint
+    (`domvec.analytics.store_crash`, capture arm); the value alone did not
+    (capture_value). An edited paragraph keeps its key, so only `value`,
+    `content_hash` (and `md` at md-level) are written -- and the row read
+    back is complete. Planted `PLANT_ADDRESS_FULL_SET`: every column, as before.
+    """
+    import domvec.graphstore as G
+    monkeypatch.setattr(G, "PLANT_ADDRESS_FULL_SET", [planted])
+    url = "https://orchid.test/"
+    workspace.index_html(SMALL, url)
+    statements = []
+    seen = []
+    original_batch = type(workspace.store)._batch
+    original_ingest = type(workspace.store).ingest
+
+    def batch(self, query, rows, *a, **kw):
+        statements.append((query, [r.get("aid") for r in rows if isinstance(r, dict)]))
+        return original_batch(self, query, rows, *a, **kw)
+
+    def ingest(self, u, addresses, chunks, **kw):
+        counts = original_ingest(self, u, addresses, chunks, **kw)
+        seen.append(dict(counts))
+        return counts
+
+    monkeypatch.setattr(type(workspace.store), "_batch", batch)
+    monkeypatch.setattr(type(workspace.store), "ingest", ingest)
+    workspace.index_html(SMALL.replace("in spring", "in early spring"), url)
+    counts = seen[-1]
+    full = [aids for q, aids in statements if "MERGE (a:Address" in q and "a.xpath = r.xp" in q]
+    value = [aids for q, aids in statements if "MERGE (a:Address" in q and "a.xpath = r.xp" not in q
+             and "a.value = r.val" in q]
+    full_aids = {a for aids in full for a in aids}
+    value_aids = {a for aids in value for a in aids}
+    if planted:
+        assert counts.get("addresses_value_only", 0) == 0 and not value_aids, (counts, statements)
+    else:
+        # The edited address keeps its aid and takes the value-only write. (One
+        # other address at that xpath has a value-dependent aid, so an edit
+        # removes it and writes a NEW one -- in full, as a new row must be.)
+        assert counts.get("addresses_value_only", 0) >= 1 and value_aids, (counts, statements)
+        assert not (value_aids & full_aids), (value_aids, full_aids)
+    # Either way the row is whole: key columns intact, the new value in place.
+    rows = workspace.store._rows(
+        "MATCH (a:Address) WHERE a.url = $u AND a.value CONTAINS 'early spring' "
+        "RETURN a.akey, a.xpath, a.tag, a.url", {"u": url})
+    assert rows and all(r[0] and r[1] and r[3] == url for r in rows), rows
