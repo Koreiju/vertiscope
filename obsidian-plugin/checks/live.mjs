@@ -11334,6 +11334,47 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-145p",
+      asks: "a picture the hover reveals is asked for (G-145, 2026-11-16: \"image hovering stops working in chunk view\"): the batch's incremental patch -- the only path a hover reveal takes -- queues the picture's decode, and still does when the atlas is full and some cell is held by no drawn node; planted (plantPatchNoDecode): never queued; planted (plantNoEvict): refused once full",
+      async run() {
+        const arm = (plant) => evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !v.batch; i++) await sleep(500);
+          const sb = v.batch, rs = v.graph.nodeRelSize(), media = v.drawnMedia;
+          const n = v.graph.graphData().nodes.find((x) => x.__bi !== undefined && !x.__bpic && !x.force && v.lookOf(x, rs, media));
+          if (!n) return { plant: "${plant}", error: "no drawn node" };
+          // A picture nobody has asked for: '.invalid' never resolves, so the
+          // decode fails and nothing is fetched or saved.
+          const src = "https://g145-check.invalid/" + Date.now() + "-${plant}.png";
+          const real = (x) => v.lookOf(x, rs, media);
+          // A drawn picture whose cell only one node holds: the hover leaving
+          // it (its look without the picture) leaves that cell held by none.
+          const h = v.graph.graphData().nodes.find((x) => x !== n && x.__bpic && x.__bsrc && sb.holders.get(x.__bsrc) === 1);
+          const once = (full) => {
+            const pic = src + (full ? "#full" : ""), was = sb.nextCell;
+            if (full) { sb.nextCell = 1024;      // the atlas as a long hover session leaves it
+                        if (h) sb.patch([h], (x) => ({ ...real(x), picture: undefined })); }
+            const unheld = sb.cells.size - sb.holders.size;
+            try { sb.patch([n], (x) => ({ ...real(x), picture: pic }));
+                  return { asked: sb.pending.has(pic) || sb.cells.has(pic) || sb.failed.has(pic), unheld }; }
+            finally { sb.nextCell = was; sb.patch([n], real); if (full && h) sb.patch([h], real); }
+          };
+          sb.plantPatchNoDecode = ${plant === "decode"}; sb.plantNoEvict = ${plant === "evict"};
+          try {
+            const a = once(false), f = once(true);
+            return { plant: "${plant}", fresh: a.asked, when_full: f.asked, unheld_when_full: f.unheld, left_picture: !!h,
+                     atlas: sb.atlasStats(), load: { ...sb.loadStats }, restored: !h || h.__bpic };
+          } finally { sb.plantPatchNoDecode = false; sb.plantNoEvict = false; }
+        })()`);
+        const clean = await arm("none");
+        const noDecode = await arm("decode");
+        const noEvict = await arm("evict");
+        return { pass: !clean.error && clean.left_picture && clean.unheld_when_full >= 1 && clean.fresh && clean.when_full && clean.restored
+                       && !noDecode.fresh && !noDecode.when_full && noEvict.fresh && !noEvict.when_full, evidence: { clean, noDecode, noEvict } };
+      },
+    },
+    {
       id: "G-368",
       asks: "a page's fit sent by the projector is where the page is drawn, even if an earlier parting pass had moved it aside (G-94 run 130: an online update moved Radix_tree's fit ~34 units, its chunks followed, the page went back to the old fit); planted (plantStaleHomeFit): the parting pass's old home restored over the new fit",
       async run() {
