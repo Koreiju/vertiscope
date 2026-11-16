@@ -188,6 +188,12 @@ class SearchDiagnostics:
     #: The fused score per row, kept by a ``count_only`` search so tier 1 can
     #: rank pages by what they actually hold.
     score: Optional[object] = None
+    #: Ask for the search's own computation graph (G-372,
+    #: `docs/SEARCH_GRAPH_DESIGN.md`): each factor's top `want_trace` rows by
+    #: that factor alone, as cids -- trie addresses -- with values, and the
+    #: lexical/semantic overlap. 0 = not asked, nothing recorded.
+    want_trace: int = 0
+    trace: Optional[dict] = None
 
     def summary(self) -> Dict[str, object]:
         return {
@@ -576,6 +582,9 @@ class ThreeFormIndex:
         score = score * _fit(self._live if self._live is not None
                              else np.ones(rows, dtype=np.float32), rows)
         _lap("fuse")
+        if diag.want_trace:
+            diag.trace = self._trace(int(diag.want_trace), rows, lexical=lexical,
+                                     semantic=semantic if available else None, ranks=ranks, fused=score)
 
         # `scope_url` ranks WITHIN a page, which a filter cannot do.
         #
@@ -660,6 +669,57 @@ class ThreeFormIndex:
             ))
         _lap("select")
         return hits
+
+    def _trace(self, k: int, rows: int, *, lexical, semantic, ranks, fused) -> dict:
+        """Each stage's output for this query, by that stage alone (G-372):
+        what the panel for `lexical`, `semantic`, `rank`, `content` and
+        `fuse` shows. Rows are named by cid, so every entry is an address in
+        the trie; a factor's list is its own ranking, not the fused one.
+
+        `overlap` is the readout item 163 asked for ("comparing frequency and
+        quantized encoder embeddings and similarity rankings"): how many of
+        lexical's top k semantic also ranks top k, and Kendall's tau of the
+        two orders over their union -- an echo is high in both."""
+        live = _fit(self._live if self._live is not None else np.ones(rows, dtype=np.float32), rows) > 0
+
+        def cid(r):
+            meta = self._meta.get(int(r))
+            return (meta[0] if meta else self.freq.rows[int(r)])
+
+        def top(values, gate=None):
+            v = np.where(live, np.asarray(values, dtype=np.float64)[:rows], -np.inf)
+            if gate is not None:
+                v = np.where(gate, v, -np.inf)
+            order = np.argsort(-v, kind="stable")[:k]
+            return [(cid(r), round(float(v[r]), 4)) for r in order if np.isfinite(v[r])]
+
+        matched = np.asarray(lexical)[:rows] > 0
+        content = (_fit(self._content, rows).astype(np.float64) if self._content is not None
+                   else np.ones(rows, dtype=np.float64))
+        out = {"k": k, "matched": int(np.sum(matched & live)),
+               "lexical": top(lexical),
+               "semantic": top(semantic) if semantic is not None else None,
+               "rank": top(_percentile(ranks), matched),
+               "content": top(content, matched),
+               "fuse": top(fused)}
+        if out["semantic"] is not None:
+            a = [c for c, _v in out["lexical"]]
+            b = [c for c, _v in out["semantic"]]
+            union = list(dict.fromkeys(a + b))
+            pa = {c: i for i, c in enumerate(a)}
+            pb = {c: i for i, c in enumerate(b)}
+            # Positions past each list count as tied at its end.
+            xa = [pa.get(c, len(a)) for c in union]
+            xb = [pb.get(c, len(b)) for c in union]
+            conc = disc = 0
+            for i in range(len(union)):
+                for j in range(i + 1, len(union)):
+                    s = np.sign(xa[i] - xa[j]) * np.sign(xb[i] - xb[j])
+                    conc += s > 0
+                    disc += s < 0
+            out["overlap"] = {"shared": len(set(a) & set(b)), "of": k,
+                              "tau": round((conc - disc) / max(conc + disc, 1), 3)}
+        return out
 
     #: How many code partitions a query ranks within (R-6); 0 = no pre-filter.
     code_partitions = 3

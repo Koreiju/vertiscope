@@ -94,3 +94,34 @@ def test_a_page_echoing_the_query_ranks_below_one_that_says_it(tmp_path, monkeyp
         assert urls[0] == "https://search.test/?q=unionRect", hits
     else:
         assert urls[0] == "https://notes.test/pipeline", hits
+
+
+@pytest.mark.parametrize("planted", [False, True])
+def test_the_trace_shows_each_stage_and_agrees_with_the_ranking(tmp_path, monkeypatch, planted):
+    """G-372 step 1: `search_payload(trace=k)` returns each stage's own
+    ranking. On the echo: lexical and semantic put the echo first, content
+    puts the article first, and the trace's `fuse` order IS the hits' order
+    in both arms -- planted, the old additive term flips both together."""
+    monkeypatch.setattr(S, "PLANT_ADDITIVE_CONTENT_TERM", [planted])
+    with Workspace(tmp_path / "ws", embedder=_WordsEmbedder()) as w:
+        w.index_html(ECHO, "https://search.test/?q=unionRect")
+        w.index_html(ARTICLE, "https://notes.test/pipeline")
+        w.flush_vectors()
+        got = search_payload(w, QUERY, 5, where="all", trace=5)
+        url_of = {h["cid"]: h["url"] for h in got["hits"]}
+        url_of.update({c: w.store.chunk(c).url for st in ("lexical", "semantic", "content", "fuse")
+                       for c, _v in got["trace"][st] if w.store.chunk(c)})
+    t = got["trace"]
+    first = lambda stage: url_of[t[stage][0][0]]
+    assert first("lexical") == first("semantic") == "https://search.test/?q=unionRect", t
+    assert first("content") == "https://notes.test/pipeline", t
+    assert [c for c, _v in t["fuse"]][:len(got["hits"])] == [h["cid"] for h in got["hits"]], (t["fuse"], got["hits"])
+    assert t["overlap"]["shared"] >= 1 and t["shape"] == [h["cid"] for h in got["hits"]]
+    assert first("fuse") == ("https://search.test/?q=unionRect" if planted else "https://notes.test/pipeline")
+
+
+def test_no_trace_unless_asked(tmp_path):
+    with Workspace(tmp_path / "ws", embedder=_WordsEmbedder()) as w:
+        w.index_html(ARTICLE, "https://notes.test/pipeline")
+        w.flush_vectors()
+        assert "trace" not in search_payload(w, QUERY, 5)

@@ -408,6 +408,8 @@ export class Sidecar {
   async search(query: string, options: {
     k?: number; offset?: number; url?: string;
     coarse?: boolean; budget?: number; where?: string;
+    /** The search's own computation graph, per stage, k rows each (G-372). */
+    trace?: number;
   } = {}): Promise<SearchResults | null> {
     if (!query.trim()) return null;
     const q = new URLSearchParams({ q: query });
@@ -417,6 +419,7 @@ export class Sidecar {
     if (options.coarse === false) q.set("coarse", "0");
     if (options.budget) q.set("budget", String(options.budget));
     if (options.where) q.set("where", options.where);
+    if (options.trace) q.set("trace", String(options.trace));
     return this.get<SearchResults>(`/search?${q.toString()}`);
   }
 

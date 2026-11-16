@@ -127,7 +127,7 @@ at `query`.
 Patricia-trie framing: every new surface below reads cids, which are trie
 addresses. None writes the trie.
 
-1. **`GET /search?trace=1`**: one search returning every stage's output
+1. **Built 2026-11-15** (`?trace=k`, `Search._trace`; live: see G-372). **`GET /search?trace=1`**: one search returning every stage's output
    (per-factor top-k with values, the overlap readout, laps, counts). It
    is built from `SearchDiagnostics`, which already holds the laps and
    counts; the per-factor vectors are the new part. Test: the trace's

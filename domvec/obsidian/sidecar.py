@@ -2099,7 +2099,7 @@ def _in_ego(stored) -> bool:
 
 def search_payload(workspace, query: str, k: int = 8, *,
                    offset: int = 0, url: str = "",
-                   coarse: bool = True, budget: int = 0, where: str = "") -> Dict:
+                   coarse: bool = True, budget: int = 0, where: str = "", trace: int = 0) -> Dict:
     """Ranked chunks for the overlay (`G-63`, `G-64`, `G-69`, `G-70`).
 
     Ranking is the store's own three-form retrieval; this adds nothing to it
@@ -2144,6 +2144,9 @@ def search_payload(workspace, query: str, k: int = 8, *,
     while True:
         from ..search import SearchDiagnostics
         diag = SearchDiagnostics()
+        # The search's own computation graph, per stage (G-372): asked by
+        # `?trace=k`, recorded by the ranking, never by a second search.
+        diag.want_trace = max(0, min(int(trace or 0), 200))
         if where == "ego" and not url and not PLANT_NO_WHERE[0]:
             # The EGO ranked over its own pages only (item 78): a scoped
             # ranking per ego page, merged by score -- a filter over the whole
@@ -2255,6 +2258,9 @@ def search_payload(workspace, query: str, k: int = 8, *,
             "more": len(hits) >= want,
             "n": int(getattr(diag, "survivors", 0) or 0),
             "code_partitions": getattr(diag, "code_partitions", None),
+            **({"trace": dict(diag.trace, shape=[r["cid"] for r in out], survivors=int(getattr(diag, "survivors", 0) or 0),
+                              laps=dict(getattr(diag, "ms", None) or {}))}
+               if getattr(diag, "trace", None) else {}),
             # Where the time went: the ranking's phases, its store reads, and
             # this reshaping's own (one more read per hit).
             "timing": dict(getattr(diag, "ms", None) or {}, select_reads=getattr(diag, "select_reads", 0),
@@ -5961,9 +5967,13 @@ class _Handler(BaseHTTPRequestHandler):
                 # Foreground: background training and embedding stand aside
                 # while the reader waits on a search (PLUGIN_GOAL 152).
                 with _foreground():
+                    try:
+                        trace = int((params.get("trace") or ["0"])[0])
+                    except ValueError:
+                        trace = 0
                     got = search_payload(
                         self.workspace, query, k, offset=offset,
-                        url=scope, coarse=coarse, budget=budget, where=where)
+                        url=scope, coarse=coarse, budget=budget, where=where, trace=trace)
                 self._send(200, got)
             return
 
