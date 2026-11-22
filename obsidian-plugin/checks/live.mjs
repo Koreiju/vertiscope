@@ -11442,7 +11442,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-386",
-      asks: "the editor's own calls from a kernel cell (PLUGIN_GOAL 172 [3]; mortegon 3A.7, the cards are the API): one cell calls create, link, invoke, commit and review, and the plane holds two new cards linked, the invoked card's output written into it, a subgraph card linking both, and a review question on the first; a link to a card that does not exist is refused, not invented; planted (plantNoCarry) no card appears",
+      asks: "the editor's own calls from a kernel cell (PLUGIN_GOAL 172 [3]; mortegon 3A.7, the cards are the API): one cell calls create, link, invoke, commit and review, and the plane holds two new cards linked, the invoked card's output written into it, a subgraph card linking both, and a review question on the first, the subgraph and the invoked card stored as vault:// pages (G-382); a link to a card that does not exist is refused, not invented; planted (plantNoCarry) no card appears",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -11455,7 +11455,7 @@ export function makeChecks(env) {
           const driver = P("g386 driver " + tag);
           const code = [
             "create(" + JSON.stringify(A) + ", 'x = 21', 'notebook')",
-            "create(" + JSON.stringify(B) + ", \"print('INVOKED', 2 * 21)\", 'notebook')",
+            "create(" + JSON.stringify(B) + ", " + JSON.stringify("print('INVOKED', 2 * 21)") + ", 'notebook')",
             "link(" + JSON.stringify(A) + ", " + JSON.stringify(B) + ")",
             "invoke(" + JSON.stringify(B) + ")",
             "commit(" + JSON.stringify(S) + ", " + JSON.stringify(A) + ", " + JSON.stringify(B) + ")",
@@ -11465,7 +11465,7 @@ export function makeChecks(env) {
           plugin.editor.plantNoCarry = ${planted};
           const before = { ...plugin.editor.stats };
           const has = (path) => !!app.vault.getAbstractFileByPath(path);
-          const text = async (path) => { const f = app.vault.getAbstractFileByPath(path); return f ? await app.vault.read(f) : ""; };
+          const text = async (path) => { const v = d.viewOf(path); if (v && v.editor) return v.editor.getValue(); const f = app.vault.getAbstractFileByPath(path); return f ? await app.vault.read(f) : ""; };
           const out = { planted: ${planted} };
           try {
             await d.create("notebook", { path: driver, text: F + "python" + NL + code + NL + F + NL });
@@ -11478,11 +11478,20 @@ export function makeChecks(env) {
             await until(() => d.linkedTo(P(S)).has(P(A)) && d.linkedTo(P(S)).has(P(B)), 4000);
             out.subgraph = [P(A), P(B)].map((q) => d.linkedTo(P(S)).has(q));
             out.invoked = /INVOKED 42/.test(await text(P(B)));
-            out.review = /\[!question\] review/.test(await text(P(A)));
+            out.review = /\\[!question\\] review/.test(await text(P(A)));
+            out.texts = { a: (await text(P(A))).slice(-260), b: (await text(P(B))).slice(-260), last: plugin.editor.stats.last };
             const st = plugin.editor.stats;
             out.counts = ["create", "link", "invoke", "commit", "review", "refused"].map((k) => st[k] - before[k]);
             out.refused = st.last && st.last.refused || null;
             out.on_plane = [A, B, S].map((n) => !!d.panelOf(P(n)));
+            // G-382's other half: the committed subgraph and the invoked card
+            // (a function node, it has run) reach the store as vault:// pages,
+            // by the reservoir indexing every plane card gets.
+            const base = plugin.settings.sidecar.replace(/\\/+$/, "");
+            const want = [S, B].map((n) => "vault://" + app.vault.getName() + "/" + P(n));
+            const held = async () => { const j = await (await fetch(base + "/pages")).json(); const u = new Set(j.urls || []); return want.map((w) => u.has(w)); };
+            if (!${planted}) await until(async () => (await held()).every(Boolean), 30000);
+            out.pages = await held();
             return out;
           } finally {
             plugin.editor.plantNoCarry = false;
@@ -11491,7 +11500,7 @@ export function makeChecks(env) {
         })()`, { timeout: 180000 });
         const clean = await arm(false);
         const planted = await arm(true);
-        const ok = !!clean && clean.cards.every(Boolean) && clean.a_b_linked && clean.subgraph.every(Boolean) && clean.invoked && clean.review
+        const ok = !!clean && clean.cards.every(Boolean) && clean.a_b_linked && clean.subgraph.every(Boolean) && clean.invoked && clean.review && clean.pages.every(Boolean)
           && JSON.stringify(clean.counts) === JSON.stringify([2, 1, 1, 1, 1, 1]) && /no card/.test(String(clean.refused || ""));
         const plantedOk = !!planted && planted.cards.every((x) => !x);
         return { pass: ok && plantedOk, evidence: { clean, planted } };

@@ -19,7 +19,7 @@
  * nothing reaches the plane except through a note.
  */
 import { Notice, TFile, type App } from "obsidian";
-import { findFences } from "./fences";
+import { cellSource, findFences } from "./fences";
 import { PLANE_FOLDER, type PlaneDesk } from "./planepanels";
 import type { RunRequest } from "./runbutton";
 
@@ -75,6 +75,27 @@ export class EditorCalls {
     }
   }
 
+  /** A block appended after a blank line. Into the card's EDITOR when it is
+   *  open on the plane (its own save persists it), else into the file: a file
+   *  write under an open editor races its autosave, and the editor's older
+   *  text can land last (main.ts storeOutput, 2026-10-25). Planted
+   *  `plantFileAppend`: always the file. */
+  plantFileAppend = false;
+  stats_append = { editor: 0, file: 0 };
+  private async append(f: TFile, block: string): Promise<void> {
+    const v = this.plantFileAppend ? null : this.host.desk.viewOf(f.path);
+    if (v && v.editor && v.getMode() === "source") {
+      const ed = v.editor, text = ed.getValue();
+      const keep = text.replace(/\s*$/, "");
+      const from = ed.offsetToPos(keep.length), to = ed.offsetToPos(text.length);
+      ed.replaceRange(NL + NL + block + NL, from, to);
+      this.stats_append.editor++;
+      return;
+    }
+    await this.host.app.vault.process(f, (t) => t.replace(/\s*$/, "") + NL + NL + block + NL);
+    this.stats_append.file++;
+  }
+
   private async do_create(c: { name: string; body?: string; kind?: string }) {
     const name = String(c.name || "").replace(UNSAFE, " ").trim();
     if (!name) throw new Error("a card needs a name");
@@ -102,7 +123,7 @@ export class EditorCalls {
     // As a wire-drop writes it (PlaneDesk.wireDrop). Undirected (G-383): the
     // link lives in one note's text, but nothing draws which one.
     const md = this.host.app.fileManager.generateMarkdownLink(dst, src.path);
-    await this.host.app.vault.process(src, (t) => t.replace(/\s*$/, "") + NL + NL + md + NL);
+    await this.append(src, md);
     return { from: pa, to: pb, said: `${a} -- ${b}` };
   }
 
@@ -117,7 +138,9 @@ export class EditorCalls {
     let ok = 0;
     try {
       for (const c of cells) {
-        const r = await this.host.onRunFence({ path: p, lang: "python", code: c.body, line: c.openLine, refs: c.refs });
+        // The source as the run button sends it (`cellSource`): storeOutput
+        // places the output only at a fence whose source matches exactly.
+        const r = await this.host.onRunFence({ path: p, lang: "python", code: cellSource(c.body), line: c.openLine, refs: c.refs });
         if (r && r.ok) ok++; else break;
       }
     } finally { this.invoking.delete(p); }
@@ -133,7 +156,7 @@ export class EditorCalls {
     const got = await this.do_create({ name: c.name, kind: "slate", body: "subgraph of " + members.length });
     const f = this.host.app.vault.getAbstractFileByPath(got.path) as TFile;
     const links = paths.map((q) => this.host.app.fileManager.generateMarkdownLink(this.host.app.vault.getAbstractFileByPath(q!) as TFile, got.path));
-    await this.host.app.vault.process(f, (t) => t.replace(/\s*$/, "") + NL + NL + links.join(NL) + NL);
+    await this.append(f, links.join(NL));
     return { path: got.path, members: paths, said: `${c.name} holds ${members.length}` };
   }
 
@@ -144,7 +167,7 @@ export class EditorCalls {
     if (!question.trim()) throw new Error("a review needs a question");
     const f = this.host.app.vault.getAbstractFileByPath(p) as TFile;
     const callout = ["> [!question] review", ...question.trim().split(NL).map((l) => "> " + l)].join(NL);
-    await this.host.app.vault.process(f, (t) => t.replace(/\s*$/, "") + NL + NL + callout + NL);
+    await this.append(f, callout);
     new Notice(`domvec: review asked on ${name} -- ${question}`, 8000);
     return { path: p, said: `asked on ${name}` };
   }
