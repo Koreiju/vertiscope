@@ -1433,3 +1433,19 @@ body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) 
 
 /* Keyword anchors under a hovered chunk's header (PLUGIN_GOAL 159). */
 .domvec-kw { font-size: 0.85em; opacity: 0.85; letter-spacing: 0.02em; color: #bcd6ff; }
+
+/* G-205: the retrieval artifact's card on the plane (session-only, not a note). */
+.domvec-browse-card { position: absolute; width: 360px; max-height: 70%; display: flex; flex-direction: column; background: #000; color: var(--text-normal); border: 1px solid var(--background-modifier-border); border-radius: 6px; z-index: 30; pointer-events: auto; font-size: 12px; }
+.domvec-browse-head { display: flex; gap: 4px; align-items: center; padding: 4px 6px; cursor: grab; border-bottom: 1px solid var(--background-modifier-border); }
+.domvec-browse-title { font-weight: 600; color: var(--text-muted); }
+.domvec-browse-q { flex: 1; min-width: 0; font-size: 12px; }
+.domvec-browse-scope, .domvec-browse-up, .domvec-browse-close { font-size: 11px; padding: 0 6px; height: 22px; }
+.domvec-browse-status { padding: 3px 6px; color: var(--text-faint); font-size: 11px; }
+.domvec-browse-body { overflow-y: auto; padding: 0 6px 6px; }
+.domvec-browse-level-head { margin-top: 6px; color: var(--text-accent); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.domvec-browse-hit { padding: 3px 4px; border-radius: 4px; cursor: pointer; }
+.domvec-browse-hit:hover { background: var(--background-modifier-hover); }
+.domvec-browse-hit.is-down { outline: 1px solid var(--text-accent); }
+.domvec-browse-hit-host { color: var(--text-faint); font-size: 10px; }
+.domvec-browse-trace { margin: 2px 0 0 10px; color: var(--text-muted); font-size: 11px; }
+.domvec-browse-step { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

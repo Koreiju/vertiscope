@@ -12022,6 +12022,53 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-205b",
+      asks: "the retrieval artifact's own view (G-205, BROWSER_CENTROID_DESIGN §4): a card on the plane, not a note (177 d), drawing the session's ONE artifact grouped by level; a move made OUTSIDE the card (an agent's or a cell's) appears on it as a diff; a click on a result descends (down) from the card; the plane's retrieval bar offers the query as a browse; planted plantNoPoll: the outside move never shows",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const p = app.plugins.plugins["domvec-bridge"], base = p.settings.sidecar.replace(/\\/+$/, "");
+          const post = async (body) => (await fetch(base + "/browse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+          const c = window.__domvecBrowseCard;
+          const card = p.openBrowseCard("90s aesthetic", "web");
+          if (!card) return { error: "no plane" };
+          let rows = 0;
+          for (let i = 0; i < 40 && !rows; i++) { await sleep(250); rows = card.querySelectorAll(".domvec-browse-hit").length; }
+          const notFile = !app.vault.getFiles().some((f) => f.path.includes("browse") && f.mtime > Date.now() - 60000);
+          // A move made outside the card, as an agent's MCP call would be.
+          const status = () => String(card.querySelector(".domvec-browse-status")?.textContent || "");
+          const arm = async (planted) => {
+            c.plantNoPoll = planted;
+            const q = planted ? "radix tree insertion" : "patricia trie";
+            await post({ query: q, scope: "web", k: 8 });
+            let seen = false;
+            for (let i = 0; i < 12 && !seen; i++) { await sleep(500); seen = status().includes(q); }
+            c.plantNoPoll = false;
+            return seen;
+          };
+          const outside = await arm(false), outsidePlanted = await arm(true);
+          await c.poll(true);
+          // A click on a result: its mousedown is the card's own descend.
+          const hit = card.querySelector(".domvec-browse-hit");
+          hit && hit.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+          let down = false;
+          for (let i = 0; i < 20 && !down; i++) { await sleep(250); down = !!card.querySelector(".domvec-browse-hit.is-down"); }
+          // The retrieval bar offers the query as a browse.
+          const desk = window.__domvecPlane; desk.ensureTools();
+          const input = document.querySelector(".domvec-plane-retrieve");
+          let offered = false;
+          if (input) {
+            input.value = "honey harbour"; input.dispatchEvent(new Event("input"));
+            for (let i = 0; i < 20 && !offered; i++) { await sleep(200); offered = [...document.querySelectorAll(".domvec-plane-retrieve-hit .domvec-plane-retrieve-kind")].some((e) => e.textContent === "browse"); }
+            input.value = ""; input.dispatchEvent(new Event("input")); input.blur();
+          }
+          const levels = [...card.querySelectorAll(".domvec-browse-level")].map((e) => e.dataset.level);
+          return { rows, notFile, outside, outsidePlanted, down, offered, levels, stats: { ...c.stats } };
+        })()`);
+        return { pass: !got.error && got.rows > 0 && got.notFile && got.outside && !got.outsidePlanted && got.down && got.offered, evidence: got };
+      },
+    },
+    {
       id: "G-386",
       asks: "the editor's own calls from a kernel cell (PLUGIN_GOAL 172 [3]; mortegon 3A.7, the cards are the API): one cell calls create, link, invoke, commit and review, and the plane holds two new cards linked, the invoked card's output written into it, a subgraph card linking both, and a review question on the first, the subgraph and the invoked card stored as vault:// pages (G-382); a link to a card that does not exist is refused, not invented; planted (plantNoCarry) no card appears",
       async run() {

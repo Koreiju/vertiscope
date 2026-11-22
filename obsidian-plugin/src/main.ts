@@ -62,6 +62,7 @@ import { VaultLinks } from "./vaultlinks";
 import { PANEL_VIEW, PanelView } from "./panelview";
 import { COCKPIT_PATH, Cockpit } from "./cockpit";
 import { PLANE_FOLDER, PlaneDesk } from "./planepanels";
+import { BrowseCard } from "./browsecard";
 import { EditorCalls } from "./editorcalls";
 import { DataflowRun, noteTextOf } from "./dataflowrun";
 import { CodeRows } from "./coderows";
@@ -410,6 +411,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // The plane's panels and its tools (items 65-66): the checks reach a
     // probe note through these, never through a workspace tab.
     (window as any).__domvecPlane = this.desk;
+    (window as any).__domvecBrowseCard = this.browseCard;
     this.registerInterval(window.setInterval(() => this.desk.ensureTools(), 1000));
     this.registerInterval(window.setInterval(() => { void this.codeRows.sweep(); }, 1000));
     // G-326: each panel sized to the fields it shows, folded to its node at its root.
@@ -917,6 +919,17 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    * Obsidian's own view of it, draggable, minimized to its node -- with the
    * plane's create / delete tools. The craft in 3D rings each one.
    */
+  /** G-205: the retrieval artifact's own view -- a card on the plane, not a note. */
+  browseCard: BrowseCard = new BrowseCard({
+    base: () => String(this.settings.sidecar || "").replace(/\/+$/, ""),
+    carry: (a: any) => this.carryToolAsk(a),
+    shownUrl: () => { const b: any = this.activeBrowser(); try { return String((typeof b?.shownUrl === "function" ? b.shownUrl() : b?.webview?.getURL()) || ""); } catch { return ""; } },
+  });
+  openBrowseCard(query = "", scope = "web"): HTMLElement | null {
+    const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;
+    const plane = g && typeof g.plane === "function" ? g.plane() : null;
+    return plane ? this.browseCard.open(plane, query, scope) : null;
+  }
   desk: PlaneDesk = new PlaneDesk(this.app, {
     plane: () => {
       const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;
@@ -933,6 +946,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     codeNodes: (q: string) => this.sidecar.codeNodes(q),
     typeNodes: (q: string) => this.minedTypes(q),
     openType: (pattern: string) => { void this.typeFromPattern(pattern, this.typeName(pattern)); },
+    openBrowse: (q: string, scope?: string) => { this.openBrowseCard(q, scope || "web"); },
     haloQuery: (path, q) => { void this.halo.open(path, q); },
     egoNotes: () => {
       const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;

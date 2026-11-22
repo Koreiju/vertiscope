@@ -46,6 +46,8 @@ export interface PlaneHost {
    *  opens as its own node on the plane (`openType`). */
   typeNodes?(q: string): Promise<any[]>;
   openType?(pattern: string): void;
+  /** G-205: the browse card -- the retrieval artifact's view -- with a query. */
+  openBrowse?(query: string, scope?: string): void;
   /** The `+ browser` tool: the browser cell as a panel (item 71). */
   openBrowser?(): void;
   /** A click (no drag) on a panel's header node: its halo (item 81). */
@@ -162,6 +164,8 @@ export class PlaneDesk {
   plantToolButtons = false;
   plantNoChatEntry = false;
   retrieveStats = { queries: 0, node_hits: 0, type_hits: 0, picked: 0, last_kind: "" };
+  /** Planted: the bar waits for every lookup before showing anything. */
+  plantRetrieveWaits = false;
   /**
    * The RETRIEVAL BAR (PLUGIN_GOAL 133: "Instead of buttons for creating only
    * three different notebook-level cells ... a retrieval bar for the different
@@ -204,6 +208,16 @@ export class PlaneDesk {
       const q = input.value.trim().toLowerCase(), my = ++seq;
       this.retrieveStats.queries++;
       const hits = general.filter((g) => !q || g.label.includes(q));
+      // G-205: any query can be BROWSED -- the retrieval artifact, on its own
+      // card, ranked at web scope (the card's picker widens or narrows it).
+      if (q.length >= 2 && this.host.openBrowse) {
+        const raw = input.value.trim();
+        hits.unshift({ label: raw, kind: "browse", act: () => { this.host.openBrowse!(raw, "web"); } });
+      }
+      // What needs no lookup is shown AT ONCE: the code nodes and the mined
+      // types follow when they come (mining reads every address row, ~5 s
+      // cold -- run 82: the bar showed nothing at all until it finished).
+      if (!this.plantRetrieveWaits) show(hits);
       let nodes: any[] = [];
       if (q.length >= 2 && this.host.codeNodes) nodes = await this.host.codeNodes(q).catch(() => []);
       let types: any[] = [];
