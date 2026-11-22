@@ -12069,6 +12069,68 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-395",
+      asks: "ONE interface per python code artifact (PLUGIN_GOAL 182: 'generalized in their interfaces no matter whether or not they are within a markdown panel or their own panel'): the same source as a block in a chat turn (a rendered markdown block) and as a code card of its own draws the SAME typed rows (G-322); editing a row's value under the model's REPEATED block rewrites THAT fence in the note and not the first copy; a click on a row field is the editor's, never a pull; planted plantCardOnly: the block in the chat has no rows",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const plugin = app.plugins.getPlugin("domvec-bridge"), rows = plugin.codeRows;
+          const tok = Date.now().toString(36), chat = "domvec/graph/g395 chat " + tok + ".md", card = "domvec/graph/g395 card " + tok + ".md";
+          const code = ["rate: float = 0.5", "steps = 3", "print(rate * steps)"];
+          const seed = ["---", "domvec: chat", "---", "", "## You", "", "a rate", "", "## Nous Hermes 2 Mistral DPO", "", F + "python", ...code, F, "",
+                        "## You", "", "again", "", "## Nous Hermes 2 Mistral DPO", "", F + "python", ...code, F, ""].join(NL);
+          const out = { planted: ${planted} };
+          rows.plantCardOnly = ${planted};
+          try {
+            await d.create("notebook", { path: card, text: ["---", "domvec: notebook", "---", "", F + "python", ...code, F, ""].join(NL) });
+            await d.create("notebook", { path: chat, text: seed });
+            for (let i = 0; i < 50 && !d.chats.get(chat); i++) await sleep(100);
+            const ui = d.chats.get(chat);
+            await ui.render();
+            let blocks = [];
+            for (let i = 0; i < 50; i++) {
+              blocks = [...ui.el.querySelectorAll(".domvec-chatui-block.is-code")];
+              if (blocks.length === 2 && blocks.every((b) => b.querySelector(".domvec-rows .domvec-rows-row"))) break;
+              await sleep(200);
+            }
+            const names = (el) => [...(el ? el.querySelectorAll(".domvec-rows-row:not(.is-inner)") : [])].map((r) => [...r.querySelectorAll("input")].map((i) => i.value).join("|"));
+            out.chat_rows = blocks.map((b) => names(b.querySelector(".domvec-rows")));
+            let cardStrip = null;
+            for (let i = 0; i < 50 && !cardStrip?.querySelector(".domvec-rows-row"); i++) { cardStrip = d.panelOf(card)?.card.querySelector(":scope > .domvec-rows"); await sleep(200); }
+            out.card_rows = names(cardStrip);
+            if (blocks.length === 2 && blocks[1].querySelector(".domvec-rows")) {
+              const field = [...blocks[1].querySelectorAll(".domvec-rows-row")].find((r) => r.querySelector(".domvec-rows-name")?.value === "rate")?.querySelector(".domvec-rows-value");
+              const pulledBefore = d.pullStats.pulled;
+              // A CLICK on the field: the editor's, never a pull.
+              field.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, clientX: 1, clientY: 1 }));
+              await sleep(500);
+              window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, clientX: 1, clientY: 1 }));
+              out.field_pulled = d.pullStats.pulled - pulledBefore;
+              field.value = "0.75"; field.dispatchEvent(new Event("change"));
+              let txt = "";
+              for (let i = 0; i < 40; i++) { await sleep(200); txt = await app.vault.read(app.vault.getAbstractFileByPath(chat)); if (txt.includes("0.75")) break; }
+              const L = txt.split(NL), opens = L.map((l, i) => l === F + "python" ? i : -1).filter((i) => i >= 0);
+              out.first_rate = L[opens[0] + 1]; out.second_rate = L[opens[1] + 1];
+            }
+          } finally {
+            rows.plantCardOnly = false;
+            for (const q of [chat, card]) {
+              try { d.panelOf(q)?.leaf.detach(); } catch (e) {}
+              for (let k = 0; k < 3; k++) { await sleep(800); const f = app.vault.getAbstractFileByPath(q); if (!f) break; await app.vault.trash(f, true); }
+            }
+          }
+          return out;
+        })()`, { timeout: 120000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean, same = JSON.stringify(c.chat_rows && c.chat_rows[0]) === JSON.stringify(c.card_rows) && (c.card_rows || []).length >= 2;
+        return { pass: same && JSON.stringify(c.chat_rows[0]) === JSON.stringify(c.chat_rows[1])
+                       && c.field_pulled === 0 && /0\.5/.test(c.first_rate || "") && /0\.75/.test(c.second_rate || "")
+                       && (planted.chat_rows || []).every((r) => r.length === 0) && (planted.card_rows || []).length >= 2,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-394",
       asks: "ONE chat interface, as a chat (PLUGIN_GOAL 182): a conversation note (`domvec: chat`) on the plane draws as speaker rows (You / the model's name), typed blocks -- prose, and each ```language block under a header naming its language -- above a clear input box; a prompt sent from that box appends `## You` and `## <model>` turns to the NOTE (the note is the state); each block carries its address (turn, block); a CLICK and a click-DRAG on a block stay the editor's (182: 'shouldn't block basic clicks for a text cursor ... click and hold with a debounce') and pull nothing; a press HELD on lines selected inside a code block, dragged off the conversation, pulls exactly those lines out as their own code panel at the drop point, its frontmatter naming the address with the line range; planted plantNoDebounce: a click-drag pulls; planted plantNoPieces: blocks carry no address; a code block in a turn has the SAME tools as any code cell -- run, terminal, open, unnest (182, 'the same for both chat and generally') -- and run on a block the model REPEATED stores its output after that fence, not the first copy; the pulled piece has them too; planted plantNoLine: the block carries no fence line and the repeated block's run is not stored there",
       async run() {

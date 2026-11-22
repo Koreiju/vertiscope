@@ -6324,3 +6324,66 @@ the two pulled lines:*
 open and unnest a code cell has are the SAME on a code block inside a chat
 turn, on a piece pulled out of it, and on any code block wherever it is found
 or created; never a reduced chat-only copy.*
+
+*The reader, after the chat was seen working (verbatim):*
+
+> Remember that all python code artifacts must be generalized in their
+> interfaces no matter whether or not they are within a markdown panel or
+> their own panel.
+
+*Read as: ONE interface per python code artifact -- its tools (run,
+terminal, open, unnest) AND its typed rows (G-322: names, types, values) --
+attached to the BLOCK, drawn the same whether the block sits inside a
+markdown panel, a chat turn, or is a panel of its own. Hiding a card's rows
+on a chat card (done the same day, after "Suspicious artifact") treated a
+symptom: the rows belong to each block, not to the card.*
+
+### 183. (2026-11-22) The ego is ONE central artifact canvas, pulled apart into a graph of panels
+
+*The reader, verbatim:*
+
+> I think our current ego graph should be switched to the central
+> consolidated panel that can be pulled apart into a graph of panels etc.
+> That would do away with the entire node style, and keep every component
+> about the ego contained/containable within a common and central artifact
+> canvas representation that respect graph editing operations but also
+> follow along a markdown-like context that both users and models can
+> interact with uniquely.
+
+*Three questions on 183, the reader's answers (verbatim):*
+
+- *How does the canvas CONTAIN the ego's components?* -- **"Embeds
+  (Recommended)"**: "Each component stays its own note; the canvas holds it
+  as an embedded section (`![[note]]`), drawn live and editable in place with
+  its own tools. Pull one out = it opens as its own panel, the canvas keeps a
+  link; drop a panel onto the canvas = it is embedded. One source of truth
+  per component, and the canvas's markdown is the ordered context a model
+  reads."
+- *Where is the canvas drawn, and what happens to the 3D craft's circles?* --
+  written by the reader:
+
+  > plane center, circles gone in 2D. for 3D, we follow the graph formatting
+  > exactly as world: glowing 3D nodes for chunks and the full graph
+  > structure of the ego's artifacts, viewable as billboards at different
+  > levels of the overall panel. So, hovering over higher rank nodes means
+  > more comprehensive canvases are billboarded in 3D, and can be partially
+  > brought into 2D and 3D at a time, depending on what is selected and
+  > clicked for including and excluding from the plane view to relegate to
+  > the 3D UMAP of chunks, same as web, be specialized for our craft. in the
+  > 2D plane, we deal only with the interface canvases themselves. But in 3D,
+  > we meld the canvases as billboards with the 3D world node representation
+  > on linked graphs.
+
+- *Which graph-editing operations first?* -- all four: **"Pull out / push
+  in"**, **"Links between panels"**, **"Order = compile order"**, **"Fold /
+  unnest"**.
+
+*Read as (mine, to be confirmed): the 2D plane holds ONLY interface canvases
+-- the ego canvas at its centre, components embedded, pulled-out panels
+around it -- and no circle or graph-form node; the 3D view draws the ego the
+way it draws the web world: glowing nodes for its chunks on the ego's own
+UMAP, its artifacts' graph structure as links, and a canvas as a BILLBOARD at
+the level of the node hovered (a higher-ranked node billboards a more
+comprehensive canvas); selecting or clicking moves a part between the plane
+and the 3D view (included on the plane, or relegated to the 3D chunk map).
+182's "circles stay as a level-of-detail fallback" is superseded in 2D.*

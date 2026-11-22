@@ -56,6 +56,9 @@ export interface RunHost {
   onOpenFence?(req: RunRequest): void | Promise<void>;
   /** G-329: the cell unnested into a black-box panel on the plane. */
   onUnnestFence?(req: RunRequest): void | Promise<void>;
+  /** G-322 / 182: the block's typed rows, drawn UNDER the rendered block --
+   *  the same rows a code card has, wherever the block is drawn. */
+  onRowsFence?(pre: HTMLElement, req: RunRequest): void | Promise<void>;
 }
 
 /** `⧉ open` beside run (G-234). */
@@ -178,6 +181,11 @@ export function readingViewRunButtons(host: RunHost) {
       if (term) pre.appendChild(term);
       if (host.onOpenFence) pre.appendChild(openButton(el.ownerDocument, () => host.onOpenFence!(req())));
       if (host.onUnnestFence) pre.appendChild(unnestButton(el.ownerDocument, () => host.onUnnestFence!(req())));
+      if (host.onRowsFence && /^py(thon3?)?$/.test(lang)) {
+        const r = req();
+        // After the block is in the document: a chat block is rendered first, attached after.
+        window.setTimeout(() => { void host.onRowsFence!(pre, r); }, 0);
+      }
     });
   };
 }

@@ -1512,6 +1512,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   plantChatOneNote = false;
   chatCellStats = { turns: 0, last: null as any };
   unnestStats = { made: 0, last: null as any };
+  /** A python block's typed rows under it, wherever it is drawn (182). */
+  onRowsFence(pre: HTMLElement, req: RunRequest): Promise<void> {
+    return this.codeRows.mountUnder(pre, { path: req.path, line: req.line }, req.code);
+  }
+
   async onUnnestFence(req: RunRequest): Promise<void> {
     if (req.path) await this.unnest(req.code, req.path, "cell " + (req.line + 1));
   }
