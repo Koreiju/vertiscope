@@ -16,6 +16,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from contextlib import nullcontext as _null
+
 from smolagents import Model
 from smolagents.models import ChatMessage, ChatMessageStreamDelta, MessageRole, get_clean_message_list
 from smolagents.monitoring import TokenUsage
@@ -70,6 +72,10 @@ class LlamaCppModel(Model):
         return self._llm
 
     def _request(self, messages, stop_sequences):
+        # smolagents' own messages carry content as a list of text parts; a
+        # bare string (a caller of our own) is wrapped to that form.
+        messages = [ChatMessage(role=m.role, content=[{"type": "text", "text": m.content}])
+                    if isinstance(m, ChatMessage) and isinstance(m.content, str) else m for m in messages]
         msgs = get_clean_message_list(
             messages, flatten_messages_as_text=True,
             role_conversions={MessageRole.TOOL_RESPONSE: MessageRole.USER, MessageRole.TOOL_CALL: MessageRole.ASSISTANT})
@@ -84,11 +90,14 @@ class LlamaCppModel(Model):
         delta is yielded the moment its chunk arrives -- nothing is buffered."""
         llm = self._load()
         n_out = 0
-        for chunk in llm.create_chat_completion(stream=True, **self._request(messages, stop_sequences)):
-            piece = ((chunk.get("choices") or [{}])[0].get("delta") or {}).get("content")
-            if piece:
-                n_out += 1
-                yield ChatMessageStreamDelta(content=piece)
+        from .gpu_gate import streaming
+        # While this stream runs, GPU embedding in any process yields (G-385).
+        with (streaming() if self.n_gpu_layers != 0 else _null()):
+            for chunk in llm.create_chat_completion(stream=True, **self._request(messages, stop_sequences)):
+                piece = ((chunk.get("choices") or [{}])[0].get("delta") or {}).get("content")
+                if piece:
+                    n_out += 1
+                    yield ChatMessageStreamDelta(content=piece)
         yield ChatMessageStreamDelta(content="", token_usage=TokenUsage(input_tokens=0, output_tokens=n_out))
 
     def generate(self, messages, stop_sequences=None, response_format=None, tools_to_call_from=None, **kw):

@@ -99,21 +99,25 @@ def agent_arm(model, quiet: bool) -> Dict:
 
 
 def load_worker(seconds: float) -> None:
-    """Embed on CUDA without pause, as the sidecar's embedder does mid-scan."""
-    from gpt4all import Embed4All
-    e = Embed4All("nomic-embed-text-v1.5.f16.gguf", device="gpu")
-    batch = ["a paragraph of scanned page text about tries and radix trees, number %d" % i for i in range(64)]
+    """Embed on CUDA without pause, through the sidecar's own embedder path
+    (`EmbeddingService._safe_embed`), so the GPU gate applies as it does
+    there. `DOMVEC_PLANT_NO_GATE=1`: the planted arm, the gate off."""
+    from .. import gpu_gate
+    from ..core.embedding_service import EmbeddingService
+    gpu_gate.PLANT_NO_GATE[0] = os.environ.get("DOMVEC_PLANT_NO_GATE") == "1"
+    e = EmbeddingService(device="cuda")
+    batch = ["search_document: a paragraph of scanned page text about tries, number %d" % i for i in range(64)]
     end = time.time() + seconds
     n = 0
     while time.time() < end:
-        e.embed(batch)
+        e._safe_embed(batch)
         n += len(batch)
-    print(json.dumps({"embedded": n}), flush=True)
+    print(json.dumps({"embedded": n, "gate": gpu_gate.STATS}), flush=True)
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m domvec.analytics.agent_stream")
-    ap.add_argument("--arms", default="gpu,gpu+load,cpu,agent,agent-quiet")
+    ap.add_argument("--arms", default="gpu,gpu+load,gpu+load-nogate,cpu,agent,agent-quiet")
     ap.add_argument("--task", default="code")
     ap.add_argument("--max-tokens", type=int, default=200)
     ap.add_argument("--load-worker", type=float, default=0.0, help=argparse.SUPPRESS)
@@ -130,18 +134,19 @@ def main(argv=None) -> int:
         if arm == "gpu":
             model_arm(gpu)                                   # warm: load, first CUDA kernels
             report["arms"]["gpu"] = model_arm(gpu)
-        elif arm == "gpu+load":
-            w = subprocess.Popen([sys.executable, "-m", "domvec.analytics.agent_stream", "--load-worker", "60"],
-                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        elif arm in ("gpu+load", "gpu+load-nogate"):
+            env = dict(os.environ, DOMVEC_PLANT_NO_GATE="1" if arm.endswith("nogate") else "0")
+            w = subprocess.Popen([sys.executable, "-m", "domvec.analytics.agent_stream", "--load-worker", "25"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=env,
                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            time.sleep(8)                                    # the worker's model is loaded and embedding
+            time.sleep(10)                                   # the worker's model is loaded and embedding
             try:
-                report["arms"]["gpu+load"] = model_arm(gpu)
+                report["arms"][arm] = model_arm(gpu)
             finally:
-                w.terminate()
                 try:
-                    w.wait(10)
-                except subprocess.TimeoutExpired:
+                    out, _ = w.communicate(timeout=40)       # the worker ends itself; its line says what it embedded
+                    report["arms"][arm]["worker"] = json.loads(out.strip().splitlines()[-1]) if out.strip() else None
+                except (subprocess.TimeoutExpired, ValueError):
                     w.kill()
         elif arm == "cpu":
             cpu = LlamaCppModel.for_task(a.task, grammar=None, temperature=0.0, max_tokens=a.max_tokens,
@@ -153,6 +158,10 @@ def main(argv=None) -> int:
     g, c = report["arms"].get("gpu"), report["arms"].get("cpu")
     if g and c and g.get("tok_per_s") and c.get("tok_per_s"):
         report["planted_cpu_slower"] = c["tok_per_s"] < 0.6 * g["tok_per_s"]
+    lg, ln = report["arms"].get("gpu+load"), report["arms"].get("gpu+load-nogate")
+    if g and lg and ln and g.get("tok_per_s"):
+        report["gated_keeps_rate"] = lg["tok_per_s"] >= 0.9 * g["tok_per_s"]
+        report["planted_nogate_slower"] = ln["tok_per_s"] < 0.6 * g["tok_per_s"]
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(json.dumps(report, indent=1))

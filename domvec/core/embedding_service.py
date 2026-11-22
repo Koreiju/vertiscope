@@ -297,6 +297,11 @@ class EmbeddingService:
         we raise :class:`ValueError` so FastAPI can return a clean 503
         with a useful message instead of leaking an unhandled traceback.
         """
+        # G-385 (PLUGIN_GOAL 171 c): a model streaming on CUDA holds the GPU
+        # gate; GPU embedding yields until it ends (bounded, `gpu_gate`).
+        if getattr(self, "device", "") != "cpu":
+            from ..gpu_gate import wait_while_streaming
+            wait_while_streaming()
         lock = _get_model_lock(self.model_name)
         with lock:
             try:
