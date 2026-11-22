@@ -986,6 +986,13 @@ class GraphStore:
             counts["addresses_rekeyed"] = sum(
                 1 for aid, (ch, key) in wanted.items()
                 if aid in held and held[aid][0] == ch and held[aid][1] != key)
+            # WHICH addresses are new, not only how many: 2026-11-22 a
+            # Radix_tree settle re-issued 1,930 of 2,069 addresses where the
+            # settle before it kept all 2,069 -- a page whose addresses flip
+            # between settles pays O(page) every time, and the count alone
+            # cannot say what flipped.
+            counts["addresses_new_sample"] = [
+                key for aid, (_ch, key) in wanted.items() if aid not in held][:4]
         else:
             unchanged_addresses = set()
             value_only = set()
@@ -1401,6 +1408,13 @@ class GraphStore:
             "MATCH (a:Address {url: $url}) RETURN a.aid", {"url": url})
             if r[0] not in keep_addresses]
         if stale:
+            # The removed half of the churn sample (see addresses_new_sample).
+            try:
+                removed["addresses_removed_sample"] = [r[0] for r in self._rows(
+                    "UNWIND $aids AS x MATCH (a:Address {aid: x}) RETURN a.akey",
+                    {"aids": stale[:4]})]
+            except Exception:                       # noqa: BLE001 -- a report, never a failed write
+                removed["addresses_removed_sample"] = []
             self._batch(
                 "UNWIND $rows AS r MATCH (a:Address {aid: r.aid}) DETACH DELETE a",
                 [{"aid": aid} for aid in stale],
