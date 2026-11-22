@@ -1,0 +1,161 @@
+# The computation graph editor — consolidated specification (draft 1)
+
+*Started 2026-11-21 for PLUGIN_GOAL item 166 (f): "begin thinking about how we
+should be consolidate our design specifications and plans, documenting
+everything precisely and carefully with our existing verbatim transcripts."
+This is that first step: the record gathered in one place, the existing
+designs mapped against it, what 166 changes measured, and what is open. It is
+NOT yet the "much more complete and self-consistent 2D computation graph
+interface design" -- that comes after, from this, plus web research (166 f).*
+
+**Authority.** Only the reader's own words bind: `PLUGIN_GOAL.md` (and, for
+the sensor, `AFFINE_MAP_GOAL.md`). Every other document cited here --
+including this one -- is a reading. Item numbers in `PLUGIN_GOAL.md` restart
+in each dated series, so every citation below carries its date:
+`(2026-11-01) 62` is not `(2026-10-11) 62`.
+
+---
+
+## 1. The record, by date
+
+What the reader has said about the editor, its cells, its tools and its
+agents, oldest first. Quotes are the reader's; the right-hand column is
+where it was read into a design.
+
+| Date, item | What the reader asked (reading in brief; quotes verbatim) | Read into |
+|---|---|---|
+| 2026-09-09 | The most convenient interface "a small language model could interact with safely ... simple and separable for the REPL" | `CALLABLE_INTERFACE.md` (superseded in framing by the chained single-hop toolspace in `PLUGIN_GOAL.md`) |
+| 2026-10-11, Addendum II | "we move onward to the notebook kernel panel design first to nail it down correctly" | `NOTEBOOK_PANEL_DESIGN.md` (`P-N1..P-N10`, `P-M*`) |
+| 2026-10-18, 162-170 | Code artifacts; (170) the installed PyPI base drawn in 3D as projected chunks, layout chosen by measurement | `CODE_ARTIFACTS_DESIGN.md`, rows `G-233..G-241` |
+| 2026-10-18, 186a-186n | Install three local quantized models; "local code -> agents through interface panels"; (186c) "hard type constraints and conventions per quantised model and task"; (186e) recover the mothership's (mortegon) recursive reservoir 2D computation-graph editor | `GRAPH_WORKBENCH_DESIGN.md`, rows `G-237..G-240` (Open; models declined for now, 2026-11-16 (165)) |
+| 2026-10-29, 1-29 | The 3D/2D computation-graph reservoir; the cockpit and the craft ("something like kerbal space program ... first person view within a 'cockpit' as well as a 3rd person view") | `RESERVOIR_DESIGN.md` |
+| 2026-11-01, 49 | Cells run in real Jupyter kernels (`jupyter_client`, `ipykernel`) | built |
+| 2026-11-01, 50 | The 2D editor is a PLANE inside the 3D view, not a second pane | built (G-299 and kin) |
+| 2026-11-01, 51 | Every code artifact embeds its PROSE only (G-52's rule) | `tokens.for_model` |
+| 2026-11-01, 62-63 | A slate IS a Python module written as a markdown tree (names in nested namespaces, `{ref}` resolved by Python scoping, Python's errors); the "missing link" between Jupyter's markdown and code cells -- a third cell kind compiled into the note's kernel | built in part (`slate_check`) |
+| 2026-11-01, 65 | One thing seen four ways: graph NODE, PANEL, KERNEL cell, tree | built in part |
+| 2026-11-01, 67-70 | The ego computation graph is ONE unit in 3D -- the craft | built, `G-299` live pass 2026-11-21 |
+| 2026-11-04, 130-132 | Browser and ego panels "one-to-one the same with the markdown cells in all jupyter notebooks"; "the 'slate' is the markdown part of the notebook" | -- |
+| 2026-11-04, 133 | Panels move across panes; a right-click makes a STUCK 2D panel (not the clipboard); ONE markdown panel, the same code, for billboard, code/node panel and notebook cell; a RETRIEVAL BAR over every typed node in place of `+ notebook / + slate / + browser`; code cells with VS Code's capabilities; minimize/exit; Ctrl +/- resize | built in part (`G-82` live pass 2026-11-21) |
+| 2026-11-14, 157-159 | Code cells, the ego plane on the camera, the retrieval cell | built in part |
+| 2026-11-15, 163-164 | The search's own computation graph -- revised the same day to ONE retrieval node whose inputs and outputs are hard links | `SEARCH_GRAPH_DESIGN.md` (revision section) |
+| **2026-11-21, 166** | Only browser-scanned code is projected; the codebase leaves the 3D layout; base TOOL PANELS of ~25 lines of Python per toolspace (db search, web search, the browser, scanned interactive chunks); slim-context agents for quantized local models; code + markdown as one computation-graph unit; the editor as a general Python + markdown notebook-cell interface composing programs into quantized agentic workflows | this document |
+
+Where the verbatim record ends: 2026-11-21, item 166. Anything below that
+line in any design is interpretation.
+
+## 2. The designs already written, and what 166 does to each
+
+| Document | Holds | After 166 |
+|---|---|---|
+| `CALLABLE_INTERFACE.md` | The safe small-model interface; single-hop toolspace | **Revived in spirit**: 166's tool panels are its natural successor -- one toolspace per artifact, small enough to sit in a quantized model's context |
+| `NOTEBOOK_PANEL_DESIGN.md` | The kernel panel, outputs-in-markdown, vault-note addressing; §8 three open questions | Kept; its cells become the editor's unit |
+| `GRAPH_WORKBENCH_DESIGN.md` | Code, models and workflows as graph nodes; the mothership's editor recovered | Kept for workflows and models; its "code as graph nodes" is narrowed by 166 (a) |
+| `CODE_ARTIFACTS_DESIGN.md` | The codebase and PyPI packages drawn in 3D | **Superseded in its layout part by 166 (a)**, pending the reader's confirmation (§6 Q1) |
+| `RESERVOIR_DESIGN.md` | The 2D/3D reservoir, cockpit, craft | Kept; §5 already corrected by (2026-11-01) 67 |
+| `SEARCH_GRAPH_DESIGN.md` | Search as one node, I/O as hard links | Kept; it is the db-search tool panel's graph form |
+
+## 3. What 166 (a) changes, measured
+
+On the live workspace (`project-noumen`, sidecar 8794, 2026-11-21): **216 of
+409 stored pages (53%) are the repository's own code** -- 148 `code://repo`,
+68 `code://plugin` -- the rest 170 `https`, 1 `http`, 22 `vault`.
+
+Rows whose subject 166 (a) removes from the layout, to be marked superseded
+once the reading is confirmed: `G-8`, `G-9`, `G-51` (modules and imports as
+graph pages), `G-104`, `T-6`, and the layout half of `G-233..G-241`
+(`(2026-10-18) 170`). What does NOT go: code that arrived by scanning a web
+page (a code block on a page is a chunk like any other), and the code
+*knowledge graph* the sidecar computes (`code_kg`, `cpg_*`, `codegraph`) --
+166 removes the codebase from the 3D *layout*, not from the store. Whether it
+should leave the store and the code-sync indexer too is §6 Q1.
+
+## 4. The tool panel -- the constraints the record sets
+
+From 166 and the items it builds on:
+
+1. **One panel, one toolspace**, roughly **25 lines of Python**, that "show[s]
+   the full capability" of that toolspace (166).
+2. Named toolspaces: **db search**, **web search** ("two different 'tool
+   panels'"), the **browser**, **scanned chunks with interactive structures**
+   (166). The rest of "the full toolspace of our app" is to be grouped the
+   same way.
+3. A panel is a **code panel**: a notebook code cell (`(2026-11-01) 65`, one
+   thing seen as node / panel / kernel cell / tree), run in the note's real
+   kernel (`(2026-11-01) 49`).
+4. Code and markdown are **one computation-graph unit** (166 d), which the
+   slate already is: a Python module written as a markdown tree
+   (`(2026-11-01) 62-63`).
+5. A tool's inputs and outputs are **hard links** in the graph (`(2026-11-15)
+   164`) -- the search node is the first instance.
+6. Sized for **quantized local models**: an agent holds "the handfuls of
+   toolspaces they can handle in context at a time" (166 c); type
+   constraints per model and task decide how outputs enter the graph
+   (`(2026-10-18) 186c`).
+
+The surface those panels would wrap, today: **~90 sidecar routes** and **~40
+MCP tools**. No quantized model holds that; a handful of 25-line panels is
+the reduction 166 asks for. A first grouping, offered for the reader to
+correct, not decided:
+
+| Toolspace | Wraps (existing) |
+|---|---|
+| db search | `/search`, `/search_pages`, `/chunk`, `/resolve`, `/pages`, `/ref` |
+| web search | the browser cell's web search (`onWebSearch`), `/capture` |
+| browser | navigate, pin, scroll, `/browser_state`, `/snapshot` |
+| scanned chunks (interactive) | `/addresses`, affordances (the MCP `affordances` tool), enact |
+| kernel / notebook | `/kernel`, `/note`, `/slate_check` |
+
+## 5. Reference material: the reader's duck.ai session (2026-11-21)
+
+The reader asked about editors that combine code, markdown and graph
+compilation. What the model answered -- unverified, to be checked against the
+projects' own pages before anything rests on it:
+
+- **marimo** -- reactive notebook; cells' dependencies inferred from which
+  variables each cell reads and defines; saved as plain `.py`; markdown via
+  `mo.md(...)`, able to embed computed values. Closest in spirit to the slate
+  (`(2026-11-01) 62`: names, scoping, a module).
+- **JupyterLab** -- distinct code / markdown / raw cells in kernel order;
+  extensions such as `jupyterlab-myst` allow inline Python expressions in
+  markdown. Closest to the kernel protocol already in use (`(2026-11-01) 49`).
+- **Typeflow**, **Nodezator** (Unlicense), **Ryven** (archived; editor MIT,
+  `ryvencore` LGPL-2.1), **python-node-editor** (MIT) -- node editors that
+  build nodes from Python callables and export graphs as Python code; none
+  shown to interleave markdown with code.
+- Its conclusion, which matches this project's direction: no existing tool
+  combines a markdown-and-code document with a compiled graph; pair a
+  notebook model with a graph engine.
+
+The reading this suggests (not a decision): the slate's def/use names give
+marimo-style dependency edges for free, and the kernel already runs the
+cells -- the graph is derived from the notebook, not drawn separately.
+
+## 6. Open -- the reader's to settle
+
+1. **How far does the codebase go?** Out of the 3D layout only (the store
+   and the code knowledge graph kept, e.g. for agents to search), or out of
+   the store and the code-sync indexer as well?
+2. **The ~25-line bound**: per panel, per tool function, or a soft target?
+   Is the panel the tool's *interface* (signatures + docstrings, the body
+   elsewhere) or its whole implementation?
+3. **Which toolspaces**, beyond the four named, make "the full toolspace of
+   our app"? §4's grouping is a guess.
+4. **Who writes the tool panels when new tools are made "along the way"** --
+   the reader, an agent in the editor, or both -- and does a new tool enter
+   the graph the moment its cell runs?
+5. **Dataflow model**: marimo-style (dependencies inferred from names, cells
+   re-run when inputs change) or Jupyter-style (explicit kernel order, edges
+   drawn by hand)?
+6. **Models**: 186's three-model plan was declined for now (2026-11-16, 165).
+   Does 166 change that, or are the tool panels to be designed first, model
+   choice after?
+
+## 7. Next
+
+- Confirm §1's reading of 166 and answer §6.
+- Verify §5 against the projects' own documentation (web research, as 166 f
+  allows), and add what that research turns up.
+- Then: the complete, self-consistent 2D interface design for
+  notebook-kernel workflows with ~25-line tools -- stated against the
+  numbered rows it will add to `PLUGIN_PRD.md`.

@@ -5821,3 +5821,52 @@ open rows were waiting on:*
 - *D-2: should the in-memory trie gain the markdown level too?* -- **"Store
   only (Recommended)"**: "The store's five-part keys satisfy D-2; the
   in-memory trie keeps its shape (the markdown is a projection of it)".
+
+### 166. (2026-11-21) Only scanned code is projected; the codebase leaves the 3D layout; the toolspace as ~25-line code panels; the computation graph editor as a Python + markdown notebook for quantized agents
+
+*2026-11-21 (verbatim):*
+
+> Okay. One bound I'll put now is that only code obtained from scans to their artifacts from the browser are embedded in the projector. The codebase itself is removed entirely from our 3D layout, leaving only the most base interfaces as code tools (i.e. 25 lines or so of python showing the full capability of the overall toolspace, including interactions on things like the browser, scanned chunks with interactive structures, essentially the full toolspace of our app (db search, web search as two different 'tool panels' that are essentially code panels holding the base toolspace of the application, important for when we begin to build our own agents with the computation graph editor and want them to stay slim on context and maximal on capabilities with the handfuls of toolspaces they can handle in context at a time. That kind of idea is what we're going for in the computation graph editor and the 3D graph view: the ability to connect the app's tools as ultra slim and form fit artifacts that quantized local agents can understand and interact with on a per-artifact basis. This links code compilation and markdown together as one computation graph unit to make the most of quantized language model input and output formats that include their own code artifacts on input and output. To this end, let's greatly refine in design docs and architecture the computation graph editor as a general python and markdown notebook cell interface that enables lightweight and modules composition of python programs that then become quantized agentic workflows using the app's tools and new tools as they are created along the way. Have a look at some context and begin thinking about how we should be consolidate our design specifications and plans, documenting everything precisely and carefully with our existing verbatim transcripts. See: "C:\Users\isaac\Downloads\duck.ai_2026-11-21_19-11-36.txt". We will then use these specs, plans, and perhaps searching the web for more info as well to then inform a much more complete and self-consistent 2D computation graph interface design for nodebook kernel style workflows with bite-sized 25-line tools for quantized language models.
+
+*The reader's own prompts in the cited duck.ai session (2026-11-21, 18:41-18:46),
+verbatim; the model's answers are reference material, not authority, and are
+summarised in `docs/COMPUTATION_GRAPH_EDITOR_SPEC.md`:*
+
+> computation graph editor user interface
+
+> how about for graph editors that support both code and markdown, as well as complex computation graph compilation over python objects and methods?
+
+> are there MIT alternatives to typeflow?
+
+> tell me more about marimo and jupyterlab?
+
+*Same day, in the question dialog:* "Relaunch, keep going (Recommended)" --
+relaunch Obsidian with the debug port, minimised, on its current workspace,
+and finish the open live work.
+
+*Read as (166) -- this is a reading, to be confirmed:*
+*(a) the projector embeds ONLY code that arrived by scanning a page in the
+browser (code shown on the web, captured as chunks); the repository's own
+source (`code://plugin/...`, `code://pypi/...`, `code://repo/...`) is removed
+from the 3D layout entirely;*
+*(b) in its place, a handful of BASE TOOL PANELS: code panels of roughly 25
+lines of Python each that show the whole capability of one toolspace -- db
+search and web search named as two distinct panels; the browser and scanned
+chunks with their interactive structures also named as toolspace to cover;*
+*(c) the purpose: agents built in the computation graph editor stay slim on
+context and maximal on capability, holding a few such toolspaces in context
+at once; each tool is an artifact a quantized local model can read and act on
+by itself;*
+*(d) code and markdown form ONE computation-graph unit, because a quantized
+model's inputs and outputs carry their own code artifacts;*
+*(e) the computation graph editor is to be refined in design docs and
+architecture as a general Python + markdown notebook-cell interface:
+lightweight, modular composition of Python programs that become quantized
+agentic workflows over the app's tools and the new tools made along the way;*
+*(f) first step: consolidate the design specifications and plans, precisely,
+against the existing verbatim transcripts; then (later) use them, plus web
+research, to produce a complete, self-consistent 2D computation graph
+interface design for notebook-kernel-style workflows with bite-sized ~25-line
+tools for quantized models.*
+*Open questions this reading cannot settle are listed in the spec's §Open.*
+
