@@ -5874,6 +5874,20 @@ class _Handler(BaseHTTPRequestHandler):
             params = parse_qs(parts.query)
             pattern = (params.get("pattern") or [""])[0]
             name = (params.get("name") or ["Item"])[0]
+            if (params.get("mine") or [""])[0]:
+                # G-388: the patterns themselves, mined from every address
+                # row -- a record root repeating on 2+ pages with a shared
+                # shape. Reads the trie's addresses; writes nothing.
+                t0 = time.time()
+                rows = self.workspace.store._rows(
+                    "MATCH (a:Address) RETURN a.url, a.xpath, a.accessor, a.value LIMIT 400000", {})
+                t1 = time.time()
+                types = _tg.mine(rows, min_pages=int((params.get("min_pages") or ["2"])[0]),
+                                 limit=int((params.get("limit") or ["50"])[0]))
+                self._send(200, {"rows": len(rows), "types": types,
+                                 "ms_read": round(1000 * (t1 - t0), 1),
+                                 "ms_mine": round(1000 * (time.time() - t1), 1)})
+                return
             if not pattern.startswith("/"):
                 self._send(400, {"error": "pattern must be an xpath, e.g. /html/body/main/article[*]"})
                 return
