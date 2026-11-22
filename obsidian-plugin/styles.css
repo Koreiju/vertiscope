@@ -1449,3 +1449,43 @@ body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) 
 .domvec-browse-hit-host { color: var(--text-faint); font-size: 10px; }
 .domvec-browse-trace { margin: 2px 0 0 10px; color: var(--text-muted); font-size: 11px; }
 .domvec-browse-step { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ONE chat interface (PLUGIN_GOAL 182, G-394): speaker rows, typed blocks,
+   a clear input box. The note behind it is hidden; the note IS its state. */
+.domvec-plane-card.is-chat { width: min(460px, 60%); }
+.domvec-plane-card.is-chat > .workspace-leaf { display: none; }
+/* The typed-rows strip (G-322) reads ONE code cell's names; on a conversation
+   it floated the first block's `graph = nx.Graph()` above the turns, out of
+   context (the reader, 2026-11-22: "Suspicious artifact"). In a chat the
+   blocks ARE the typed artifacts (182), each with its own tools. */
+.domvec-plane-card.is-chat > .domvec-rows { display: none; }
+/* It FILLS its card: the card's height is the panel's (G-326, a reader's
+   resize); a fixed height let the card's flex column squeeze it to 28 px,
+   the log scrolled inside a sliver (2026-11-22, seen in the app). */
+.domvec-plane-card.is-chat { min-height: 300px; height: min(520px, 62vh); }
+.domvec-chatui { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; background: #16161c; color: #ddd; font-size: 13px; }
+.domvec-chatui-log { min-height: 120px; }
+.domvec-chatui-log { flex: 1; overflow-y: auto; padding: 8px 10px; }
+.domvec-chatui-empty { color: #888; font-style: italic; padding: 16px 4px; }
+.domvec-chatui-turn { margin: 4px 0 12px; }
+.domvec-chatui-who { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-weight: 600; }
+.domvec-chatui-avatar { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; background: #2a2a36; }
+.domvec-chatui-turn.is-you .domvec-chatui-name { color: #c792ea; }
+.domvec-chatui-turn.is-model .domvec-chatui-name { color: #b48ef0; }
+.domvec-chatui-turn.is-you .domvec-chatui-block.is-prose { background: #22222c; border-radius: 6px; padding: 6px 10px; }
+.domvec-chatui-block { position: relative; margin: 4px 0; border-radius: 6px; user-select: text; }
+.domvec-chatui-block p { margin: 0.2em 0; }
+.domvec-chatui-block[data-address]:hover { box-shadow: 0 0 0 1px #3a3a4a; }
+.domvec-chatui-block.is-armed { box-shadow: 0 0 0 2px #7aa2f7; cursor: grabbing; }
+.domvec-chatui-block.is-code { background: #0e0e12; border: 1px solid #2a2a36; overflow: hidden; }
+.domvec-chatui-codehead { display: flex; justify-content: space-between; padding: 3px 10px; background: #1f1f28; color: #aaa; font-size: 11px; }
+.domvec-chatui-copy { cursor: pointer; opacity: 0.7; }
+.domvec-chatui-copy:hover { opacity: 1; }
+.domvec-chatui-codebody pre { margin: 0 !important; background: transparent !important; }
+.domvec-chatui-inputbox { display: flex; align-items: flex-end; gap: 6px; margin: 6px 8px 8px; padding: 6px 8px; border: 1px solid #3a3a4a; border-radius: 8px; background: #1c1c24; }
+.domvec-chatui-input { flex: 1; resize: none; border: none !important; background: transparent !important; color: #eee; font-size: 13px; min-height: 22px; max-height: 160px; box-shadow: none !important; }
+.domvec-chatui-send { cursor: pointer; color: #999; padding: 2px 4px; }
+.domvec-chatui-send:hover { color: #fff; }
+.domvec-chatui.is-busy .domvec-chatui-send { opacity: 0.3; pointer-events: none; }
+.domvec-chatui-ghost { position: fixed; z-index: 9999; pointer-events: none; max-width: 320px; white-space: pre; overflow: hidden; font: 11px var(--font-monospace); background: #0e0e12; color: #ccc; border: 1px solid #7aa2f7; border-radius: 4px; padding: 4px 6px; opacity: 0.9; }
+body.domvec-chatui-pulling, body.domvec-chatui-pulling * { user-select: none !important; cursor: grabbing !important; }

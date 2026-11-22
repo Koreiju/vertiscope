@@ -12069,6 +12069,130 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-394",
+      asks: "ONE chat interface, as a chat (PLUGIN_GOAL 182): a conversation note (`domvec: chat`) on the plane draws as speaker rows (You / the model's name), typed blocks -- prose, and each ```language block under a header naming its language -- above a clear input box; a prompt sent from that box appends `## You` and `## <model>` turns to the NOTE (the note is the state); each block carries its address (turn, block); a CLICK and a click-DRAG on a block stay the editor's (182: 'shouldn't block basic clicks for a text cursor ... click and hold with a debounce') and pull nothing; a press HELD on lines selected inside a code block, dragged off the conversation, pulls exactly those lines out as their own code panel at the drop point, its frontmatter naming the address with the line range; planted plantNoDebounce: a click-drag pulls; planted plantNoPieces: blocks carry no address; a code block in a turn has the SAME tools as any code cell -- run, terminal, open, unnest (182, 'the same for both chat and generally') -- and run on a block the model REPEATED stores its output after that fence, not the first copy; the pulled piece has them too; planted plantNoLine: the block carries no fence line and the repeated block's run is not stored there",
+      async run() {
+        const arm = (plant) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const tok = Date.now().toString(36), path = "domvec/graph/g394 chat " + tok + ".md";
+          const code = ["def add(a, b):", "    total = a + b", "    print(total)", "    return total", "", "add(20, " + (Date.now() % 1000) + ")"];
+          const seed = ["---", "domvec: chat", "---", "", "## You", "", "add two numbers", "", "## Nous Hermes 2 Mistral DPO", "",
+                        "Here is a function:", "", F + "python", ...code, F, "", "It prints and returns the sum.", "",
+                        "## You", "", "again", "", "## Nous Hermes 2 Mistral DPO", "", F + "python", ...code, F, ""].join(NL);
+          const UI = d.chats.constructor && null;
+          const made = [];
+          const out = { plant: ${JSON.stringify("PLANT")} };
+          let ChatUI = null;
+          try {
+            await d.create("notebook", { path, text: seed });
+            for (let i = 0; i < 40 && !d.chats.get(path); i++) await sleep(100);
+            const ui = d.chats.get(path);
+            if (!ui) return { error: "no chat interface mounted" };
+            ChatUI = ui.constructor;
+            ChatUI.plantNoDebounce = out.plant === "debounce";
+            ChatUI.plantNoPieces = out.plant === "pieces";
+            ChatUI.plantNoLine = out.plant === "line";
+            await ui.render();
+            const el = ui.el;
+            out.input_box = !!el.querySelector(".domvec-chatui-inputbox textarea") && !!el.querySelector(".domvec-chatui-send");
+            out.names = [...el.querySelectorAll(".domvec-chatui-name")].map((x) => x.textContent);
+            out.lang_head = (el.querySelector(".domvec-chatui-block.is-code .domvec-chatui-lang") || {}).textContent || "";
+            out.highlighted = !!el.querySelector(".domvec-chatui-block.is-code pre code");
+            const blocks = [...el.querySelectorAll(".domvec-chatui-block")];
+            out.blocks = blocks.map((b) => (b.dataset.kind || "?") + ":" + (b.dataset.address || "").split("#")[1]);
+            const cb = el.querySelector(".domvec-chatui-block.is-code");
+            const r0 = cb.getBoundingClientRect(), cx = r0.left + 30, cy = r0.top + 30;
+            const pe = (type, x, y) => (type === "pointerdown" ? cb : window).dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, button: 0, bubbles: true, pointerId: 1 }));
+            const pulledBefore = d.pullStats.pulled;
+            // A CLICK: down, up at once.
+            pe("pointerdown", cx, cy); await sleep(60); pe("pointerup", cx, cy); await sleep(60);
+            // A click-DRAG (a selection): down, move away at once, up outside the chat.
+            const outside = { x: el.getBoundingClientRect().left - 80, y: cy };
+            pe("pointerdown", cx, cy); await sleep(30); pe("pointermove", cx + 30, cy); pe("pointermove", outside.x, outside.y); await sleep(30); pe("pointerup", outside.x, outside.y);
+            for (let i = 0; i < 30 && d.pullStats.pulled === pulledBefore; i++) await sleep(100);   // a pull, if one began, lands
+            out.click_and_drag_pulled = d.pullStats.pulled - pulledBefore;
+            out.hold = { ...ui.holdStats };
+            // Select lines 2-3 inside the rendered code, then HOLD and drag them off.
+            const codeEl = cb.querySelector("pre code") || cb.querySelector("pre");
+            const want = code[1] + NL + code[2];
+            const walk = document.createTreeWalker(codeEl, NodeFilter.SHOW_TEXT);
+            const nodes = []; let all = ""; for (let n = walk.nextNode(); n; n = walk.nextNode()) { nodes.push([n, all.length]); all += n.textContent; }
+            const at = all.indexOf(want), end = at + want.length;
+            const pos = (o) => { for (let i = nodes.length - 1; i >= 0; i--) if (nodes[i][1] <= o) return [nodes[i][0], o - nodes[i][1]]; };
+            const rg = document.createRange(); const [sn, so] = pos(at), [en, eo] = pos(end);
+            rg.setStart(sn, so); rg.setEnd(en, eo);
+            const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(rg);
+            out.selected = sel.toString() === want;
+            const pr0 = d.host.plane().getBoundingClientRect(), cr0 = el.getBoundingClientRect(); const drop = { x: cr0.left - pr0.left > 340 ? cr0.left - 320 : cr0.right + 20, y: r0.top + 40 }; out.drop_on_plane = drop.x > pr0.left && drop.x + 300 < pr0.right;
+            pe("pointerdown", cx, cy); await sleep(ChatUI.HOLD_MS + 150); pe("pointermove", cx + 20, cy); pe("pointermove", drop.x, drop.y); pe("pointerup", drop.x, drop.y);
+            for (let i = 0; i < 40 && d.pullStats.pulled === pulledBefore + out.click_and_drag_pulled; i++) await sleep(100);
+            const last = d.pullStats.last;
+            out.held_pulled = d.pullStats.pulled - pulledBefore - out.click_and_drag_pulled;
+            if (last && out.held_pulled) {
+              made.push(last.path);
+              const f = app.vault.getAbstractFileByPath(last.path);
+              const txt = f ? await app.vault.read(f) : "";
+              out.pulled = { address: last.address, lines: last.lines, kind: last.kind,
+                             body_is_lines: txt.includes(F + "python" + NL + want + NL + F), from_in_frontmatter: txt.includes("from: " + JSON.stringify(last.address)) };
+              const c = d.panelOf(last.path)?.card, pr = window.__domvecPlane && d.host.plane().getBoundingClientRect();
+              out.pulled.at_drop = c && pr ? Math.abs(c.getBoundingClientRect().left - drop.x) < 60 : false;
+            }
+            for (const m of d.pullStats ? [] : []) {}
+            // The SAME tools as any code cell (182), on the model's REPEATED block:
+            // run must land its output after THAT fence, not the first copy.
+            const second = [...el.querySelectorAll(".domvec-chatui-block.is-code")][1];
+            out.tools = second ? ["domvec-run-fence", "domvec-term-fence", "domvec-open-fence", "domvec-unnest-fence"].filter((c) => second.querySelector("." + c)) : [];
+            if (out.plant === "none" || out.plant === "line") {
+              const before = await app.vault.read(app.vault.getAbstractFileByPath(path));
+              second?.querySelector(".domvec-run-fence")?.click();
+              let txt = before;
+              for (let i = 0; i < 100 && txt === before; i++) { await sleep(200); txt = await app.vault.read(app.vault.getAbstractFileByPath(path)); }
+              const L = txt.split(NL), fences = L.map((l, i) => l === F + "python" ? i : -1).filter((i) => i >= 0);
+              const after = (i) => { const close = L.indexOf(F, i + 1); return L.slice(close + 1, close + 4).join(NL); };
+              out.run = { stored: txt !== before, first_has_output: fences.length > 0 && after(fences[0]).includes("nb-output"),
+                          second_has_output: fences.length > 1 && after(fences[1]).includes("nb-output"), want: String(20 + (Number(code[5].slice(8, -1)))),
+                          printed: txt.includes(NL + String(20 + Number(code[5].slice(8, -1))) + NL) };
+              await sleep(600);
+            }
+            // The pulled piece is a code cell like any other: the same tools.
+            if (made.length) { const pc = d.panelOf(made[0])?.card; out.pulled_tools = pc ? ["domvec-run-fence", "domvec-term-fence"].filter((c) => pc.querySelector("." + c)).length : 0; }
+            // The input box: a REAL prompt to the model, its turns into the note.
+            if (out.plant === "none") {
+              ui.input.value = "Reply with one short sentence: what is 2 + 2?";
+              const reply = await ui.ask();
+              const txt = await app.vault.read(app.vault.getAbstractFileByPath(path));
+              const heads = txt.split(NL).filter((l) => l.startsWith("## "));
+              out.ask = { reply_chars: reply.length, heads, turns_drawn: el.querySelectorAll(".domvec-chatui-turn").length, error: ui.stats.last_error };
+            }
+          } finally {
+            if (ChatUI) { ChatUI.plantNoDebounce = false; ChatUI.plantNoPieces = false; ChatUI.plantNoLine = false; }
+            for (const q of [path, ...made]) {
+              try { d.panelOf(q)?.leaf.detach(); } catch (e) {}
+              for (let k = 0; k < 3; k++) { await sleep(800); const f = app.vault.getAbstractFileByPath(q); if (!f) break; await app.vault.trash(f, true); }
+            }
+          }
+          return out;
+        })()`.replace("PLANT", plant), { timeout: 300000 });
+        const clean = await arm("none"), debounce = await arm("debounce"), pieces = await arm("pieces"), line = await arm("line");
+        const c = clean, pu = c.pulled || {};
+        const pass = !c.error && c.input_box && c.lang_head === "python" && c.highlighted
+          && JSON.stringify(c.names) === JSON.stringify(["You", "Nous Hermes 2 Mistral DPO", "You", "Nous Hermes 2 Mistral DPO"])
+          && c.blocks.join(",") === "prose:turn1/block1,prose:turn2/block1,code:turn2/block2,prose:turn2/block3,prose:turn3/block1,code:turn4/block1"
+          && c.tools.length === 4 && c.pulled_tools === 2
+          && c.run && c.run.second_has_output && !c.run.first_has_output && c.run.printed
+          && line.run && !line.run.second_has_output
+          && c.click_and_drag_pulled === 0 && c.hold.clicks >= 1 && c.hold.cancelled_by_move >= 1
+          && c.selected && c.held_pulled === 1 && pu.kind === "code" && JSON.stringify(pu.lines) === "[2,3]"
+          && /#turn2\/block2\/L2-3$/.test(pu.address || "") && pu.body_is_lines && pu.from_in_frontmatter && c.drop_on_plane && pu.at_drop
+          && c.ask && c.ask.reply_chars > 0 && c.ask.turns_drawn === 6
+          && c.ask.heads.join("|") === "## You|## Nous Hermes 2 Mistral DPO|## You|## Nous Hermes 2 Mistral DPO|## You|## Nous Hermes 2 Mistral DPO"
+          && debounce.click_and_drag_pulled >= 1
+          && (pieces.blocks || []).every((b) => b.endsWith(":undefined"));
+        return { pass, evidence: { clean, debounce, pieces, line } };
+      },
+    },
+    {
       id: "G-237",
       asks: "the typed-decision role, jev, from a kernel cell (PLUGIN_GOAL 166, 179 'Per role', 181): run_role('jev', state=..., questions=...) reads OpenJev's first-position logits through llama-cpp-python and returns each question's calibrated distribution over ITS options -- a checkout page's 'which completes the purchase' picks Place order, 'is there a coupon field' is yes, and the job is a run of model://jev; planted jev-letter-shift: the readout scores the next letter and the choice moves off Place order",
       async run() {

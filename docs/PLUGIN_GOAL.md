@@ -6281,3 +6281,46 @@ syntax colouring; and below THAT, a few lines cut out of the block
 (`friend1, friend2 = request.json['users']` ... `graph.add_edge(friend1,
 friend2)`) shown on their own -- a typed chunk pulled out of the code, joined
 to the block it came from.*
+
+*Three questions on 182, the reader's answers (verbatim, the options chosen):*
+
+- *Which graph view form goes -- the 3D craft's circles, the 2D slate's
+  graph-form toggle (G-281), or both?* -- **"Both (Recommended)"**: "Retire
+  the slate's graph-form toggle and draw the 3D craft's nodes as small live
+  renderings of the artifacts (a code block looks like code, a prompt like a
+  prompt), links kept between them. The circles stay only as a
+  level-of-detail fallback when the camera is too far to read anything."
+- *One chat interface for the browser strip, the notebook chat and the plane's
+  chat note?* -- **"One component, three hosts (Recommended)"**: "One chat
+  panel drawn the same everywhere, each host supplying its own context
+  (pinned web chunks, the rewound cells, the magnetized panels). A
+  conversation is one note holding its turns; each turn's prompt, prose and
+  each code block are addressable chunks of that note."
+- *How is a typed piece pulled out of a chat turn?* -- **"Select + drag
+  (Recommended)"**: "Hover shows each block's grain (turn, paragraph, code
+  block, line range); drag a block, or a selected range of lines, off the
+  conversation onto the plane and it becomes its own typed panel, linked back
+  to its source address and usable in retrieval and dependency graphs."
+
+*The reader, after the answers (verbatim):*
+
+> note also that pulling and physically manipulating panels shouldn't block
+> basic clicks for a text cursor etc for straightforward editing. Click and
+> hold with a debounce would be the difference.
+
+*Read as: a click places the cursor and a click-drag selects text, exactly as
+in any editor; only a press HELD STILL past a debounce picks a piece up to
+pull it -- moving before the debounce is a selection, never a pull.*
+
+*The reader, after G-394's first live run (verbatim), with a screenshot of a
+pulled code panel showing its toolbar -- run, terminal, open, unnest -- over
+the two pulled lines:*
+
+> Note that code artifacts must also see interactive kernel/command terminal
+> capabilities, and they must be the same for both chat and generally
+> wherever found or created.
+
+*Read as: one code artifact, one set of tools -- the run (kernel), terminal,
+open and unnest a code cell has are the SAME on a code block inside a chat
+turn, on a piece pulled out of it, and on any code block wherever it is found
+or created; never a reduced chat-only copy.*

@@ -30,6 +30,7 @@ import { App, MarkdownView, TFile } from "obsidian";
 import { chunkNoteState, clampToPlane, makeDraggable, type PlaceStats } from "./planecard";
 import { edgeResizable } from "./edgeresize";
 import { isSlate, COCKPIT_PATH } from "./cockpit";
+import { ChatUI, type Piece } from "./chatui";
 
 export interface PlaneHost {
   /** The plane over the 3D view, when a graph is open. */
@@ -259,11 +260,13 @@ export class PlaneDesk {
     this.stats.created++;
     // A new note's frontmatter is not cached yet: a terminal is known by its text.
     if (text === TERMINAL_TEXT) return this.open(f, { mount: (c) => this.terminalMount(c) });
+    if (/^---\r?\ndomvec: chat\r?\n/.test(text)) return this.open(f, { mount: (c) => this.chatMount(c, f) });
     return this.open(f);
   }
 
   /** A note as a panel on the plane: the card it already has, or a new one. */
   async open(file: TFile, opts: { line?: number; leaf?: any; state?: any;
+                                  at?: { x: number; y: number } | null;
                                   mount?: (card: HTMLElement) => Promise<(() => void) | void> } = {}): Promise<any> {
     const plane = this.host.plane();
     if (this.plantOwnView || !plane) {
@@ -321,7 +324,8 @@ export class PlaneDesk {
         tool("ask ▸", "is-ask", () => { void this.askChat(file.path); });
         const askEl = head.querySelector(".is-ask") as HTMLElement;
         const isChat = () => String(this.app.metadataCache.getFileCache(file)?.frontmatter?.domvec || "") === "chat";
-        const paintAsk = () => { askEl.style.display = isChat() ? "" : "none"; };
+        // A chat note drawn as the chat interface (G-394) asks from its own input box.
+        const paintAsk = () => { askEl.style.display = isChat() && !card.classList.contains("is-chat") ? "" : "none"; };
         paintAsk();
         const ref = this.app.metadataCache.on("changed", (f: TFile) => { if (f.path === file.path) paintAsk(); });
         window.setTimeout(paintAsk, 600);
@@ -365,7 +369,8 @@ export class PlaneDesk {
       // booting for seconds once hid the panel itself (G-300).
       this.panels.push(p);
       this.hook(p);
-      const mount = opts.mount || (this.isTerminal(file) ? (c: HTMLElement) => this.terminalMount(c, Leaf) : undefined);
+      const mount = opts.mount || (this.isTerminal(file) ? (c: HTMLElement) => this.terminalMount(c, Leaf)
+                                   : this.isChatNote(file) ? (c: HTMLElement) => this.chatMount(c, file) : undefined);
       if (mount) { const pp = p; const undo = await mount(card); if (undo) pp.cleanup = undo; clampToPlane(card, plane); }
       const path = file.path;
       // Ctrl+= / Ctrl+- (and Ctrl+0) resize THIS panel (PLUGIN_GOAL 133),
@@ -723,6 +728,75 @@ export class PlaneDesk {
     return false;
   }
   terminalStats = { mounted: 0 };
+
+  /** A conversation note (`domvec: chat`), drawn as the ONE chat interface
+   *  (PLUGIN_GOAL 182, G-394): its turns from the note, a clear input box,
+   *  its context the panels magnetized to it (134), a piece pulled out of
+   *  it landing as its own panel where it is dropped. */
+  isChatNote(file: TFile): boolean {
+    return String(this.app.metadataCache.getFileCache(file)?.frontmatter?.domvec || "") === "chat";
+  }
+  chats = new Map<string, ChatUI>();
+  /** L-1: the chat role of the one model table (`models.ROLES["chat"]`). */
+  static CHAT_MODEL = "Nous Hermes 2 Mistral DPO";
+  private async chatMount(card: HTMLElement, file: TFile): Promise<() => void> {
+    card.addClass("is-chat");
+    const ui = new ChatUI(this.app, file, {
+      model: () => String(this.app.metadataCache.getFileCache(file)?.frontmatter?.model || PlaneDesk.CHAT_MODEL),
+      context: () => this.chatContext(file.path),
+      stream: (p, ctx, on) => this.host.chatStream ? this.host.chatStream(p, ctx, on) : Promise.reject(new Error("no sidecar chat")),
+      pullOut: (piece, at) => this.pullPiece(file.path, piece, at),
+    }, card);
+    this.chats.set(file.path, ui);
+    const ref = this.app.vault.on("modify", (f) => { if (f.path === file.path && !ui.busy) void ui.render(); });
+    return () => { this.app.vault.offref(ref); ui.destroy(); this.chats.delete(file.path); };
+  }
+
+  /** The context of a chat at `path`: the panels magnetized to it, in
+   *  compilation order, then the rest -- truncated to a budget (134, 142). */
+  async chatContext(path: string): Promise<string[]> {
+    const strip = (t: string) => t.replace(/^---[\s\S]*?---\s*/, "").trim();
+    const ctx: string[] = [];
+    let budget = 6000;
+    const order = this.compileOrder(path).filter((q) => q !== path);
+    const rest = this.magnetized(path).filter((q) => !order.includes(q));
+    this.chatStats.order = order.slice();
+    for (const q of [...order, ...rest]) {
+      const g = this.app.vault.getAbstractFileByPath(q) as TFile | null;
+      if (!g || budget <= 0) continue;
+      const t = strip(await this.app.vault.read(g)).slice(0, budget);
+      if (t) { ctx.push(t); budget -= t.length; }
+    }
+    this.chatStats.asks++; this.chatStats.context_cells = ctx.length;
+    return ctx;
+  }
+
+  /** A piece pulled out of a conversation (182): its own note, typed by
+   *  what it is (a code block a code cell, prose a markdown panel), its
+   *  frontmatter naming the address it came from, opened where it was
+   *  dropped. Being a vault note it is retrieved and linked like any other. */
+  pullStats = { pulled: 0, last: null as any };
+  async pullPiece(from: string, piece: Piece, at: { x: number; y: number }): Promise<string> {
+    const NL = String.fromCharCode(10), BT = String.fromCharCode(96).repeat(3);
+    const dir = from.includes("/") ? from.slice(0, from.lastIndexOf("/")) : PLANE_FOLDER;
+    const base = from.slice(from.lastIndexOf("/") + 1).replace(/\.md$/, "");
+    const tag = piece.address.slice(piece.address.indexOf("#") + 1).replace(/\//g, " ");
+    let path = "";
+    for (let i = 1; ; i++) { path = `${dir}/${base} ${tag}${i > 1 ? " " + i : ""}.md`; if (!this.app.vault.getAbstractFileByPath(path)) break; }
+    const body = piece.kind === "code" ? [BT + piece.lang, piece.text, BT] : [piece.text];
+    const text = ["---", "domvec: " + (piece.kind === "code" ? "code-output" : "piece"), "from: " + JSON.stringify(piece.address), "---", "", ...body, ""].join(NL);
+    await this.create("notebook", { path, text });
+    const c = this.panelOf(path)?.card, plane = this.host.plane();
+    if (c && plane) {
+      const r = plane.getBoundingClientRect();
+      c.style.right = "auto";
+      c.style.left = `${Math.round(at.x - r.left)}px`;
+      c.style.top = `${Math.round(at.y - r.top)}px`;
+      clampToPlane(c, plane);
+    }
+    this.pullStats.pulled++; this.pullStats.last = { path, address: piece.address, kind: piece.kind, lines: piece.lines || null };
+    return path;
+  }
   /** A terminal cell: its note on top (what it is for), a live PowerShell
    *  session beneath, in the same card -- so it snaps like any cell. */
   private async terminalMount(card: HTMLElement, Leaf?: any): Promise<() => void> {

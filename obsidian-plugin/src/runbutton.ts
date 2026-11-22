@@ -164,7 +164,13 @@ export function readingViewRunButtons(host: RunHost) {
         // Reading view knows the section, not the line. `getSectionInfo` gives
         // the real line when it can; -1 says "unknown" rather than guessing 0,
         // which would make every unknown cell collide on the first one.
-        line: ctx.getSectionInfo(pre)?.lineStart ?? -1,
+        // A block drawn by the chat interface (G-394) is rendered detached,
+        // so Obsidian knows no section; the interface wrote the fence's line
+        // in the conversation note on the block -- the same cell identity a
+        // note gives, so the same tools act on the same cell (182).
+        line: ctx.getSectionInfo(pre)?.lineStart
+          ?? (Number((pre.closest(".domvec-chatui-block") as HTMLElement | null)?.dataset.line ?? NaN) >= 0
+              ? Number((pre.closest(".domvec-chatui-block") as HTMLElement).dataset.line) : -1),
         path: ctx.sourcePath || "",
       });
       pre.appendChild(runButton(el.ownerDocument, () => host.onRunFence(req())));
