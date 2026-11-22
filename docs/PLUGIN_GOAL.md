@@ -6104,3 +6104,52 @@ defect may be fixed inside the reader's uncommitted browser.ts / graph.ts,
 only the lines needed, staged as separate hunks; (c) vault:// pages whose
 note no longer exists are purged from the store; (d) G-237 stays Open, no
 model downloads.*
+
+### 177. (2026-11-22) G-205's four questions; the domain scope opens PageRank's hierarchy
+
+*Asked in the question dialog (2026-11-22), on `docs/BROWSER_CENTROID_DESIGN.md`
+draft 1:*
+
+- *"at most one tool call" -- which reading?* -- **"One tool, many args
+  (Recommended)"**: "browse(query, scope, down, up, act): every move is the
+  same call with different arguments, returning one retrieval artifact."
+- *When an agent goes 'down' into a result's page trace, which browser should
+  it drive?* -- **"My browser cell"**: "The agent drives the same browser cell
+  you see, so you watch every step."
+- *For the 'domain' retrieval scope (between web and in-page), what is a
+  domain?* -- the reader's own words (verbatim):
+
+> Here's how we'll approach retrieval for the "domains":
+>
+> all three options are used hierarchically. but my worry here is that we're
+> ignoring this aspect and a more corrected treatment of how our pagerank
+> algorithm incorporates these kinds of hierarchical links. what we're
+> currently seeing is noise in our results because our dual embedding
+> similarity score might be impeded by a poorly designed linking structure over
+> the general patricia trie. my worry though is that you also misinterpret our
+> dual embedding similarity with a layout cluster's spatial distances as an
+> adequate similarity. The difference is in where the two components come
+> from. please do dedicate a substantial and proper session on this component
+> and correcting on this direction.
+
+- *Should a retrieval artifact persist?* -- **"Session only"**: "Lives while
+  the session does, then is gone."
+
+*The reader, next message (2026-11-22, verbatim):*
+
+> so the dual embedding similarity aspect is what the "cluster" label confuses
+
+*That is: the question's third option, "a layout cluster" ("the url nodes the 3D layout groups together"), was the misreading 177's worry names. The third level of the domain hierarchy is SIMILARITY IN THE DUAL EMBEDDING -- the frequency vector and the semantic vector, the two factors the ranking already multiplies -- not proximity in the UMAP layout, which is a projection of that space and not the space.*
+
+*Read as (177) -- a reading, to be confirmed:*
+*(a) `browse` is ONE tool whose arguments are the moves; (b) `down` drives the
+reader's own browser cell; (c) the domain scope is HIERARCHICAL -- exact host,
+registrable domain and a dual-embedding similarity group (NOT a
+layout cluster) are all used, as levels; (d) the
+artifact lives for the session only; (e) a DIRECTION, before more of G-205 is
+built: a dedicated session on how PageRank treats hierarchical links over the
+patricia trie, because a poorly designed link structure is suspected of adding
+noise that impedes the dual embedding similarity; and the dual embedding
+similarity must not be mistaken for a layout cluster's spatial distance --
+the two come from different places (the embeddings from the encoder and the
+frequency vectors; the layout from the UMAP fit over them).*
