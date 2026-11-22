@@ -1250,6 +1250,8 @@ PLANT_NO_PLUGIN_SOURCE = [False]
 PLANT_CODE_SYNC = [False]
 #: Planted: the `/package` route indexes this repository and installed packages again (G-375 closed it).
 PLANT_PACKAGE_ROUTE = [False]
+#: Planted: the chat cell streams through GPT4All again, ungated (G-385 moved it to llama.cpp on CUDA).
+PLANT_CHAT_GPT4ALL = [False]
 
 
 def _sync_code(workspace, *, limit: Optional[int] = None, forget=()) -> Dict:
@@ -3517,12 +3519,16 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.end_headers()
             t_ask = time.time()
+            # G-385 (PLUGIN_GOAL 171): the same Hermes GGUF through llama.cpp on
+            # CUDA, holding the GPU gate while it streams. `engine: "gpt4all"`
+            # (or planted `PLANT_CHAT_GPT4ALL`) is the old path, kept as the arm.
+            engine = str(body.get("engine") or ("gpt4all" if PLANT_CHAT_GPT4ALL[0] else "cuda"))
             lock = nullcontext() if unlocked else _chat.GEN_LOCK
             with lock:
                 waited_ms = round((time.time() - t_ask) * 1000)
                 be = None
                 with _chat._GLOBAL:
-                    if _chat._BACKEND[0] is None and not dry_ms:
+                    if _chat._BACKEND[0] is None and not dry_ms and engine == "gpt4all":
                         _chat._BACKEND[0] = _chat.HermesBackend()
                     be = _chat._BACKEND[0]
                     if be is not None and not dry_ms:
@@ -3543,6 +3549,12 @@ class _Handler(BaseHTTPRequestHandler):
                                 t_first = time.time()
                             self.wfile.write(b"."); self.wfile.flush(); n += 1
                             time.sleep(0.05)
+                    elif engine == "cuda":
+                        from .. import chat_cuda as _cc
+                        for tok in _cc.stream(text, max_tokens=int(body.get("max_tokens") or 400)):
+                            if not n:
+                                t_first = time.time()
+                            self.wfile.write(tok.encode("utf-8")); self.wfile.flush(); n += 1
                     else:
                         m = be._load()
                         with m.chat_session(_chat.SYSTEM, _chat.TEMPLATE):
@@ -3562,7 +3574,9 @@ class _Handler(BaseHTTPRequestHandler):
             _profile("chat_stream", {"tokens": n, "context": len(context), "ms": round((time.time() - t0) * 1000),
                                      "first_ms": round((t_first - t0) * 1000) if t_first else None,
                                      "waited_ms": waited_ms, "in_flight": in_flight, "dry": bool(dry_ms), "unlocked": unlocked,
-                                     "loaded_on": getattr(be, "loaded_on", "") if be is not None else "", "prompt_chars": len(text),
+                                     "engine": engine,
+                                     "loaded_on": (getattr(be, "loaded_on", "") if be is not None else "") if engine != "cuda" else __import__("domvec.chat_cuda", fromlist=["x"]).loaded_on(),
+                                     "prompt_chars": len(text),
                                      "tok_s": round(n / max(1e-3, time.time() - t_first), 2) if t_first and n > 1 else None,
                                      "kept_torch_cache": keep, "vram_before": vram_before, "vram_after": _vram()})
             self.close_connection = True
