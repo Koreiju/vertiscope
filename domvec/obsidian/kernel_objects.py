@@ -215,7 +215,8 @@ if "browse" not in globals():
         browser cell at its address; `up=True` returns toward the query;
         `act={"address", "value"}` acts on a control in place. Returns the
         artifact; the cell's moves are carried out when this cell ends."""
-        body = {"query": query, "scope": scope, "of": of, "down": down, "up": bool(up), "act": act, "k": int(k)}
+        body = {"query": query, "scope": scope, "of": of, "down": down, "up": bool(up), "act": act, "k": int(k),
+                "caller": globals().get("_domvec_note") or "kernel"}
         req = _ur.Request(%(base)r + "/browse", data=_json.dumps(body).encode(),
                           headers={"content-type": "application/json"})
         try:

@@ -102,7 +102,7 @@ export class BrowseCard {
     this.stats.moves++;
     let got: any;
     try {
-      const r = await fetch(this.host.base() + "/browse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const r = await fetch(this.host.base() + "/browse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ caller: "plane://browse", ...body }) });
       got = await r.json();
       if (!r.ok) throw new Error(got?.error || String(r.status));
     } catch (e) {

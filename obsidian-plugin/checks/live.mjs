@@ -12069,6 +12069,49 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-391",
+      asks: "tool calls are runs of the dependency graph (THROUGH_STACK_SYNTHESIS 1c, PLUGIN_GOAL 180): a browse move is recorded as a Run keyed by its CALLER (line -1) whose inputs are its results, /inverse_map from a result finds it, and a kernel cell's focus ask is recorded under the cell's note with the chunk it named; planted no-call-runs: the same move records nothing",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge"), base = plugin.settings.sidecar.replace(/[/]+$/, "");
+          const post = async (path, body) => (await fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+          const runs = async (note) => ((await (await fetch(base + "/runs?note=" + encodeURIComponent(note))).json()).runs || []);
+          const tok = Date.now().toString(36);
+          const caller = "plane://g391-" + tok, callerP = "plane://g391p-" + tok;
+          const made = await post("/browse", { caller, query: "patricia trie", k: 5 });
+          const mine = await runs(caller);
+          const first = ((made.artifact || {}).results || [])[0] || {};
+          const inv = ((await (await fetch(base + "/inverse_map?cid=" + encodeURIComponent(first.cid || ""))).json()).runs || []).filter((r) => r.note === caller);
+          await post("/plant", { name: "no-call-runs", on: true });
+          try { await post("/browse", { caller: callerP, query: "patricia trie", k: 5 }); }
+          finally { await post("/plant", { name: "no-call-runs", on: false }); }
+          const planted = await runs(callerP);
+          // A kernel cell's ask, under the cell's note.
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const driver = "domvec/graph/g391 driver " + tok + ".md";
+          const code = ["r = focus(" + JSON.stringify(first.cid || "") + ")", "print('G391OK')"].join(NL);
+          let cellRuns = [];
+          try {
+            await d.create("notebook", { path: driver, text: F + "python" + NL + code + NL + F + NL });
+            await plugin.onRunFence({ lang: "python", code, line: 0, path: driver });
+            await sleep(500);
+            cellRuns = (await runs(driver)).filter((r) => r.line === -1);
+          } finally {
+            try { d.panelOf(driver)?.leaf.detach(); } catch (e) {}
+            for (let k = 0; k < 3; k++) { await sleep(2500); const f = app.vault.getAbstractFileByPath(driver); if (!f) break; await app.vault.trash(f, true); }
+          }
+          return { results: ((made.artifact || {}).results || []).length, run_id: made.run || null,
+                   runs: mine.map((r) => ({ line: r.line, inputs: r.inputs.length, code: String(r.code_hash) })),
+                   inverse_found: inv.length, planted_runs: planted.length,
+                   cell_call_runs: cellRuns.map((r) => ({ inputs: r.inputs.map((i) => i.name + ":" + i.cid) })) };
+        })()`, { timeout: 120000 });
+        return { pass: got.runs.length === 1 && got.runs[0].line === -1 && got.runs[0].inputs === got.results && got.results > 0
+                       && got.inverse_found === 1 && got.planted_runs === 0
+                       && got.cell_call_runs.length === 1 && got.cell_call_runs[0].inputs.length === 1, evidence: got };
+      },
+    },
+    {
       id: "G-205d",
       asks: "browse from a KERNEL CELL (G-205: one surface for the agent and the cell): a cell's browse(query, scope='domain', of) returns the artifact with its levels, browse(down=cid) moves the reader's own browser cell to that result's page when the cell ends, and two moves in one call are refused; planted plantNoToolAsks: the same cell makes the artifact but the browser cell does not move",
       async run() {

@@ -779,6 +779,7 @@ class DomvecMCP:
         `carryToolAsk` -- the same road a kernel cell's asks take -- so an
         agent and a cell drive the cell identically."""
         body = {k: args.get(k) for k in ("query", "scope", "of", "down", "up", "act", "k") if args.get(k) is not None}
+        body["caller"] = "mcp://browse"
         got = self.live().post("/browse", body)
         carried = []
         for ask in got.get("asks") or []:

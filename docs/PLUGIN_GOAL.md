@@ -6206,3 +6206,18 @@ replaces it -- a promise is a declared type plus a check cell; a query no tool
 answers is proposed to the reader, never constructed unasked; models are
 chosen per role once downloads are allowed, the on-disk Qwen2.5-Coder-7B
 until then.*
+
+### 180. (2026-11-22) Synthesize the deprecated design into the current one
+
+*The reader, after 179 (verbatim):*
+
+> Well, try synthesizing the themes and ideas from the design to our current
+> design to see if we can make use of any of the findings as interlaced with
+> existing APIs, whether ones we've documented or not.
+
+*Answered by `docs/THROUGH_STACK_SYNTHESIS.md` (b7c668f). Read as (180) -- a
+reading, to be confirmed: the through-stack's themes are to be realised, where
+they are useful, through the APIs that already exist rather than as a new
+subsystem; the synthesis ranks four uses, of which (1) -- every tool call a run
+of the dependency graph -- needs no decision and is taken first (G-391). The
+model table (2) waits on which file is "chat".*

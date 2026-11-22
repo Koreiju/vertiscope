@@ -552,6 +552,11 @@ def _model_job(workspace, jid: str, body: Dict) -> None:
                    s=round(time.time() - t0, 1))
     except Exception as exc:                        # noqa: BLE001
         job.update(state="error", error="%s: %s" % (type(exc).__name__, str(exc)[:200]), s=round(time.time() - t0, 1))
+    # The job as a run of `model://<role>` over the chunk it read (THROUGH_STACK_SYNTHESIS 1c).
+    record_call(workspace, "model://%s" % job.get("role"),
+                _call_text("run_role", {"role": job.get("role"), "cid": job.get("cid")}),
+                [("text", job.get("cid"))] if job.get("cid") else [], job.get("state") == "done",
+                str(job.get("error") or job.get("state")))
     _profile("model_run", {k: job.get(k) for k in ("role", "cid", "state", "s")})
 
 
@@ -945,6 +950,7 @@ _PLANTABLE = {
     "capture-load": ("domvec.obsidian.sidecar", "PLANT_CAPTURE_LOAD"),      # D-42 load
     "no-shape": ("domvec.typegen", "PLANT_NO_SHAPE"),                         # G-388: every repeat is a type
     "browse-host-only": ("domvec.browse", "PLANT_DOMAIN_HOST_ONLY"),          # G-205: the domain scope one level only
+    "no-call-runs": ("domvec.obsidian.sidecar", "PLANT_NO_CALL_RUNS"),       # synthesis 1c: tool calls leave no run
     "placeholder-target": ("domvec.markdown", "PLANT_PLACEHOLDER_TARGET"),   # G-197
     "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),
     "no-declump": ("domvec.obsidian.layout", "PLANT_NO_DECLUMP"),            # 137(6)
@@ -2191,6 +2197,33 @@ CODEGRAPH = {"graph": None, "ms": 0, "error": ""}
 #: What the browser cell in use shows, as the plugin last told it (G-279).
 BROWSER_STATE: dict = {"url": "", "title": "", "at": 0.0}
 
+#: Planted: tool calls leave no run -- only cell runs reach the dependency graph,
+#: as before THROUGH_STACK_SYNTHESIS item 1.
+PLANT_NO_CALL_RUNS = [False]
+
+
+def record_call(workspace, caller: str, call: str, inputs, ok: bool, output: str):
+    """A TOOL call as a run of the dependency graph (THROUGH_STACK_SYNTHESIS
+    1c, item 1): the same `Run` / `RunInput` a cell run writes (G-279), keyed
+    by its CALLER where a cell run is keyed by its note -- the cell's note when
+    a cell called, `mcp://<tool>` for an agent, `plane://<tool>` for a card,
+    `model://<role>` for a model job. Line -1 marks a call. Its inputs are the
+    chunks it read or acted on, so `/signal` draws it and `/inverse_map` finds
+    it from any of them. Returns the run id, or None when not recorded."""
+    if PLANT_NO_CALL_RUNS[0] or workspace is None or getattr(workspace, "read_only", False) or not caller:
+        return None
+    try:
+        with _WORK_LOCK:
+            return workspace.store.record_run(str(caller), -1, str(call), [(n, c) for n, c in inputs if c],
+                                              bool(ok), str(output or "")[:2000])
+    except Exception:                               # noqa: BLE001 -- a record never fails the call
+        return None
+
+
+def _call_text(name: str, args: dict) -> str:
+    return "%s(%s)" % (name, ", ".join("%s=%r" % (k, v) for k, v in args.items() if v not in (None, "", False)))
+
+
 #: G-205: the one retrieval artifact per sidecar -- session-only (177 d).
 BROWSE: dict = {"session": None}
 
@@ -3093,6 +3126,20 @@ class _Handler(BaseHTTPRequestHandler):
                         query=body.get("query"), scope=str(body.get("scope") or "web"), of=str(body.get("of") or ""),
                         down=body.get("down"), up=bool(body.get("up")), act=body.get("act"),
                         k=int(body.get("k") or 10))
+                # The move as a run: a query read its results; `down` and
+                # `act` acted on the result the cursor is in.
+                art = got.get("artifact") or {}
+                cur = art.get("cursor") or {}
+                if got.get("moved") == "query":
+                    ins = [("result%d" % (i + 1), h.get("cid")) for i, h in enumerate(art.get("results") or [])]
+                elif got.get("moved") in ("down", "act") and cur.get("cid"):
+                    ins = [(got["moved"], cur.get("cid"))]
+                else:
+                    ins = []
+                args = {k: body.get(k) for k in ("query", "scope", "of", "down", "up", "act", "k")}
+                got["run"] = record_call(self.workspace, str(body.get("caller") or "tool://browse"),
+                                         _call_text("browse", args), ins, True,
+                                         "moved %s, v%s" % (got.get("moved"), got.get("version")))
                 self._send(200, got)
             except (ValueError, KeyError) as exc:
                 self._send(400, {"error": str(exc)})
@@ -4140,6 +4187,8 @@ class _Handler(BaseHTTPRequestHandler):
                 from . import kernel_objects as _ko
                 port = self.server.server_address[1]
                 self.kernel_pool.run(note, _ko.boot("http://127.0.0.1:%d" % port))
+                # Who is calling, for the calls that record themselves (`browse`).
+                self.kernel_pool.run(note, "_domvec_note = %r" % note)
             # The vault facade (P-N4): `Vault`, and the note's folder as the
             # working directory. Only for a note's kernel, and only under a
             # vault root the plugin names that exists. Planted `PLANT_NO_VAULT`.
@@ -4196,6 +4245,17 @@ class _Handler(BaseHTTPRequestHandler):
                 asks = _ko.parse_asks(self.kernel_pool.run(note, _ko.DRAIN))
                 if asks:
                     reply = dict(reply, asks=asks)
+                    # Each ask a call of the cell's note (THROUGH_STACK_SYNTHESIS
+                    # 1c), with the chunk it names when it names one. A
+                    # `reveal` comes from `browse`, which recorded itself.
+                    for a in asks:
+                        if not isinstance(a, dict) or "reveal" in a:
+                            continue
+                        kind = next(iter(a), "")
+                        v = a.get(kind)
+                        cid = v if kind in ("focus", "attach") and isinstance(v, str) else None
+                        record_call(self.workspace, note, _call_text(kind, {"arg": v}),
+                                    [(kind, cid)] if cid else [], True, "asked")
         except Exception as exc:                    # noqa: BLE001
             self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
