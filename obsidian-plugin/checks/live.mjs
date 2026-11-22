@@ -266,8 +266,21 @@ export function makeChecks(env) {
     const itemCount = () => b.webview.executeJavaScript(
       "document.getElementById('items').children.length");
     const wasItems = await itemCount();
+    // What the click is aimed AT, measured in the guest: the element at the
+    // aim, and the scale between the webview's box and the guest's viewport
+    // (a zoomed or squeezed cell puts a viewport coordinate somewhere else).
+    const aimDiag = await b.webview.executeJavaScript(
+      "(function(){var e=document.elementFromPoint(" + at.x + "," + at.y + ");" +
+      "return {hit: e ? e.tagName + (e.id ? '#' + e.id : '') : null, dpr: window.devicePixelRatio};})()");
+    const wvRect = b.webview.getBoundingClientRect();
+    let zoom = null; try { zoom = b.webview.getZoomFactor(); } catch (e) {}
     for (const type of ["mouseDown", "mouseUp"]) {
-      b.webview.sendInputEvent({ type, x: at.x, y: at.y,
+      // sendInputEvent takes the WEBVIEW's coordinates; at is the guest's
+      // CSS viewport. A zoomed cell (0.408 in run 75: a 1,169 px page in a
+      // 523 px box) put the click 2.4x too far out -- off the button, which
+      // read for runs 66-74 as the page refusing to mutate. Scaled here.
+      b.webview.sendInputEvent({ type, x: Math.round(at.x * (b.webview.getZoomFactor ? b.webview.getZoomFactor() : 1)),
+                                 y: Math.round(at.y * (b.webview.getZoomFactor ? b.webview.getZoomFactor() : 1)),
                                  button: "left", clickCount: 1 });
     }
     await sleep(1200);
@@ -314,6 +327,8 @@ export function makeChecks(env) {
       null_arm_changed: nullArmChanged,
       mutated_in_page: inPage === true,
       items_before: wasItems, items_after: itemsNow,
+      aim_hit: aimDiag && aimDiag.hit, guest_dpr: aimDiag && aimDiag.dpr, zoom,
+      webview_box: [Math.round(wvRect.width), Math.round(wvRect.height)],
       guest_focused: at.focused === true,
       aimed_at: [at.x, at.y], viewport: [at.vw, at.vh],
       aim_on_screen: at.x >= 0 && at.y >= 0 && at.x < at.vw && at.y < at.vh,
@@ -480,7 +495,12 @@ export function makeChecks(env) {
       "document.getElementById('items').children.length");
     const wasItems = await itemCount();
     for (const type of ["mouseDown", "mouseUp"]) {
-      b.webview.sendInputEvent({ type, x: at.x, y: at.y,
+      // sendInputEvent takes the WEBVIEW's coordinates; at is the guest's
+      // CSS viewport. A zoomed cell (0.408 in run 75: a 1,169 px page in a
+      // 523 px box) put the click 2.4x too far out -- off the button, which
+      // read for runs 66-74 as the page refusing to mutate. Scaled here.
+      b.webview.sendInputEvent({ type, x: Math.round(at.x * (b.webview.getZoomFactor ? b.webview.getZoomFactor() : 1)),
+                                 y: Math.round(at.y * (b.webview.getZoomFactor ? b.webview.getZoomFactor() : 1)),
                                  button: "left", clickCount: 1 });
     }
     await sleep(1500);
@@ -17789,7 +17809,7 @@ export function makeChecks(env) {
       async run() {
         const fixtures = await serveFixtures();
         const token = "domvecprobe" + Date.now().toString(36);
-        const pagesBefore = (await ask("/health")).pages;
+        const pagesBefore = (await ask("/pages")).n;
         const page = fixtures.origin + "/live_mutate.html?token=" + token;
         try {
           const got = await evaluate(mutateProbe(page, token, SIDECAR),
@@ -17798,7 +17818,7 @@ export function makeChecks(env) {
           // a page per run is an instrument changing its own denominator.
           got.purged = await tidyFixtures(fixtures.origin);
           got.pages_before = pagesBefore;
-          got.pages_after = (await ask("/health")).pages;
+          got.pages_after = (await ask("/pages")).n;
           if (got.error) return { pass: false, evidence: got };
           return {
             // Three things, and any two can hold while the third is broken:
@@ -17824,14 +17844,14 @@ export function makeChecks(env) {
       async run() {
         const fixtures = await serveFixtures();
         const token = "domvecuniform" + Date.now().toString(36);
-        const pagesBefore = (await ask("/health")).pages;
+        const pagesBefore = (await ask("/pages")).n;
         const page = fixtures.origin + "/live_mutate.html?token=" + token;
         try {
           const got = await evaluate(uniformProbe(page, token, SIDECAR),
                                      { timeout: 600000 });
           got.purged = await tidyFixtures(fixtures.origin);
           got.pages_before = pagesBefore;
-          got.pages_after = (await ask("/health")).pages;
+          got.pages_after = (await ask("/pages")).n;
           if (got.error) return { pass: false, evidence: got };
           return {
             // "Uniformly" is the whole row, so every surface has to carry it,
@@ -17871,12 +17891,12 @@ export function makeChecks(env) {
           tall: fixtures.origin + "/live_tall.html",
         };
         try {
-          const pagesBefore = (await ask("/health")).pages;
+          const pagesBefore = (await ask("/pages")).n;
           const got = await evaluate(paceProbe(pages, SIDECAR),
                                      { timeout: 900000 });
           got.purged = await tidyFixtures(fixtures.origin);
           got.pages_before = pagesBefore;
-          got.pages_after = (await ask("/health")).pages;
+          got.pages_after = (await ask("/pages")).n;
           if (got.error) return { pass: false, evidence: got };
           return {
             // **Different criteria per page, because they answer different
@@ -17910,12 +17930,12 @@ export function makeChecks(env) {
         const fixtures = await serveFixtures();
         const page = fixtures.origin + "/shadow_catalogue.html";
         try {
-          const pagesBefore = (await ask("/health")).pages;
+          const pagesBefore = (await ask("/pages")).n;
           const got = await evaluate(shadowProbe(page, SIDECAR),
                                      { timeout: 600000 });
           got.purged = await tidyFixtures(fixtures.origin);
           got.pages_before = pagesBefore;
-          got.pages_after = (await ask("/health")).pages;
+          got.pages_after = (await ask("/pages")).n;
           if (got.error) return { pass: false, evidence: got };
           return {
             // The first clause is the non-vacuity arm and it is not optional:
@@ -20583,12 +20603,12 @@ export function makeChecks(env) {
         const fixtures = await serveFixtures();
         const page = fixtures.origin + "/shadow_catalogue.html";
         try {
-          const pagesBefore = (await ask("/health")).pages;
+          const pagesBefore = (await ask("/pages")).n;
           const got = await evaluate(deltaProbe(page, SIDECAR),
                                      { timeout: 600000 });
           got.purged = await tidyFixtures(fixtures.origin);
           got.pages_before = pagesBefore;
-          got.pages_after = (await ask("/health")).pages;
+          got.pages_after = (await ask("/pages")).n;
           if (got.error) return { pass: false, evidence: got };
           return {
             // Millisecond: the worst fold stays under 50ms.
