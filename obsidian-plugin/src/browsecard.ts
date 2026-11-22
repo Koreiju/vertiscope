@@ -37,6 +37,14 @@ export class BrowseCard {
 
   constructor(private host: BrowseHost) {}
 
+  /** The artifact as last read, and its version: the 3D centroid node reads
+   *  this (`browsecentroid.ts`), card open or not. */
+  current(): { art: any; version: number } | null { return this.artifact ? { art: this.artifact, version: this.version } : null; }
+
+  /** Polled from plugin load, every 3 s while the card is closed, so the
+   *  world's centroid node follows an artifact an agent or a cell made. */
+  start(): void { if (!this.timer) this.timer = window.setInterval(() => { void this.poll(); }, this.card ? 1500 : 3000); }
+
   open(plane: HTMLElement, query = "", scope = "web"): HTMLElement {
     if (this.card && plane.contains(this.card)) { this.card.style.display = ""; }
     else this.build(plane);
@@ -48,10 +56,11 @@ export class BrowseCard {
   }
 
   close(): void {
-    if (this.timer) { window.clearInterval(this.timer); this.timer = 0; }
     this.card?.remove();
     this.card = null;
   }
+
+  stop(): void { if (this.timer) { window.clearInterval(this.timer); this.timer = 0; } }
 
   private build(plane: HTMLElement): void {
     const card = plane.createDiv({ cls: "domvec-browse-card" });
@@ -109,13 +118,14 @@ export class BrowseCard {
 
   /** The diffs since the version drawn; any change redraws from the artifact. */
   async poll(force = false): Promise<void> {
-    if (!this.card || (this.plantNoPoll && !force)) return;
+    if (this.plantNoPoll && !force) return;
     this.stats.polls++;
     try {
       const got = await (await fetch(this.host.base() + "/browse?since=" + (force ? 0 : this.version))).json();
       if (force || (got.version || 0) > this.version) {
         this.stats.diffs_applied += (got.changes || []).length;
-        this.render(got.artifact, got.version || 0, "");
+        if (this.card) this.render(got.artifact, got.version || 0, "");
+        else { this.artifact = got.artifact; this.version = got.version || 0; }
       }
     } catch (e) { this.stats.errors++; this.stats.last_error = String(e); }
   }

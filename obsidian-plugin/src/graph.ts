@@ -31,6 +31,7 @@ import { forceCenter, forceCollide, forceManyBody } from "d3-force-3d";
 import type { ForceNodeDelta } from "./forcetree";
 import type { CentralDiff } from "./types";
 import * as THREE from "three";
+import { BrowseCentroid } from "./browsecentroid";
 import { chunkNoteState } from "./planecard";
 import { NodeLook, Picture, SceneBatch, PIC_PX } from "./scenebatch";
 import { flushTiny, octreeVerdict } from "./octreeguard";
@@ -657,6 +658,8 @@ export class GraphView extends ItemView {
         this.craftClickTimer = window.setTimeout(() => { this.craftClickAt = 0; this.craftClicks.halo++; if (cn.path) this.onHalo(cn.path); }, 330);
         return;
       }
+      // G-205: the browser centroid node -- its click opens the artifact's card.
+      if (this.graph && this.browseCentroid.hit(this.graph, e.clientX, e.clientY)) { this.browseCentroid.click(); return; }
       const hit = this.bisectorAt(e.clientX, e.clientY);
       if (hit) this.toggleBisector(hit);
     }, { passive: true, capture: true });
@@ -5315,6 +5318,10 @@ export class GraphView extends ItemView {
    * (`UserAgent.tick`). Rebuilt only when the plan, its leg or its nodes'
    * places change -- a still plan costs a frame nothing.
    */
+  /** G-205: the browser centroid node and its rays to the artifact's results. */
+  browseCentroid = new BrowseCentroid(
+    () => (window as any).__domvecBrowseCard?.current?.() ?? null,
+    () => { (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.openBrowseCard?.(); });
   private planGroup: any = null;
   private planKey = "";
   planDrawn = { points: 0, current: -1, mode: "", rebuilt: 0 };
@@ -8029,6 +8036,8 @@ export class GraphView extends ItemView {
         this.agentAt = t;
         if (dt > 0) this.agent.tick(dt);
         this.drawPlan(g);
+        // G-205: the retrieval artifact's handle in the world.
+        this.browseCentroid.frame(g);
         // The craft: the ego computation graph as one unit (items 67-69).
         this.craftFrame();
         // No long links (137/138): 10% of the cloud's radius, refreshed twice a second.

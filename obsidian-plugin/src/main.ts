@@ -412,6 +412,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // probe note through these, never through a workspace tab.
     (window as any).__domvecPlane = this.desk;
     (window as any).__domvecBrowseCard = this.browseCard;
+    this.browseCard.start();
+    this.register(() => this.browseCard.stop());
     this.registerInterval(window.setInterval(() => this.desk.ensureTools(), 1000));
     this.registerInterval(window.setInterval(() => { void this.codeRows.sweep(); }, 1000));
     // G-326: each panel sized to the fields it shows, folded to its node at its root.

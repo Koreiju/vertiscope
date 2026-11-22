@@ -12069,6 +12069,54 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-205c",
+      asks: "the browser centroid NODE in 3D (G-205, BROWSER_CENTROID_DESIGN §4.3): an artifact made outside the card (as an agent's call) puts a node in the world at the centroid of its results as drawn -- a chunk's node, else its page's -- with one ray per placed result; a click on it opens the artifact's card on the plane; planted plantAtOrigin: the node is not at its results' centroid",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const p = app.plugins.plugins["domvec-bridge"], base = p.settings.sidecar.replace(/\\/+$/, "");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph) return { error: "no 3D view" };
+          const bc = v.browseCentroid, card = window.__domvecBrowseCard;
+          card.close();
+          const made = await (await fetch(base + "/browse", { method: "POST", headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ query: "patricia trie radix", scope: "web", k: 8 }) })).json();
+          for (let i = 0; i < 30 && bc.drawn.version !== made.version; i++) await sleep(250);
+          // The results' own nodes, as the world draws them -- read from the graph, not from the centroid.
+          const nodes = v.graph.graphData().nodes;
+          const ends = [];
+          for (const h of made.artifact.results) {
+            const n = nodes.find((x) => x.id === h.cid) || nodes.find((x) => x.level === "page" && String(x.url).split("#")[0] === String(h.url).split("#")[0]);
+            if (n && Number.isFinite(n.x)) ends.push([n.x, n.y, n.z || 0]);
+          }
+          const mean = [0, 1, 2].map((i) => ends.reduce((s, e) => s + e[i], 0) / Math.max(1, ends.length));
+          const off = (at) => Math.hypot(at[0] - mean[0], at[1] - mean[1], at[2] - mean[2]);
+          const clean = { ...bc.drawn, at: [...bc.drawn.at] };
+          // Waited on the FRAME, not a fixed time: run 85 read the planted
+          // place 300 ms in and got the clean one -- the loop had not drawn.
+          const frameMoved = async (from) => { for (let i = 0; i < 50 && bc.drawn.at.join() === from.join(); i++) await sleep(100); return [...bc.drawn.at]; };
+          bc.plantAtOrigin = true;
+          const planted = await frameMoved(clean.at);
+          bc.plantAtOrigin = false;
+          await frameMoved(planted);
+          // A click where the node is drawn: the card opens.
+          const s = bc.screenAt(v.graph), canvas = v.graph.renderer().domElement, r = canvas.getBoundingClientRect();
+          const onScreen = !!s && s.x > r.left && s.x < r.right && s.y > r.top && s.y < r.bottom;
+          const clicks0 = bc.drawn.clicks;
+          if (onScreen) {
+            for (const type of ["pointerdown", "pointerup"]) canvas.dispatchEvent(new PointerEvent(type, { clientX: s.x, clientY: s.y, bubbles: true, pointerId: 1, isPrimary: true }));
+          }
+          await sleep(500);
+          const opened = !!document.querySelector(".domvec-browse-card");
+          return { results: made.artifact.results.length, rays: clean.rays, unplaced: clean.unplaced, ends: ends.length,
+                   clean_off: Math.round(off(clean.at) * 10) / 10, planted_off: Math.round(off(planted) * 10) / 10,
+                   onScreen, clicked: bc.drawn.clicks - clicks0, opened };
+        })()`);
+        return { pass: !got.error && got.rays > 0 && got.rays === got.ends && got.clean_off < 1 && got.planted_off > 5
+                       && got.onScreen && got.clicked === 1 && got.opened, evidence: got };
+      },
+    },
+    {
       id: "G-386",
       asks: "the editor's own calls from a kernel cell (PLUGIN_GOAL 172 [3]; mortegon 3A.7, the cards are the API): one cell calls create, link, invoke, commit and review, and the plane holds two new cards linked, the invoked card's output written into it, a subgraph card linking both, and a review question on the first, the subgraph and the invoked card stored as vault:// pages (G-382); a link to a card that does not exist is refused, not invented; planted (plantNoCarry) no card appears",
       async run() {
