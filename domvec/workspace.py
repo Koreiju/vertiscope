@@ -395,8 +395,10 @@ class Workspace:
         one place where the graph and the matrix can fall out of step. They
         cannot fall out of step, because neither is written without the other.
         """
+        _t = time.perf_counter()
         chunks = render_trie(trie, context_window=self.context_window, md_level=getattr(self.store, "md_level", False),
                              report=report)
+        ms_render = round((time.perf_counter() - _t) * 1000, 1)
         addresses = [
             (node.address, node.value, node.content_hash)
             for node in trie.leaves() if node.address is not None
@@ -404,9 +406,12 @@ class Workspace:
         def held(a, _t=trie):
             n = _t.find(a)
             return n.value if n is not None else None
-        return self.ingest_chunks(url, chunks, addresses, title=title,
-                                  root_hash=trie.root_hash, defer=defer, complete=complete,
-                                  raw_values=held)
+        out = self.ingest_chunks(url, chunks, addresses, title=title,
+                                 root_hash=trie.root_hash, defer=defer, complete=complete,
+                                 raw_values=held)
+        if isinstance(out, tuple) and len(out) > 1 and isinstance(out[1], dict):
+            out[1]["ms_render"] = ms_render
+        return out
 
     def ingest_chunks(
         self,
@@ -617,13 +622,22 @@ class Workspace:
         # The index takes the DELTA (the rows this write touched), not a
         # rebuild on the next search (PLUGIN_GOAL 152). Planted
         # `_PLANT_INDEX_REBUILD`: thrown away, as before.
+        # Every step below runs under the sidecar's write lock at a settle and
+        # was untimed: on 2026-11-22 a Thunderbirds settle held the lock
+        # 9,257 ms while the store's own phases summed to 4,859. Each is now
+        # timed, so the record accounts for the whole hold.
+        _t = time.perf_counter()
         self._index_changed(set(rows) | set(superseded))
+        _timed["ms_index"] = round((time.perf_counter() - _t) * 1000, 1)
         # A write that describes a whole page is a settled unit, and flushing
         # it is a batch — one embedder call for the page, which is what the
         # design asks for. A delta is not settled and stays queued. This is
         # the line the prohibition actually draws: batch, not per-delta.
         if complete:
+            _t = time.perf_counter()
             self.flush_vectors()
+            _timed["ms_flush_vectors"] = round((time.perf_counter() - _t) * 1000, 1)
+            _t = time.perf_counter()
             # Stage two, at the settle (`G-31`). This is the one point where
             # the page is finished AND its vectors exist, which is what
             # aggregation needs -- a delta is neither. Putting it here rather
@@ -638,18 +652,23 @@ class Workspace:
                 self.aggregate(url)
             except Exception:                       # noqa: BLE001
                 pass
-        if isinstance(counts, dict):
-            counts.update(_timed)
+            _timed["ms_aggregate"] = round((time.perf_counter() - _t) * 1000, 1)
         # PLUGIN_GOAL 186k: the special files a page links to.
+        _t = time.perf_counter()
         try:
             self.last_files = self.special_files(url, chunks)
         except Exception as exc:                    # noqa: BLE001 -- never fails a capture
             self.last_files = {"error": str(exc)[:160]}
+        _timed["ms_special_files"] = round((time.perf_counter() - _t) * 1000, 1)
         # G-233/G-235: a page's Python code blocks join the code graph.
+        _t = time.perf_counter()
         try:
             self.last_web_cpg = self.web_code_cpg(url, chunks, raw=raw_values)
         except Exception as exc:                    # noqa: BLE001 -- never fails a capture
             self.last_web_cpg = {"error": str(exc)[:160]}
+        _timed["ms_web_cpg"] = round((time.perf_counter() - _t) * 1000, 1)
+        if isinstance(counts, dict):
+            counts.update(_timed)
         return chunks, counts
 
     def page_url(self, url: str) -> str:
