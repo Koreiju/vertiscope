@@ -56,8 +56,13 @@ def test_planted_reversal_flips_the_sign():
 
 
 def test_null_rewire_erases_it():
-    cids, edges = _tree()
-    rnd = random.Random(7)
-    null = [(rnd.choice(cids), rnd.choice(cids)) for _ in edges]
-    s = structure(cids, null, depths(cids, edges), _children(edges))
-    assert abs(s["spearman_rank_depth"]) < 0.2
+    # 364 nodes, five rewirings: one rewiring of 121 nodes read 0.201, inside
+    # a single correlation's sampling error (~0.09) of zero.
+    cids, edges = _tree(levels=5)
+    d, ch = depths(cids, edges), _children(edges)
+    rhos = []
+    for seed in range(5):
+        rnd = random.Random(seed)
+        null = [(rnd.choice(cids), rnd.choice(cids)) for _ in edges]
+        rhos.append(structure(cids, null, d, ch)["spearman_rank_depth"])
+    assert abs(sum(rhos) / len(rhos)) < 0.1

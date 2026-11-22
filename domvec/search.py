@@ -113,14 +113,34 @@ def _unit(v: np.ndarray) -> np.ndarray:
     return v / top if top > 0 else np.zeros_like(v)
 
 
+#: Which PageRank the ranking reads (PLUGIN_GOAL 177e): ``flat`` over the
+#: chunk graph's Contains + LinksTo edges -- measured to track nesting depth
+#: (rank_noise, Spearman +0.77) -- or ``hier`` over page, host, domain and
+#: dual-similarity levels (`domvec.hierank`). ``none`` drops the rank term:
+#: the counterfactual every comparison is scored against.
+RANK_MODE = ["flat"]
+
+#: Planted: tied values take percentiles by ROW ORDER, as before 177e. Tied
+#: leaves (most of the corpus shares a handful of rank values) were spread
+#: across the whole 0..1 term by when they happened to be indexed.
+PLANT_PERCENTILE_ROW_ORDER = [False]
+
+
 def _percentile(v: np.ndarray) -> np.ndarray:
     """A term on 0..1 by rank: PageRank's raw values span orders of magnitude
-    (it sums to one over the corpus), so its POSITION is what is comparable."""
+    (it sums to one over the corpus), so its POSITION is what is comparable.
+
+    Ties share their AVERAGE position: equal ranks are one value, and a stable
+    sort's tie-break is row order -- when a chunk was indexed, which says
+    nothing about it."""
     v = np.asarray(v, dtype=np.float64)
     if v.size < 2:
         return np.ones_like(v)
-    order = np.argsort(np.argsort(v, kind="stable"), kind="stable")
-    return order / float(v.size - 1)
+    if PLANT_PERCENTILE_ROW_ORDER[0]:
+        order = np.argsort(np.argsort(v, kind="stable"), kind="stable")
+        return order / float(v.size - 1)
+    from scipy.stats import rankdata
+    return (rankdata(v, method="average") - 1.0) / float(v.size - 1)
 
 import re as _re
 _CONTROL = _re.compile(r"^\(\s.*\s\)$|^\[[ xX]\]\s|^\[[^\]]*\]$")
@@ -170,6 +190,8 @@ class SearchDiagnostics:
     """
 
     candidates: int = 0
+    #: Which PageRank this search read: flat, hier or none (177e).
+    rank_mode: str = ""
     zeroed_by_lexical: int = 0
     zeroed_by_semantic: int = 0
     zeroed_by_rank: int = 0
@@ -447,6 +469,72 @@ class ThreeFormIndex:
             self.build()
         return self._ranks if self._ranks is not None else np.zeros(0)
 
+    def hier_ranks(self, similarity: bool = True) -> np.ndarray:
+        """Per row: its page's rank over the page / host / domain / dual-
+        similarity levels (`domvec.hierank`). Memoised on what it is a
+        function of (CLAUDE.md 5c): the rows, the lexical version, the
+        embedding count and the link count -- any of them changing re-derives
+        it."""
+        from . import hierank
+        rows = len(self.freq.rows)
+        emb_n = int(self.embeddings.matrix.shape[0]) if (self.embeddings is not None
+                                                          and self.embeddings.matrix is not None) else 0
+        links = self.store.page_links()
+        key = (rows, getattr(self.freq, "version", 0), emb_n, len(links), len(self._meta), similarity)
+        slot = "_hier" if similarity else "_hier_levels"
+        got = getattr(self, slot, None)
+        if got is not None and got[0] == key:
+            return got[1]
+        row_urls = [(self._meta.get(r) or ("", "", ""))[1] for r in range(rows)]
+        urls, lex, sem = self.page_forms()
+        # A kept version is its page's past (`hierank.page_of`): as a
+        # similarity candidate it would be every page's nearest neighbour.
+        keep = [i for i, u in enumerate(urls) if hierank.page_of(u) == u]
+        if len(keep) < len(urls):
+            urls, lex, sem = [urls[i] for i in keep], lex[keep], sem[keep]
+        if not similarity:
+            sim = []
+        elif hierank.PLANT_LAYOUT_SIMILARITY[0]:
+            sim = hierank.layout_similar(*self._layout_positions(urls))
+        else:
+            sim = hierank.dual_similar(urls, lex, sem) if len(urls) else []
+        pr = hierank.page_ranks(sorted({u for u in row_urls if u}), links, sim)
+        out = hierank.chunk_ranks(row_urls, pr)
+        order = sorted(pr.items(), key=lambda kv: -kv[1])
+        info = (key, out, {"pages": len(pr), "sim_edges": len(sim), "links": len(links),
+                                 "top": [[u, round(v, 3)] for u, v in order[:12]],
+                                 "bottom": [[u, round(v, 3)] for u, v in order[-5:]]})
+        setattr(self, slot, info)
+        return out
+
+    def page_forms(self):
+        """Each page's two centroids, row-aligned: the tf-idf centroid (the
+        frequency form) and the semantic one (`page_centroids`), over the
+        pages that have both. Both L2-normalised."""
+        from scipy import sparse as _sp
+        urls, sem = self.page_centroids()
+        if not urls:
+            return [], np.zeros((0, 0)), np.zeros((0, 0))
+        index = {u: i for i, u in enumerate(urls)}
+        tf = self.freq.tfidf()
+        rr, cc = [], []
+        for row, meta in self._meta.items():
+            if meta and meta[1] in index and 0 <= int(row) < tf.shape[0]:
+                rr.append(index[meta[1]]); cc.append(int(row))
+        P = _sp.csr_matrix((np.ones(len(rr)), (rr, cc)), shape=(len(urls), tf.shape[0]))
+        lex = (P @ tf).toarray() if tf.shape[1] * len(urls) < 4e8 else None
+        if lex is None:
+            return [], np.zeros((0, 0)), np.zeros((0, 0))
+        lex /= np.maximum(np.linalg.norm(lex, axis=1, keepdims=True), 1e-12)
+        return urls, lex.astype(np.float32), np.asarray(sem, dtype=np.float32)
+
+    def _layout_positions(self, urls):
+        """The PLANTED similarity source: the projector's page positions."""
+        from .obsidian import layout as _layout
+        pos = next(iter(_layout._PAGE_POS.values()), {}) if _layout._PAGE_POS else {}
+        keep = [u for u in urls if u in pos]
+        return keep, np.array([pos[u][:3] for u in keep], dtype=np.float64).reshape(len(keep), -1)
+
     # -- query -------------------------------------------------------------
     def search(
         self,
@@ -462,6 +550,7 @@ class ThreeFormIndex:
         scope_url: str = "",
         count_only: bool = False,
         ref: str = "",
+        rank: str = "",
     ) -> List[Hit]:
         """Rank chunks by the triple product.
 
@@ -532,7 +621,23 @@ class ThreeFormIndex:
         diag.semantic_available = available
         _lap("semantic")
 
-        ranks = _fit(self.ranks, rows)
+        rank_mode = rank or RANK_MODE[0]
+        diag.rank_mode = rank_mode
+        if rank_mode == "hier":
+            ranks = _fit(self.hier_ranks(), rows)
+        elif rank_mode == "levels":
+            # The url levels and hyperlinks alone: hier minus its similarity
+            # level, to say which part of hier moves the ranking.
+            ranks = _fit(self.hier_ranks(similarity=False), rows)
+        elif rank_mode == "none":
+            ranks = np.ones(rows, dtype=np.float32)
+        elif rank_mode == "shuffle":
+            # The null arm: the flat ranks PERMUTED -- the same values and
+            # spread, none of the structure. A rank whose effect survives
+            # this was never about the link graph.
+            ranks = _fit(self.ranks, rows)[np.random.default_rng(177).permutation(rows)]
+        else:
+            ranks = _fit(self.ranks, rows)
 
         diag.zeroed_by_lexical = int(np.sum(lexical <= 0))
         diag.zeroed_by_semantic = int(np.sum(semantic <= 0)) if available else 0

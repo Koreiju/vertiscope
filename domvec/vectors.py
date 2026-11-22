@@ -698,6 +698,7 @@ def pagerank(
     damping: float = 0.85,
     tol: float = 1e-8,
     max_iter: int = 100,
+    weights: Optional[Sequence[float]] = None,
 ) -> np.ndarray:
     """PageRank over integer-indexed nodes. Returns a length-`n` vector.
 
@@ -718,14 +719,18 @@ def pagerank(
 
     src = np.fromiter((s for s, _ in edges), dtype=np.int64, count=len(edges))
     dst = np.fromiter((d for _, d in edges), dtype=np.int64, count=len(edges))
-    keep = (src >= 0) & (src < n) & (dst >= 0) & (dst < n)
-    src, dst = src[keep], dst[keep]
+    w = (np.ones(len(edges), dtype=np.float64) if weights is None
+         else np.asarray(weights, dtype=np.float64))
+    keep = (src >= 0) & (src < n) & (dst >= 0) & (dst < n) & (w > 0)
+    src, dst, w = src[keep], dst[keep], w[keep]
     if src.size == 0:
         return np.full(n, 1.0 / n, dtype=np.float32)
 
-    out_degree = np.bincount(src, minlength=n).astype(np.float64)
-    weights = 1.0 / out_degree[src]
-    matrix = sparse.csr_matrix((weights, (dst, src)), shape=(n, n))
+    # Weighted out-degree: an edge's share of its source's mass is its weight
+    # over the source's total (hierank's similarity level is weighted). With
+    # no weights every edge is 1 and this is the plain out-degree.
+    out_degree = np.bincount(src, weights=w, minlength=n).astype(np.float64)
+    matrix = sparse.csr_matrix((w / out_degree[src], (dst, src)), shape=(n, n))
     dangling = out_degree == 0
 
     rank = np.full(n, 1.0 / n, dtype=np.float64)

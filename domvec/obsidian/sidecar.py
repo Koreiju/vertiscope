@@ -2263,7 +2263,7 @@ def _in_ego(stored) -> bool:
 def search_payload(workspace, query: str, k: int = 8, *,
                    offset: int = 0, url: str = "",
                    coarse: bool = True, budget: int = 0, where: str = "", trace: int = 0,
-                   ref: str = "") -> Dict:
+                   ref: str = "", rank: str = "") -> Dict:
     """Ranked chunks for the overlay (`G-63`, `G-64`, `G-69`, `G-70`).
 
     Ranking is the store's own three-form retrieval; this adds nothing to it
@@ -2324,7 +2324,8 @@ def search_payload(workspace, query: str, k: int = 8, *,
         else:
             try:
                 hits = workspace.search(query, k=want, scope_url=url or "", diagnostics=diag,
-                                        **({"ref": ref} if ref else {}))
+                                        **({"ref": ref} if ref else {}),
+                                        **({"rank": rank} if rank else {}))
             except TypeError:                   # an index without diagnostics
                 hits = workspace.search(query, k=want, scope_url=url or "")
         import time as _time
@@ -6272,6 +6273,37 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, interpreters())
             return
 
+        if segments[0] == "rank_levels":
+            # The hierarchical rank's levels and its similarity audit (177e):
+            # the similarity level's edges from the two embeddings, against
+            # the PLANTED layout-distance edges and a random pairing, each
+            # scored by the dual similarity of the pairs it links. Read-only.
+            from .. import hierank
+            idx = self.workspace.index
+            with _foreground():
+                urls, lex, sem = idx.page_forms()
+                keep = [i for i, u in enumerate(urls) if hierank.page_of(u) == u]
+                urls, lex, sem = [urls[i] for i in keep], lex[keep], sem[keep]
+                dual = hierank.dual_similar(urls, lex, sem) if urls else []
+                lay_urls, pos = idx._layout_positions(urls)
+                lay = hierank.layout_similar(lay_urls, pos) if len(lay_urls) > 1 else []
+                lv = hierank.levels(urls)
+                idx.hier_ranks()
+                info = (getattr(idx, "_hier", None) or (None, None, {}))[2]
+                pr = idx._hier[1] if getattr(idx, "_hier", None) else None
+            self._send(200, {
+                "pages": len(urls), "hosts": len({h for h, _ in lv.values()}),
+                "domains": len({d for _, d in lv.values()}),
+                "multi_host_domains": sorted({d for h, d in lv.values() if d != h
+                                              and sum(1 for x in lv.values() if x[1] == d) > 1})[:40],
+                "audit_dual": hierank.similarity_audit(urls, lex, sem, dual) if urls else {},
+                "audit_layout_planted": hierank.similarity_audit(urls, lex, sem, lay) if lay else {"edges": 0},
+                "layout_pages": len(lay_urls),
+                "hier": info,
+                "hier_rank_spread": (round(float(pr.max() / max(pr[pr > 0].min(), 1e-12)), 2)
+                                     if pr is not None and pr.size else None)})
+            return
+
         if segments[0] == "search":
             params = parse_qs(parts.query)
             query = (params.get("q") or [""])[0]
@@ -6315,9 +6347,14 @@ class _Handler(BaseHTTPRequestHandler):
                         trace = int((params.get("trace") or ["0"])[0])
                     except ValueError:
                         trace = 0
+                    # `rank` picks the PageRank the ranking reads (177e):
+                    # flat, hier, or none -- the counterfactual.
+                    rank = (params.get("rank") or [""])[0]
+                    rank = rank if rank in ("flat", "hier", "levels", "none", "shuffle") else ""
                     got = search_payload(
                         self.workspace, query, k, offset=offset,
-                        url=scope, coarse=coarse, budget=budget, where=where, trace=trace, ref=ref)
+                        url=scope, coarse=coarse, budget=budget, where=where, trace=trace, ref=ref,
+                        rank=rank)
                 self._send(200, got)
             return
 
