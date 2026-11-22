@@ -11375,6 +11375,49 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-375",
+      asks: "the repository's own code is gone from the 3D layout (PLUGIN_GOAL 166 a, 167 a): the drawn graph holds nodes and none of them is a code://repo, code://plugin or code://pypi page; planted: a code:// node slipped into the same count is counted",
+      async run() {
+        const got = await evaluate(`(async () => {
+          ${PREP}
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          for (let i = 0; i < 60 && !(v.graph && v.graph.graphData().nodes.length); i++) await sleep(500);
+          const urls = v.graph.graphData().nodes.map((n) => String(n.url || n.id || ""));
+          const isRepo = (u) => ["code://repo/", "code://plugin/", "code://pypi/"].some((x) => u.startsWith(x));
+          return { n: urls.length, repo: urls.filter(isRepo).length,
+                   planted: [...urls, "code://repo/planted.py"].filter(isRepo).length };
+        })()`);
+        return { pass: got.n > 0 && got.repo === 0 && got.planted === 1, evidence: got };
+      },
+    },
+    {
+      id: "G-385",
+      asks: "the chat cell's reply streams live from the CUDA model (PLUGIN_GOAL 171): through the plugin's own chatStream, a warm turn's first piece within 500 ms and its median gap under 30 ms, the sidecar recording engine cuda on cuda; planted: the old GPT4All path's no-model turn (a piece per 50 ms) fails the gap bar",
+      async run() {
+        const got = await evaluate(`(async () => {
+          ${PREP}
+          const p = app.plugins.plugins["domvec-bridge"], base = p.settings.sidecar.replace(/\\/+$/, "");
+          const stats = (st) => { const g = st.slice(1).map((x, i) => x - st[i]).sort((a, b) => a - b);
+                                  return { first_ms: Math.round(st[0] ?? -1), pieces: st.length,
+                                           gap_p50: +(g[Math.floor(g.length / 2)] ?? 0).toFixed(1), gap_max: +(g[g.length - 1] ?? 0).toFixed(1) }; };
+          const turn = async () => { const t0 = performance.now(), st = [];
+                                     await p.sidecar.chatStream("Name two uses of a trie.", [], () => st.push(performance.now() - t0)); return stats(st); };
+          await turn();                                        // load and warm
+          const clean = await turn();
+          const prof = await (await fetch(base + "/profile")).json();
+          const last = (prof.chat_stream || []).slice(-1)[0] || {};
+          const t0 = performance.now(), st = [];
+          const r = await fetch(base + "/chat_stream", { method: "POST", headers: { "Content-Type": "application/json" },
+                                 body: JSON.stringify({ prompt: "x", engine: "gpt4all", dry_ms: 600 }) });
+          const rd = r.body.getReader(); for (;;) { const { done } = await rd.read(); if (done) break; st.push(performance.now() - t0); }
+          return { clean: { ...clean, engine: last.engine, loaded_on: last.loaded_on, tok_s: last.tok_s }, planted: stats(st) };
+        })()`);
+        const c = got.clean, pl = got.planted;
+        return { pass: c.first_ms >= 0 && c.first_ms < 500 && c.gap_p50 < 30 && c.engine === "cuda" && c.loaded_on === "cuda"
+                       && pl.pieces > 3 && pl.gap_p50 >= 30, evidence: got };
+      },
+    },
+    {
       id: "G-368",
       asks: "a page's fit sent by the projector is where the page is drawn, even if an earlier parting pass had moved it aside (G-94 run 130: an online update moved Radix_tree's fit ~34 units, its chunks followed, the page went back to the old fit); planted (plantStaleHomeFit): the parting pass's old home restored over the new fit",
       async run() {
