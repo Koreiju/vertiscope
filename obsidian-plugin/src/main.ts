@@ -1255,6 +1255,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         if (browser && typeof (browser as any).go === "function" && !this.plantNoBrowserAsk) { (browser as any).go(a.go); notes.push(`go: the browser sent to ${a.go}`); }
         else notes.push(`go: no browser cell open for ${a.go}`);
       }
+      // The toolspaces' asks (G-377): each carried out by the method the
+      // reader's own gesture uses.
+      const said2 = await this.carryToolAsk(a);
+      if (said2) notes.push(said2);
     }
 
     // Its readers, re-run (G-380): the cells that read the names this one
@@ -1769,6 +1773,58 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   }
 
   typegenStats = { asked: 0, made: 0, last: null as any, mined_asks: 0, mined_fetches: 0 };
+  /** G-377: what the toolspaces' asks did, by kind, for the harness. */
+  toolAskStats: Record<string, number> = {};
+  toolAskLast: any = null;
+  /**
+   * A toolspace call that changes the world (COMPUTATION_GRAPH_EDITOR_SPEC
+   * §8), carried out when its cell ends by the method the gesture uses:
+   * `focus` the hover's flight, `unfold` the page right-click, `attach` the
+   * ego tag, `view` the V key, `pin` the browser's right-click pin, `act` a
+   * panel control. Returns the note for the cell's notice, or "".
+   */
+  /** Planted (G-377): the toolspaces' asks are dropped -- the cell runs, the world does not change. */
+  plantNoToolAsks = false;
+  async carryToolAsk(a: any): Promise<string> {
+    if (!a || typeof a !== "object") return "";
+    const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;
+    const browser: any = this.activeBrowser();
+    const kind = ["focus", "unfold", "attach", "view", "pin", "act"].find((k) => a[k] !== undefined);
+    if (!kind) return "";
+    if (this.plantNoToolAsks) return "";
+    this.toolAskStats[kind] = (this.toolAskStats[kind] || 0) + 1;
+    let said = "";
+    if (kind === "focus") {
+      const n = g?.graph?.graphData().nodes.find((x: any) => x.id === a.focus);
+      if (n && typeof g.flyTo === "function") { g.flyTo(n); said = `focus: flying to ${String(a.focus).slice(0, 12)}`; }
+      else said = `focus: ${String(a.focus).slice(0, 12)} is not drawn`;
+    } else if (kind === "unfold") {
+      const page = g?.graph?.graphData().nodes.find((x: any) => x.level === "page" && x.url === a.unfold);
+      if (!g || !page) said = `unfold: no page node for ${a.unfold}`;
+      else {
+        g.collapsedByReader?.delete(a.unfold);
+        const drawn = g.graph.graphData().nodes.some((x: any) => x.url === a.unfold && x.level !== "page");
+        const r = drawn ? { nodes: 0, action: "already open" } : await g.togglePage(page);
+        said = `unfold: ${r.action} ${r.nodes}`;
+      }
+    } else if (kind === "attach") {
+      const ok = g && typeof g.tagEgo === "function" ? await g.tagEgo(String(a.attach), true) : false;
+      said = ok ? `attach: ${String(a.attach).slice(0, 12)} tagged into the ego` : `attach: not tagged`;
+    } else if (kind === "view") {
+      if (g?.agent) { g.agent.setMode("ego"); g.agent.setView(a.view); said = `view: ${a.view} person`; }
+      else said = "view: no 3D view";
+    } else if (kind === "pin") {
+      const r = browser && typeof browser.pinXpath === "function" ? await browser.pinXpath(String(a.pin)) : { error: "no browser cell" };
+      said = r && r.cid ? `pin: ${String(r.cid).slice(0, 12)} on the plane` : `pin: ${r?.error || "failed"}`;
+    } else if (kind === "act") {
+      const v = a.act || {};
+      const action = v.value === null || v.value === undefined ? "press" : "type";
+      const r = browser && typeof browser.actOnAddress === "function" ? await browser.actOnAddress(String(v.address), action, v.value ?? undefined) : { error: "no browser cell" };
+      said = r && !(r as any).error ? `act: ${action} done` : `act: ${(r as any)?.error || "failed"}`;
+    }
+    this.toolAskLast = { kind, said, at: Date.now() };
+    return said;
+  }
   /** G-388: the patterns `/typegen?mine=1` found, kept 5 minutes -- mining
    *  reads every address row (5.2 s on 245k), so the retrieval bar must not
    *  pay it per keystroke. One fetch in flight however many ask. */

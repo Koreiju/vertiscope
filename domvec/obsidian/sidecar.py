@@ -3051,6 +3051,21 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"name": name, "on": now})
             return
 
+        if route == "slate_check":
+            # `check(slate)` in a cell (G-377): the dialect's own errors over a
+            # slate's text -- duplicates, self-definitions, cycles, references
+            # to nothing (`slate_module.check`). Reads nothing, writes nothing.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "bad body: %s" % exc})
+                return
+            from .. import slate_module as _sm
+            diags = _sm.check(str(body.get("text") or ""), body.get("known") or ())
+            self._send(200, {"diagnostics": [d.to_json() for d in diags]})
+            return
+
         if route == "cypher":
             # Read-only Cypher over the store (G-279: `Database.cypher` in a
             # cell). A statement that writes or calls a procedure is refused.

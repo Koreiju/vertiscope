@@ -22,11 +22,12 @@ def test_the_specs_surfaces_are_well_formed_and_counted():
     found = ts.surfaces(SPEC)
     assert [s.problems for s in found] == [[]] * len(found)
     c = ts.count(found)
-    assert (c["surfaces"], c["exists"], c["new"]) == (6, 10, 14)
+    # 10 / 14 until G-377 built the fourteen and added `types` (2026-11-22).
+    assert (c["surfaces"], c["exists"], c["new"]) == (6, 25, 0)
 
 
 def test_clean_surface():
-    s = one("# t\nsearch('x', k=3)  # exists: ranked\nWebBrowser.url  # exists: shown\nfocus(cid)  # new: fly\n")
+    s = one("# t\nsearch('x', k=3)  # exists: ranked\nWebBrowser.url  # exists: shown\nteleport(cid)  # new: not built\n")
     assert s.problems == [] and [l.resolves for l in s.lines] == [True, True, False]
 
 

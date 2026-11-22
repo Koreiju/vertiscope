@@ -121,6 +121,89 @@ if "create" not in globals():
         _domvec_asks.append({"review": [str(name), str(question)]})
         return {"asked": "review", "name": str(name), "pending": True}
 
+if "similar" not in globals():
+    # The toolspaces' calls (G-376, G-377; COMPUTATION_GRAPH_EDITOR_SPEC §8).
+    # READS go to the sidecar's own routes, as `Database` does; calls that
+    # change the world in place are ASKS the plugin carries out when the cell
+    # ends, and each returns a value naming what it asked (G-380: invisible to
+    # name dataflow otherwise).
+
+    def _domvec_get(path, missing=None):
+        try:
+            with _ur.urlopen(%(base)r + path, timeout=120) as r:
+                return _json.load(r)
+        except _ue.HTTPError as e:
+            if e.code == 404:
+                return missing
+            raise
+
+    def similar(cid, k=8):
+        """A chunk's nearest neighbours in the store: [{cid, url, text}]."""
+        got = _domvec_get("/search?ref=" + _up.quote(str(cid), safe="") + "&k=" + str(int(k))) or {}
+        return [{"cid": h.get("cid"), "url": h.get("url"), "text": h.get("preview") or ""}
+                for h in (got.get("hits") or []) if h.get("cid") != cid]
+
+    def chunk(cid):
+        """A chunk's markdown, each line with its trie address: {cid, url, lines: [{text, key}]}."""
+        got = _domvec_get("/chunk/" + _up.quote(str(cid), safe=""))
+        if got is None:
+            return None
+        return {"cid": got.get("cid"), "url": got.get("url"),
+                "lines": [{"text": l.get("text") or "", "key": l.get("key") or "", **({"control": l["control"]} if l.get("control") else {})}
+                          for l in (got.get("lines") or [])]}
+
+    def page_form(cid):
+        """The saved page form of a chunk (its snapshot), or None."""
+        return _domvec_get("/snapshot/" + _up.quote(str(cid), safe=""))
+
+    def resolve(url, xpath):
+        """The chunk that draws an address on a page."""
+        return _domvec_get("/resolve?url=" + _up.quote(str(url), safe="") + "&xpath=" + _up.quote(str(xpath), safe=""))
+
+    def pages(contains=""):
+        """The page urls the store holds, optionally those containing a string."""
+        got = _domvec_get("/pages" + ("?contains=" + _up.quote(str(contains), safe="") if contains else "")) or {}
+        return list(got.get("urls") or [])
+
+    def ego():
+        """The ego: its notes and the chunks tagged into it."""
+        return _domvec_get("/ego") or {}
+
+    def types(q=""):
+        """Types mined from trie-path patterns across pages (G-388): [{pattern, instances, pages, fields}]."""
+        got = _domvec_get("/typegen?mine=1&limit=200") or {}
+        s = str(q).lower()
+        return [t for t in (got.get("types") or []) if not s or s in t["pattern"].lower() or any(s in f for f in t["fields"])]
+
+    def check(slate):
+        """The dialect's own errors over a slate's text: [{line, from, to, kind, message}]."""
+        req = _ur.Request(%(base)r + "/slate_check", data=_json.dumps({"text": str(slate)}).encode(),
+                          headers={"content-type": "application/json"})
+        with _ur.urlopen(req, timeout=60) as r:
+            return (_json.load(r) or {}).get("diagnostics") or []
+
+    def focus(cid):
+        """Fly the 3D view to a chunk's node."""
+        _domvec_asks.append({"focus": str(cid)})
+        return {"asked": "focus", "cid": str(cid), "pending": True}
+
+    def unfold(url):
+        """A page in the 3D view unfolded into every chunk the store holds of it."""
+        _domvec_asks.append({"unfold": str(url)})
+        return {"asked": "unfold", "url": str(url), "pending": True}
+
+    def attach(cid):
+        """Tag a chunk into the ego."""
+        _domvec_asks.append({"attach": str(cid)})
+        return {"asked": "attach", "cid": str(cid), "pending": True}
+
+    def view(v):
+        """The ego view in first or third person ("first" / "third")."""
+        if str(v) not in ("first", "third"):
+            raise ValueError("view is 'first' or 'third'")
+        _domvec_asks.append({"view": str(v)})
+        return {"asked": "view", "view": str(v), "pending": True}
+
 if "WebBrowser" not in globals():
     class _WebBrowser:
         """WebBrowser: the browser cell, from a kernel. `url` -- what it shows now; `go(url)` -- asked of
@@ -154,8 +237,27 @@ if "WebBrowser" not in globals():
             with _ur.urlopen(self._base + "/page_map?url=" + _up.quote(u, safe=""), timeout=60) as r:
                 return sorted(((_json.load(r) or {}).get("chunks") or {}).keys())
 
+        def pin(self, xpath):
+            """Pin the element at an xpath of the page shown as a panel on the plane, as the right-click does."""
+            _domvec_asks.append({"pin": str(xpath)})
+            return {"asked": "pin", "xpath": str(xpath), "pending": True}
+
+        def controls(self, cid=None):
+            """The page's interactive fields by trie address: [{cid, key, text, control}]. One chunk, or
+            the first 40 of the page shown."""
+            out = []
+            for c in ([cid] if cid else self.chunks()[:40]):
+                got = chunk(c) or {}
+                out += [{"cid": c, **l} for l in got.get("lines") or [] if l.get("control")]
+            return out
+
+        def act(self, address, value=None):
+            """Act on a field in place through its trie address: press it, or type / choose `value`."""
+            _domvec_asks.append({"act": {"address": str(address), "value": None if value is None else str(value)}})
+            return {"asked": "act", "address": str(address), "pending": True}
+
         def __repr__(self):
-            return "WebBrowser(url, title, go, chunks) at " + self._base
+            return "WebBrowser(url, title, go, chunks, pin, controls, act) at " + self._base
 
     WebBrowser = _WebBrowser(%(base)r)
 

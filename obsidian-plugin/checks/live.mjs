@@ -8154,6 +8154,77 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-377",
+      asks: "every toolspace call runs in a real kernel cell (G-376, G-377; COMPUTATION_GRAPH_EDITOR_SPEC 8): the reads -- similar, chunk, page_form, resolve, pages, ego, types, check, WebBrowser.controls -- answer from the store (a missing chunk is None, a slate referencing nothing has a diagnostic and a clean one none), and the asks -- view, attach, unfold, focus -- change the app when the cell ends: the ego view in third person, the chunk tagged into the ego; planted (plantNoToolAsks) the cell runs and the world does not change",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), TAB = String.fromCharCode(9), F = String.fromCharCode(96).repeat(3);
+          await window.__domvec.act("open", "graph"); await sleep(800);
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!g) return { error: "no graph view" };
+          const base = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const top = ((await (await fetch(base + "/search?q=trie&k=1")).json()).hits || [])[0];
+          if (!top) return { error: "no search hit" };
+          const wasTagged = !!(g.egoTags && g.egoTags.has(top.cid));
+          const mode0 = g.agent.mode, view0 = g.agent.view;
+          g.agent.setMode("map"); g.agent.setView("first"); await sleep(300);
+          const tag = (${planted} ? "p" : "c") + Date.now().toString(36);
+          const driver = "domvec/graph/g377 driver " + tag + ".md";
+          const code = [
+            "import json",
+            "h = search('trie', k=1)[0]",
+            "cid, url = h['cid'], h['url']",
+            "c = chunk(cid)",
+            "xp = c['lines'][0]['key'].split('|')[1] if c['lines'] else ''",
+            "r = {'cid': cid, 'similar': len(similar(cid, 5)), 'chunk_lines': len(c['lines']), 'missing_chunk': chunk('0000nochunk0000'),",
+            "     'page_form': page_form(cid) is not None, 'resolve': bool(resolve(url, xp)), 'pages': len(pages()), 'pages_some': len(pages('trie')),",
+            "     'ego_keys': sorted(ego().keys()), 'types': len(types()), 'check_clean': check('m' + chr(10) + chr(9) + 'a' + chr(9) + '1' + chr(10)),",
+            "     'check_bad': check('m' + chr(10) + chr(9) + 'a' + chr(9) + '{nowhere_at_all}' + chr(10)), 'controls': len(WebBrowser.controls(cid))}",
+            "asked = [view('third'), attach(cid), unfold(url), focus(cid)]",
+            "print('G377JSON' + json.dumps(r) + 'G377END')",
+          ].join(NL);
+          plugin.plantNoToolAsks = ${planted};
+          const before = { ...plugin.toolAskStats };
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path: driver, text: F + "python" + NL + code + NL + F + NL });
+            const t0 = performance.now();
+            const reply = await plugin.onRunFence({ lang: "python", code, line: 0, path: driver });
+            out.ms = Math.round(performance.now() - t0);
+            const so = String((reply && (reply.stdout || "")) || "");
+            const i = so.indexOf("G377JSON"), j = so.indexOf("G377END");
+            out.reads = i >= 0 && j > i ? JSON.parse(so.slice(i + 8, j)) : null;
+            if (!out.reads) out.kernel = { ok: reply && reply.ok, error: String((reply && reply.error) || "").slice(-400), stdout: so.slice(-300) };
+            out.asks_counted = ["view", "attach", "unfold", "focus"].map((k) => (plugin.toolAskStats[k] || 0) - (before[k] || 0));
+            await sleep(1200);
+            out.after = { mode: g.agent.mode, view: g.agent.view, tagged: !!(g.egoTags && g.egoTags.has(top.cid)), same_cid: out.reads ? out.reads.cid === top.cid : null,
+                          page_chunks_drawn: g.graph.graphData().nodes.filter((n) => n.url === top.url && n.level !== "page").length };
+            out.last = plugin.toolAskLast;
+            return out;
+          } finally {
+            plugin.plantNoToolAsks = false;
+            try { d.panelOf(driver)?.leaf.detach(); } catch (e) {}
+            const f = app.vault.getAbstractFileByPath(driver); if (f) await app.vault.trash(f, true);
+            if (!wasTagged && g.egoTags && g.egoTags.has(top.cid)) await g.tagEgo(top.cid, false);
+            g.agent.setMode(mode0); if (g.agent.view !== view0) g.agent.setView(view0);
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false), planted = await arm(true);
+        const r = clean.reads || {};
+        const reads_ok = r.similar > 0 && r.chunk_lines > 0 && r.missing_chunk === null && r.resolve === true && r.pages > 0
+          && r.pages_some <= r.pages && (r.ego_keys || []).includes("cids") && r.types > 0
+          && Array.isArray(r.check_clean) && r.check_clean.length === 0 && Array.isArray(r.check_bad) && r.check_bad.length > 0
+          && typeof r.controls === "number";
+        const ok = !clean.error && !planted.error && reads_ok
+          && clean.after.mode === "ego" && clean.after.view === "third" && clean.after.tagged && clean.after.same_cid
+          && clean.asks_counted.every((n) => n === 1)
+          && planted.reads && planted.after.view === "first" && planted.after.mode === "map" && !planted.after.tagged;
+        return { pass: ok, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "P-C5",
       asks: "a saved edit to a module is a live delta in both halves and the 3D view: the trie side re-reads the store and marks exactly the chunk that changed (not its neighbour), and that chunk reaches the projector's delta stream; planted (plantNoTrieRefresh) the trie side keeps the old text, planted (source-not-projected) the chunk never reaches the stream",
       async run() {

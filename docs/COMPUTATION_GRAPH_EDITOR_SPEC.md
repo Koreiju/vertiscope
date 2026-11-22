@@ -240,8 +240,9 @@ named where one exists). Nothing below is decided.
 search("radix trie", k=8)                 # exists: ranked chunks, lexical x pagerank x semantic
 search("radix trie", where="ego")         # exists: only the ego's artifacts and tagged chunks
 search("radix trie", duckduckgo=True)     # exists: asks the browser cell; results arrive as captures
-similar(cid, k=8)                          # new: /search?ref= (G-372 step 2) -- a chunk's neighbours
+similar(cid, k=8)                          # exists: /search?ref= (G-372 step 2) -- a chunk's neighbours
 Database.cypher("MATCH (p:Page) RETURN count(p)")  # exists: read-only, writes refused
+types("article")                           # exists: G-388 -- types mined from trie-path patterns across pages
 ```
 
 ```python
@@ -249,30 +250,30 @@ Database.cypher("MATCH (p:Page) RETURN count(p)")  # exists: read-only, writes r
 WebBrowser.url                             # exists: what the cell shows now
 WebBrowser.go("https://en.wikipedia.org/wiki/Trie")  # exists: carried out when the cell ends
 WebBrowser.chunks()                        # exists: the stored chunks of the page shown
-WebBrowser.pin(xpath)                      # new: the right-click pin -> a stuck plane panel (133 b)
-WebBrowser.controls()                      # new: the page's interactive fields, by address (affordances)
-WebBrowser.act(address, value)             # new: act on a field in place through its trie address
+WebBrowser.pin(xpath)                      # exists: the right-click pin -> a stuck plane panel (133 b)
+WebBrowser.controls()                      # exists: the page's interactive fields, by address (affordances)
+WebBrowser.act(address, value)             # exists: act on a field in place through its trie address
 ```
 
 ```python
 # panels -- a chunk's two forms
-chunk(cid)                                 # new: /chunk -- the markdown, each line with its address
-page_form(cid)                             # new: /snapshot/<cid> -- the saved page form, or None
-resolve(url, xpath)                        # new: /resolve -- the chunk that draws an address
+chunk(cid)                                 # exists: /chunk -- the markdown, each line with its address
+page_form(cid)                             # exists: /snapshot/<cid> -- the saved page form, or None
+resolve(url, xpath)                        # exists: /resolve -- the chunk that draws an address
 ```
 
 ```python
 # 3D graph -- the world
-focus(cid)                                 # new: fly to a node (the plugin, not the sidecar)
-unfold(url)                                # new: /unfold -- a page into its chunks
-pages(contains="wiki")                     # new: /pages -- stored page urls
+focus(cid)                                 # exists: fly to a node (the plugin, not the sidecar)
+unfold(url)                                # exists: /unfold -- a page into its chunks
+pages(contains="wiki")                     # exists: /pages -- stored page urls
 ```
 
 ```python
 # the ego -- the tool space as one graph
-ego()                                      # new: /ego -- its nodes and links
-attach(cid)                                # new: tag a chunk into the ego
-view("third")                              # new: first / third person (G-333's camera field)
+ego()                                      # exists: /ego -- its nodes and links
+attach(cid)                                # exists: tag a chunk into the ego
+view("third")                              # exists: first / third person (G-333's camera field)
 ```
 
 ```python
@@ -280,10 +281,10 @@ view("third")                              # new: first / third person (G-333's 
 Vault.read("notes/Lattice.md")             # exists: the vault's files
 Vault.write("notes/out.md", text)          # exists: inside the vault only, never .obsidian/.git
 Agent.ask("summarise", context=hits)       # exists: the sidecar's local model, one session per kernel
-check(slate)                               # new: /slate_check -- the dialect's own errors (2026-11-01 62)
+check(slate)                               # exists: /slate_check -- the dialect's own errors (2026-11-01 62)
 ```
 
-Counted: **10 calls exist, 14 are new** (computed: `python -m domvec.tool_surface` reads these blocks and resolves each call against the kernel bootstrap; `tests/test_tool_surface.py`) -- and every new one sits on a route
+Counted: **25 calls exist, 0 are new** (2026-11-22, G-377 built: the fourteen that were new, plus `types` for G-388; it was 10 exist / 14 new before) (computed: `python -m domvec.tool_surface` reads these blocks and resolves each call against the kernel bootstrap; `tests/test_tool_surface.py`) -- and every new one sits on a route
 or plugin action that already exists, so the surfaces are wrappers, not new
 machinery. Two rows decide their shape: `G-378` (a tool panel is read-only
 and cannot open the code behind it) and `G-380` (marimo-style: a call that
