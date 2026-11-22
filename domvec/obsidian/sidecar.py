@@ -903,6 +903,7 @@ _PLANTABLE = {
     "stored-note": ("domvec.obsidian.refs", "PLANT_STORED_NOTE"),             # G-277
     "uniform-types": ("domvec.codegraph", "PLANT_UNIFORM_TYPES"),             # G-317
     "no-versions": ("domvec.graphstore", "PLANT_NO_VERSIONS"),                # G-253
+    "no-requeue": ("domvec.workspace", "PLANT_NO_REQUEUE"),                   # stuck unembedded rows
     "retire-in-session": ("domvec.obsidian.sidecar", "_PLANT_RETIRE_IN_SESSION"),  # Q.002 / G-120
     "edge-two-match": ("domvec.graphstore", "PLANT_EDGE_TWO_MATCH"),  # 137 (20)
     "record-split-at-window": ("domvec.markdown", "PLANT_RECORD_SPLIT_AT_WINDOW"),  # G-246
@@ -1547,6 +1548,30 @@ def _save_lexical_due(workspace, every: float = 30.0) -> None:
 _EMBED_SAVED_AT = [0.0]
 
 
+_REQUEUED_AT = [0.0]
+
+
+def _requeue_unembedded_due(workspace, every: float = 60.0) -> None:
+    """Every `every` seconds of an idle embedder: stored chunks with text
+    and no vector that nothing would embed go back in the queue
+    (`Workspace.requeue_unembedded`). Under the work lock for the one read.
+    Never raises."""
+    now = time.monotonic()
+    if now - _REQUEUED_AT[0] < every or not hasattr(workspace, "requeue_unembedded"):
+        return
+    _REQUEUED_AT[0] = now
+    try:
+        started = time.perf_counter()
+        with _WORK_LOCK:
+            got = workspace.requeue_unembedded()
+        if got.get("found"):
+            _profile("embed_requeue", dict(got, ms=round((time.perf_counter() - started) * 1000, 1)))
+        if got.get("requeued"):
+            _EMBED_WANTED.set()
+    except Exception as exc:                        # noqa: BLE001
+        _profile("embed_requeue", {"error": str(exc)[:160]})
+
+
 def _save_embeddings_due(workspace, every: float = 120.0) -> None:
     """Persist the query-side embedding matrix (`EmbeddingMatrix.load`'s
     cache) at most every `every` seconds, if it changed. The copy is taken
@@ -1632,6 +1657,7 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
             # hard kill costs seconds of them, not the whole session's.
             _save_lexical_due(workspace)
             _save_embeddings_due(workspace)
+            _requeue_unembedded_due(workspace)
             _warm_lexical(workspace)
             continue
         _EMBED_WANTED.clear()

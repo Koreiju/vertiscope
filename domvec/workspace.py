@@ -30,7 +30,7 @@ import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import threading
 
@@ -61,6 +61,9 @@ _PLANT_HF_BLOB = bool(os.environ.get("DOMVEC_PLANT_HF_BLOB"))
 #: Planted (P-N6): the embed gate is not seeded from the store, so after a
 #: restart an unchanged chunk of an edited note is embedded again.
 PLANT_NO_SEED = [False]
+#: Planted: a stored chunk with text and no vector, not queued, stays so
+#: until a restart's backfill -- as before `requeue_unembedded`.
+PLANT_NO_REQUEUE = [False]
 
 ProgressFn = Callable[[str, str], None]
 
@@ -1675,6 +1678,45 @@ class Workspace:
         t = threading.Thread(target=self._reconcile_embeddings, name="domvec-embed-reconcile", daemon=True)
         self._embed_reconciler = t
         t.start()
+
+    def requeue_unembedded(self, limit: int = 4000) -> Dict[str, Any]:
+        """Stored chunks with markdown and no vector that nothing will embed,
+        queued again. Seen 2026-11-22 on the-fit: 508 such rows while the
+        embed queue held 56 -- the startup backfill is the only other path
+        that reaches them, so mid-session they waited for a restart. The
+        digest gate is the one thing that can refuse them (it remembers a
+        cid's text as embedded), so a stale digest is dropped first.
+
+        What it found is kept on `requeue_stats`, split by url scheme, by
+        version rows (G-253) and by whether the gate thought the chunk was
+        embedded -- which names the leak's path the next time it is read.
+        Reads the trie's chunk rows; writes the embed queue only."""
+        stats: Dict[str, Any] = {"found": 0, "queued_already": 0, "had_digest": 0,
+                                 "requeued": 0, "versions": 0, "by_scheme": {}}
+        if PLANT_NO_REQUEUE[0] or self.embedder is None:
+            self.requeue_stats = stats
+            return stats
+        rows = self.store._rows(
+            "MATCH (c:Chunk) WHERE size(c.md) > 0 AND c.embedding IS NULL "
+            "RETURN c.cid, c.md, c.url LIMIT $n", {"n": int(limit)})
+        for cid, md, url in rows:
+            if not cid:
+                continue
+            stats["found"] += 1
+            if cid in self.vectors.pending:
+                stats["queued_already"] += 1
+                continue
+            if self.vectors.digests.pop(cid, None) is not None:
+                stats["had_digest"] += 1
+            u = str(url or "")
+            if u.endswith("#~v"):
+                stats["versions"] += 1
+            scheme = u.split(":", 1)[0] if ":" in u else "?"
+            stats["by_scheme"][scheme] = stats["by_scheme"].get(scheme, 0) + 1
+            if self.vectors.push(cid, md or "", url=u):
+                stats["requeued"] += 1
+        self.requeue_stats = stats
+        return stats
 
     def _reconcile_embeddings(self, batch: int = 2000) -> Dict[str, int]:
         """The saved matrix against the store, off the request path: every
