@@ -11418,6 +11418,29 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-382",
+      asks: "the kernel's tool panels are pages, searchable and placed in 3D (PLUGIN_GOAL 170 a, 172 [2]; mortegon UR O.22): after POST /tool_panels the five tool://kernel/ pages are drawn as graph nodes, and the store's search finds the Database panel by what it does; planted: a nonsense query does not rank a tool panel first",
+      async run() {
+        const got = await evaluate(`(async () => {
+          ${PREP}
+          const p = app.plugins.plugins["domvec-bridge"], base = p.settings.sidecar.replace(/\\/+$/, "");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const drawn = () => v.graph.graphData().nodes.map((n) => String(n.url || n.id || "")).filter((u) => u.startsWith("tool://kernel/"));
+          const before = drawn().length;
+          const r = await (await fetch(base + "/tool_panels", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
+          let after = [];
+          for (let i = 0; i < 90; i++) { after = drawn(); if (new Set(after).size >= 5) break; await sleep(1000); }
+          const top = async (q) => { const j = await (await fetch(base + "/search?q=" + encodeURIComponent(q) + "&k=5")).json();
+                                     return (j.hits || []).map((h) => h.url); };
+          const found = await top("read-only Cypher query over the store");
+          const nonsense = await top("zebra marmalade quarterback");
+          return { before, stored: (r.panels || []).length, drawn: [...new Set(after)].sort(), found: found.slice(0, 3), nonsense_top: nonsense[0] || null, ms: r.ms };
+        })()`);
+        return { pass: got.stored === 5 && got.drawn.length === 5 && got.found.includes("tool://kernel/Database")
+                       && !String(got.nonsense_top || "").startsWith("tool://"), evidence: got };
+      },
+    },
+    {
       id: "G-368",
       asks: "a page's fit sent by the projector is where the page is drawn, even if an earlier parting pass had moved it aside (G-94 run 130: an online update moved Radix_tree's fit ~34 units, its chunks followed, the page went back to the old fit); planted (plantStaleHomeFit): the parting pass's old home restored over the new fit",
       async run() {
