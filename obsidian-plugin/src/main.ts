@@ -1776,6 +1776,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   /** G-377: what the toolspaces' asks did, by kind, for the harness. */
   toolAskStats: Record<string, number> = {};
   toolAskLast: any = null;
+  toolAskLog: any[] = [];
   /**
    * A toolspace call that changes the world (COMPUTATION_GRAPH_EDITOR_SPEC
    * §8), carried out when its cell ends by the method the gesture uses:
@@ -1819,10 +1820,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     } else if (kind === "act") {
       const v = a.act || {};
       const action = v.value === null || v.value === undefined ? "press" : "type";
+      // The key is passed as `WebBrowser.controls` gave it: the store holds
+      // controls at the markdown level, so reducing it to the four-part leaf
+      // was refused as "not in this workspace" (G-377b, run 64).
       const r = browser && typeof browser.actOnAddress === "function" ? await browser.actOnAddress(String(v.address), action, v.value ?? undefined) : { error: "no browser cell" };
       said = r && !(r as any).error ? `act: ${action} done` : `act: ${(r as any)?.error || "failed"}`;
     }
     this.toolAskLast = { kind, said, at: Date.now() };
+    this.toolAskLog.push(this.toolAskLast); if (this.toolAskLog.length > 20) this.toolAskLog.shift();
     return said;
   }
   /** G-388: the patterns `/typegen?mine=1` found, kept 5 minutes -- mining

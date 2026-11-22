@@ -55,11 +55,38 @@ def test_the_route_stores_them_and_the_purge_removes_them(server):
     with urllib.request.urlopen(req, timeout=120) as r:
         got = json.load(r)
     urls = {p["url"] for p in got["panels"]}
-    assert urls == {tp.url_of(n) for n in ("search", "Database", "WebBrowser", "Agent", "Vault", "editor")}
+    assert urls == {tp.url_of(n) for n in ("search", "Database", "WebBrowser", "Agent", "Vault", "editor")} | \
+        {tp.PANE_ROOT + n for n in tp.render_panes()}
     assert all(p["chunks"] >= 1 for p in got["panels"])
     assert urls <= set(pp._get(base, "/pages")["urls"])
     # a search finds a tool panel by what it does -- the point of O.22
     hits = ws.search("read-only Cypher query over the store", k=10)
     assert any(str(getattr(h, "url", "")).startswith("tool://") for h in hits)
     out = pp.purge(base, ["tool://"])
-    assert out["purged"] == 6 and out["left_under_prefixes"] == 0
+    assert out["purged"] == 6 + len(tp.render_panes()) and out["left_under_prefixes"] == 0
+
+
+
+# --- G-376: one tool panel per README pane ---------------------------------
+
+def test_a_panel_per_readme_pane_every_line_a_kernel_call():
+    panes = tp.render_panes()
+    assert set(panes) == {"search", "browser-cell", "panels", "3d-graph", "the-ego", "notebook-slates"}
+    names = ts.kernel_names()
+    for name, text in panes.items():
+        block = text.split("```python\n", 1)[1].split("```", 1)[0]
+        s = ts.parse("# " + name + "\n" + block, names)
+        assert s.problems == [] and s.lines and all(l.resolves for l in s.lines), (name, s.problems)
+        assert len(s.lines) <= ts.MAX_LINES
+    assert 'view("third")' in panes["the-ego"] and 'types("article")' in panes["search"]
+
+
+def test_planted_pane_naming_a_call_the_kernel_lacks_is_refused():
+    spec = "## 8. x\n\n```python\n# the ego -- x\nteleport(cid)   # exists: no such call\n```\n\n## 9. y\n"
+    with pytest.raises(ValueError, match="teleport"):
+        tp.render_panes(spec)
+    tp.PLANT_UNCHECKED[0] = True
+    try:
+        assert "teleport" in tp.render_panes(spec)["the-ego"]
+    finally:
+        tp.PLANT_UNCHECKED[0] = False

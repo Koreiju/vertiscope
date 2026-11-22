@@ -69,6 +69,23 @@ export function parseAddressKey(key: string):
   return { url, xpath, tag, accessor };
 }
 
+/**
+ * A RENDERED line's key -- the address at the markdown level, `url|xpath|md|
+ * tag|accessor` (D-2) -- as the four fields acting needs; null for anything
+ * else. The store holds controls at this level, so the key itself is what is
+ * forwarded to the act; only the fields are read from it here (G-377b: the
+ * kernel's `WebBrowser.controls` hands out these keys, and `act` refused them
+ * as unparseable, run 63).
+ */
+export function parseRenderedKey(key: string):
+    { url: string; xpath: string; tag: string; accessor: string } | null {
+  const parts = String(key || "").split(SEP);
+  if (parts.length !== 5) return null;
+  const [url, xpath, , tag, accessor] = parts.map(unesc);
+  if (!xpath.startsWith("/")) return null;
+  return { url, xpath, tag, accessor };
+}
+
 /** An element of the panel, reduced to what deciding on a gesture reads. */
 export interface PanelEl {
   /** `data-domvec-address`; absent on anything the trie did not address. */

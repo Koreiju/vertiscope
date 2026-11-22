@@ -94,14 +94,62 @@ def url_of(name: str) -> str:
     return ROOT + name
 
 
+# ---------------------------------------------------------------------------
+# G-376: THE TOOLSPACES ARE THE README'S PANES (167 b: "a table at the very
+# beginning of our readme on what would become the 25-line tool surfaces").
+# Each pane's surface -- COMPUTATION_GRAPH_EDITOR_SPEC section 8, one block a
+# pane -- is a tool panel of its own at `tool://pane/<pane>`, beside the
+# per-object panels above. The block is the source; `tool_surface` checks
+# every line against the kernel before anything is stored, so a pane panel
+# cannot name a call a cell cannot make.
+# ---------------------------------------------------------------------------
+
+PANE_ROOT = "tool://pane/"
+SPEC = "docs/COMPUTATION_GRAPH_EDITOR_SPEC.md"
+
+
+def pane_slug(title: str) -> str:
+    """`notebook / slates -- the computation graph itself` -> `notebook-slates`."""
+    import re
+    head = title.split(" -- ", 1)[0].strip().lower()
+    return re.sub(r"[^a-z0-9]+", "-", head).strip("-") or "pane"
+
+
+def render_panes(spec_text: str = None) -> Dict[str, str]:
+    """Pane slug -> its tool panel markdown, from the spec's section 8 blocks."""
+    from pathlib import Path
+    from .tool_surface import surfaces
+    if spec_text is None:
+        p = Path(__file__).resolve().parents[1] / SPEC
+        if not p.exists():
+            return {}
+        spec_text = p.read_text(encoding="utf-8")
+    out: Dict[str, str] = {}
+    for s in surfaces(spec_text):
+        if (s.problems or not all(l.resolves for l in s.lines)) and not PLANT_UNCHECKED[0]:
+            raise ValueError("pane %s does not match the kernel: %s" % (s.title, s.problems or
+                             [l.target for l in s.lines if not l.resolves]))
+        width = max([len(l.code) for l in s.lines] + [0]) + 2
+        lines = ["%s# %s" % (l.code.ljust(width), l.comment) for l in s.lines]
+        title = s.title.split(" -- ", 1)
+        out[pane_slug(s.title)] = "\n".join([
+            "# %s" % title[0].strip(), "",
+            "The %s toolspace%s: every call a kernel cell or an agent makes on it, one a line. "
+            "Read-only; the code behind them is not shown." % (title[0].strip(), (" -- " + title[1]) if len(title) > 1 else ""),
+            "", "```python", *lines, "```", ""])
+    return out
+
+
 def index(workspace) -> List[dict]:
-    """Every panel into the store as a page (the page path: trie, chunks, vectors)."""
+    """Every panel into the store as a page (the page path: trie, chunks, vectors):
+    one per kernel object (G-382) and one per README pane (G-376)."""
     from .trie import AddressTrie
     from .vault import tag_note
     out = []
-    for name, text in render().items():
-        url = url_of(name)
+    every = [(url_of(n), "tool panel: %s" % n, t) for n, t in render().items()] + \
+            [(PANE_ROOT + n, "toolspace: %s" % n, t) for n, t in render_panes().items()]
+    for url, title, text in every:
         trie = AddressTrie.from_tags(tag_note(text), url)
-        chunks, _ = workspace.ingest(url, trie, title="tool panel: %s" % name)
+        chunks, _ = workspace.ingest(url, trie, title=title)
         out.append({"url": url, "chunks": len(chunks)})
     return out

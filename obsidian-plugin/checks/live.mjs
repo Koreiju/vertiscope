@@ -8225,6 +8225,120 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-376",
+      asks: "the toolspaces are the README's panes (PLUGIN_GOAL 167 b): after POST /tool_panels each of the six panes -- search, browser cell, panels, 3D graph, the ego, notebook / slates -- is a tool://pane/ page drawn as a graph node, and the store's search finds the right pane by what it does (first or third person -> the ego; fly to a node / unfold a page -> the 3D graph); planted: a nonsense query does not rank a pane first",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          await window.__domvec.act("open", "graph"); await sleep(800);
+          const p = app.plugins.plugins["domvec-bridge"], base = p.settings.sidecar.replace(/[/]+$/, "");
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          const drawn = () => [...new Set(v.graph.graphData().nodes.map((n) => String(n.url || n.id || "")).filter((u) => u.startsWith("tool://pane/")))];
+          const before = drawn().length;
+          const r = await (await fetch(base + "/tool_panels", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
+          const stored = (r.panels || []).filter((x) => String(x.url).startsWith("tool://pane/")).map((x) => x.url).sort();
+          let after = [];
+          for (let i = 0; i < 90; i++) { after = drawn(); if (after.length >= 6) break; await sleep(1000); }
+          const top = async (q) => { const j = await (await fetch(base + "/search?q=" + encodeURIComponent(q) + "&k=3")).json();
+                                     return (j.hits || []).map((h) => h.url); };
+          return { before, stored, drawn: after.sort(), ms: r.ms,
+                   ego_q: await top("first or third person view of the ego"),
+                   graph_q: await top("fly to a node and unfold a page into its chunks"),
+                   nonsense: await top("zebra marmalade quarterback") };
+        })()`, { timeout: 180000 });
+        const want = ["3d-graph", "browser-cell", "notebook-slates", "panels", "search", "the-ego"].map((n) => "tool://pane/" + n);
+        return { pass: JSON.stringify(got.stored) === JSON.stringify(want) && got.drawn.length === 6
+                       && got.ego_q.includes("tool://pane/the-ego") && got.graph_q.includes("tool://pane/3d-graph")
+                       && !String(got.nonsense[0] || "").startsWith("tool://pane/"), evidence: got };
+      },
+    },
+    {
+      id: "G-377b",
+      asks: "the browser toolspace from a kernel cell, on a page whose only motion is ours (tests/fixtures/live_mutate.html): WebBrowser.controls lists the page's add button by its trie address, WebBrowser.act on that address presses it -- exactly one new list item in the live page -- and WebBrowser.pin pins the list as a panel; planted (plantNoToolAsks, run FIRST so the count is clean) the same cell adds no item and pins nothing",
+      async run() {
+        const fixtures = await serveFixtures();
+        const token = "g377b" + Date.now().toString(36);
+        const page = fixtures.origin + "/live_mutate.html?token=" + token;
+        try {
+          const got = await evaluate(`(async () => {
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+            const plugin = app.plugins.getPlugin("domvec-bridge");
+            const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+            const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+            const PAGE = ${JSON.stringify(page)};
+            await window.__domvec.act("open", "graph"); await sleep(800);
+            for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) l.detach();
+            await sleep(500);
+            const gl = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+            const leaf = gl ? app.workspace.createLeafBySplit(gl, "vertical") : app.workspace.getLeaf("tab");
+            await leaf.setViewState({ type: "domvec-browser-view", active: true });
+            app.workspace.revealLeaf(leaf); await sleep(1500);
+            for (const l of app.workspace.getLeavesOfType("domvec-browser-view")) if (l.loadIfDeferred) await l.loadIfDeferred();
+            const b = app.workspace.getLeavesOfType("domvec-browser-view")[0]?.view;
+            const g = gl && gl.view;
+            if (!b || !b.webview) return { error: "no browser cell" };
+            const out = {};
+            try {
+              try { b.setLive(true); } catch (e) {}
+              b.go(PAGE);
+              for (let i = 0; i < 60; i++) { await sleep(400); if (!b.webview.isLoading() && b.webview.getURL().indexOf(PAGE) === 0) break; }
+              const landed = b.webview.getURL();
+              const resolve = async (xp) => { const r = await fetch(SIDE + "/resolve?url=" + encodeURIComponent(landed) + "&xpath=" + encodeURIComponent(xp)); return r.ok ? r.json() : null; };
+              let btn = null;
+              for (let i = 0; i < 75 && !(btn && Array.isArray(btn.lines)); i++) { btn = await resolve("/html/body/button"); if (!(btn && Array.isArray(btn.lines))) await sleep(800); }
+              if (!btn || !Array.isArray(btn.lines)) return { error: "the page never reached the trie", landed };
+              const items = () => b.webview.executeJavaScript("document.querySelectorAll('#items li').length");
+              const pins = () => (g && g.billboards ? g.billboards.size : 0);
+              const arm = async (planted) => {
+                const tag = (planted ? "p" : "c") + Date.now().toString(36);
+                const driver = "domvec/graph/g377b driver " + tag + ".md";
+                const code = [
+                  "import json",
+                  "ctl = WebBrowser.controls(" + JSON.stringify(btn.cid) + ")",
+                  "add = [c for c in ctl if 'add' in c['text'].lower()]",
+                  "a = WebBrowser.act(add[0]['key']) if add else None",
+                  "p = WebBrowser.pin('/html/body/ul')",
+                  "print('G377B' + json.dumps({'url': WebBrowser.url, 'controls': len(ctl), 'add_key': add[0]['key'] if add else None}) + 'G377END')",
+                ].join(NL);
+                plugin.plantNoToolAsks = planted;
+                const r = { planted, items_before: await items(), pins_before: pins() };
+                try {
+                  await d.create("notebook", { path: driver, text: F + "python" + NL + code + NL + F + NL });
+                  const reply = await plugin.onRunFence({ lang: "python", code, line: 0, path: driver });
+                  const so = String((reply && reply.stdout) || "");
+                  const i = so.indexOf("G377B"), j = so.indexOf("G377END");
+                  r.cell = i >= 0 && j > i ? JSON.parse(so.slice(i + 5, j)) : { error: String((reply && reply.error) || "").slice(-300), stdout: so.slice(-200) };
+                  await sleep(2500);
+                  r.items_after = await items(); r.pins_after = pins();
+                  r.said = (plugin.toolAskLog || []).slice(-3);
+                } finally {
+                  plugin.plantNoToolAsks = false;
+                  try { d.panelOf(driver)?.leaf.detach(); } catch (e) {}
+                  const f = app.vault.getAbstractFileByPath(driver); if (f) await app.vault.trash(f, true);
+                }
+                return r;
+              };
+              out.landed = landed;
+              out.planted = await arm(true);
+              out.clean = await arm(false);
+              return out;
+            } finally {
+              try { b.setLive(false); } catch (e) {}
+              try { b.go("about:blank"); } catch (e) {}
+              await sleep(1500);
+            }
+          })()`, { timeout: 300000 });
+          got.purged = await tidyFixtures(fixtures.origin);
+          const c = got.clean || {}, pl = got.planted || {};
+          return { pass: !got.error && c.cell && c.cell.controls >= 1 && !!c.cell.add_key && c.cell.url === got.landed
+                         && c.items_after === c.items_before + 1 && c.pins_after > c.pins_before
+                         && pl.cell && pl.items_after === pl.items_before && pl.pins_after === pl.pins_before, evidence: got };
+        } finally {
+          await fixtures.close();
+        }
+      },
+    },
+    {
       id: "P-C5",
       asks: "a saved edit to a module is a live delta in both halves and the 3D view: the trie side re-reads the store and marks exactly the chunk that changed (not its neighbour), and that chunk reaches the projector's delta stream; planted (plantNoTrieRefresh) the trie side keeps the old text, planted (source-not-projected) the chunk never reaches the stream",
       async run() {
@@ -11809,7 +11923,7 @@ export function makeChecks(env) {
                                      return (j.hits || []).map((h) => h.url); };
           const found = await top("read-only Cypher query over the store");
           const nonsense = await top("zebra marmalade quarterback");
-          return { before, stored: (r.panels || []).length, drawn: [...new Set(after)].sort(), found: found.slice(0, 3), nonsense_top: nonsense[0] || null, ms: r.ms };
+          return { before, stored: (r.panels || []).filter((x) => String(x.url).startsWith("tool://kernel/")).length, drawn: [...new Set(after)].sort(), found: found.slice(0, 3), nonsense_top: nonsense[0] || null, ms: r.ms };
         })()`);
         return { pass: got.stored === 6 && got.drawn.length === 6 && got.found.includes("tool://kernel/Database")
                        && !String(got.nonsense_top || "").startsWith("tool://"), evidence: got };

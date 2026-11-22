@@ -49,7 +49,7 @@ import { LayoutNode } from "./graph";
 import { Sidecar } from "./sidecar";
 import { GATE_SMALL_LINES, GateVerdict, pageGate } from "./gate";
 import { CentralDiff, EnactResult, SearchHit } from "./types";
-import { ActRecord, ActResult, PanelAction, addressTable, chainFor, parseAddressKey } from "./panelact";
+import { ActRecord, ActResult, PanelAction, addressTable, chainFor, parseAddressKey, parseRenderedKey } from "./panelact";
 
 export const BROWSER_VIEW = "domvec-browser-view";
 
@@ -2260,7 +2260,7 @@ export class BrowserView extends ItemView {
    * separate headless Firefox the reader never sees.
    */
   async actOnAddress(key: string, action = "press", text?: string): Promise<EnactResult | null> {
-    const at = parseAddressKey(key);
+    const at = parseAddressKey(key) || parseRenderedKey(key);
     if (!at) return { error: "unparseable address" };
     const act: PanelAction = action === "type" || action === "choose" || action === "toggle"
       ? action : "press";
