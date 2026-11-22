@@ -14835,25 +14835,28 @@ export function makeChecks(env) {
             // read as the panel failing (run 2026-11-22 01:33: 5 of 6 null in
             // BOTH arms). Each null now says why; the wait is 3 s, not ~1.
             const mine = chunks().filter((n) => String(n.url).split("#")[0] === String(pg.url).split("#")[0]);
-            const why = []; let skipped = 0;
+            const why = [], forms = []; let skipped = 0;
             for (const n of mine) {
               if (times.length >= 6) break;
               const t0 = performance.now();
               const pay = await v.chunkPayload(String(n.id));
-              const words = ((pay && pay.lines) || []).map((l) => String(l.text || "").replace(/\]\([^)]*\)/g, " ")).join(" ").match(/\p{L}{5,}/gu) || [];
+              const words = ((pay && pay.lines) || []).map((l) => String(l.text || "").replace(/\\]\\([^)]*\\)/g, " ")).join(" ").match(/\\p{L}{5,}/gu) || [];
               const first = words[0] || "";
               if (!first) { skipped++; continue; }
               await v.openBillboard(n);
               const e = v.billboards.get(String(n.id));
               let ms = null;
               const until = performance.now() + 3000;
-              while (e && performance.now() < until) { if ((e.el.textContent || "").includes(first)) { ms = performance.now() - t0; break; } await sleep(10); }
+              while (e && performance.now() < until) { if (shown().includes(first)) { ms = performance.now() - t0; break; } await sleep(10); }
               times.push(ms === null ? null : Math.round(ms));
-              why.push(ms !== null ? "ok" : !e ? "no panel" : "not shown in 3 s: " + first + " / panel: " + (e.el.textContent || "").slice(0, 60));
+              forms.push(e ? String(e.form || "") : "");
+              why.push(ms !== null ? "ok" : !e ? "no panel" : "not shown in 3 s: " + first + " / panel (" + e.form + "): " + shown().slice(0, 60));
               v.closeBillboard(String(n.id));
             }
             const ok = times.filter((x) => x !== null).sort((a, b) => a - b);
-            return { planted: ${planted}, page: String(pg.url).slice(-40), n: ok.length, p50: ok[ok.length >> 1], p90: ok[Math.floor(0.9 * (ok.length - 1))], times, why, skipped_no_word: skipped };
+            // Nearest-rank p90 (run 30 read p90 30 < p50 138 at n = 2).
+            return { planted: ${planted}, page: String(pg.url).slice(-40), n: ok.length, p50: ok[ok.length >> 1],
+                     p90: ok[Math.max(0, Math.ceil(0.9 * ok.length) - 1)], times, forms, why, skipped_no_word: skipped };
           } finally { v.plantShortPayloadCache = false; if (opened) await v.togglePage(opened); }
         `);
         const clean = await arm(false), planted = await arm(true);
@@ -14873,6 +14876,13 @@ export function makeChecks(env) {
           try {
             if (chunks().length < 2) {
               const pg = v.graph.graphData().nodes.find((n) => n.level === "page" && !n.force && (n.members || 0) >= 5 && (n.members || 0) <= 200 && /^https:/.test(String(n.url)));
+              // The PAGE form draws in a same-origin srcdoc iframe
+              // (snapshot.ts), which el.textContent does not reach: run
+              // 2026-11-22 05:23 read three panels that had drawn the page's
+              // own snapshot as "not shown". Text = the panel's own plus its
+              // frames'; the form each panel drew rides along.
+              const shown = () => (e.el.textContent || "") + [...e.el.querySelectorAll("iframe")]
+                .map((f) => { try { return f.contentDocument?.body?.textContent || ""; } catch (x) { return ""; } }).join(" ");
               if (pg) { const r = await v.togglePage(pg); if (r && r.action === "expand") opened = pg; }
               for (let i = 0; i < 20 && chunks().length < 2; i++) await sleep(500);
             }
@@ -14884,6 +14894,12 @@ export function makeChecks(env) {
             for (const k of [...v.billboards.keys()]) v.closeBillboard(k);
             b.onRightChunk(id, String(n.url), id); await sleep(1500);
             const afterRight = v.billboards.has(id);
+        // A discarded warm-up first: the first arm leaves page-form snapshots
+        // in the panel store (snapshot.ts STORE, which the plant does not
+        // empty), so whichever arm ran second drew the page form from memory
+        // -- run 34: planted p90 158 ms against clean 576, page forms 5 of 6
+        // against 2 of 6. Both measured arms now start from the same store.
+        await arm(false);
             for (const k of [...v.billboards.keys()]) v.closeBillboard(k);
             return { mode: ${JSON.stringify(mode)}, hover_opened: afterHover, right_opened: afterRight };
           } finally { v.setPanelsOn(was); if (opened) await v.togglePage(opened); }
