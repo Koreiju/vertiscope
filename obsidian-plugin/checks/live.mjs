@@ -12167,6 +12167,8 @@ export function makeChecks(env) {
             }
           } finally {
             if (ChatUI) { ChatUI.plantNoDebounce = false; ChatUI.plantNoPieces = false; ChatUI.plantNoLine = false; }
+            // EVERY piece this arm pulled (a planted arm pulls more than one), by the conversation's name.
+            for (const f of app.vault.getMarkdownFiles()) if (f.path.startsWith(path.replace(/\.md$/, "") + " ") && !made.includes(f.path)) made.push(f.path);
             for (const q of [path, ...made]) {
               try { d.panelOf(q)?.leaf.detach(); } catch (e) {}
               for (let k = 0; k < 3; k++) { await sleep(800); const f = app.vault.getAbstractFileByPath(q); if (!f) break; await app.vault.trash(f, true); }

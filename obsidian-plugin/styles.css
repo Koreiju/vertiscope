@@ -1482,6 +1482,9 @@ body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) 
 .domvec-chatui-copy { cursor: pointer; opacity: 0.7; }
 .domvec-chatui-copy:hover { opacity: 1; }
 .domvec-chatui-codebody pre { margin: 0 !important; background: transparent !important; }
+/* Obsidian's own copy-code icon sat ON the run button (seen 2026-11-22);
+   the block's header already has copy. */
+.domvec-chatui-codebody .copy-code-button { display: none !important; }
 .domvec-chatui-inputbox { display: flex; align-items: flex-end; gap: 6px; margin: 6px 8px 8px; padding: 6px 8px; border: 1px solid #3a3a4a; border-radius: 8px; background: #1c1c24; }
 .domvec-chatui-input { flex: 1; resize: none; border: none !important; background: transparent !important; color: #eee; font-size: 13px; min-height: 22px; max-height: 160px; box-shadow: none !important; }
 .domvec-chatui-send { cursor: pointer; color: #999; padding: 2px 4px; }
