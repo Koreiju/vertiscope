@@ -8206,7 +8206,16 @@ export function makeChecks(env) {
           } finally {
             plugin.plantNoToolAsks = false;
             try { d.panelOf(driver)?.leaf.detach(); } catch (e) {}
-            const f = app.vault.getAbstractFileByPath(driver); if (f) await app.vault.trash(f, true);
+            // The panel's editor saves its buffer on close, after a delay: a
+            // trash at once was undone by that save, and six driver notes
+            // survived runs 59-66. Wait it out, trash, and trash again if the
+            // note comes back.
+            for (let k = 0; k < 3; k++) {
+              await sleep(2500);
+              const f = app.vault.getAbstractFileByPath(driver);
+              if (!f) break;
+              await app.vault.trash(f, true);
+            }
             if (!wasTagged && g.egoTags && g.egoTags.has(top.cid)) await g.tagEgo(top.cid, false);
             g.agent.setMode(mode0); if (g.agent.view !== view0) g.agent.setView(view0);
           }
@@ -17660,7 +17669,20 @@ export function makeChecks(env) {
                 "click", { bubbles: true, cancelable: true }));
 
               out.card = await until(async () => { const f = frameOf(); return !!f && !!f.contentDocument.querySelector("[data-domvec-address]"); }, 25000);
-              if (!out.card) return { ...out, error: "no card with addressed elements" };
+              if (!out.card) {
+                // What the pin's panel DOES hold, so the failure names its stage.
+                const gv = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+                const key = (gv && gv.pinAlias && gv.pinAlias.get(cid)) || cid;
+                const bbE = gv && gv.billboards.get(key);
+                const f = bbE && bbE.el && bbE.el.querySelector("iframe.domvec-snapshot");
+                let fd = null;
+                try { fd = f && f.contentDocument; } catch (e) { fd = null; }
+                out.diag = { billboard: !!bbE, key: String(key).slice(0, 16), aliased: key !== cid, billboards: gv ? [...gv.billboards.keys()].map((k) => String(k).slice(0, 16)) : [],
+                             classes: bbE && bbE.el ? bbE.el.className : null, iframe: !!f, iframe_ready: !!(fd && fd.readyState === "complete"),
+                             root: !!(fd && fd.getElementById("domvec-root")), addressed: fd ? fd.querySelectorAll("[data-domvec-address]").length : 0,
+                             body_text: bbE && bbE.el ? (bbE.el.textContent || "").slice(0, 160) : "", snapshot_held: !!(b.snapshots && b.snapshots.has && b.snapshots.has(cid)) };
+                return { ...out, error: "no card with addressed elements" };
+              }
               const first = frameOf();
 
               // ---- The card is LINKED to the trie: every addressed element names this page and resolves in it.

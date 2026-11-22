@@ -6071,3 +6071,36 @@ pattern; (b) rank-dominance collapse is generalised to every node in both
 views; (c) DEBIAS = 2 becomes the fit's default; (d) `chat_cuda.IDLE_S` stays
 300 s. The 2D editor's host, the first of section 6's questions, is read as
 already answered by G-295 ("the 2D computation-graph plane over the 3D view").*
+
+### 176. (2026-11-22) Four rulings: repeats kept, G-111 fixed in the uncommitted work, scratch pages purged, models held
+
+*Asked in the question dialog (2026-11-22, after G-376/G-377 and the S-12
+re-scope):*
+
+- *R-K2b: when a page repeats its own content (88% of the repeats measured),
+  should a chunk that shows the repetition be kept as faithful to the page,
+  or dropped as noise?* -- **"Faithful, keep (Recommended)"**: "The map draws
+  what the page draws; repeats stay as chunks, deduplicated only by the
+  existing content hash where identical."
+- *G-111 fails because a pinned chunk's billboard on the plane shows no
+  snapshot frame with addressed controls within 25 s. That code sits in your
+  uncommitted browser.ts / graph.ts edits. May I debug and fix it there?* --
+  **"Yes, fix it (Recommended)"**: "I diagnose through the harness and change
+  only the lines needed, staged as my own hunks, leaving the rest of your
+  edits uncommitted."
+- *Check runs left their scratch notes in the store as vault:// pages (about
+  8, from 103 to 111 pages this session). Purge the vault:// pages whose
+  notes no longer exist?* -- **"Purge them (Recommended)"**: "Only vault://
+  pages whose note file is gone; cannot be undone, but they describe deleted
+  scratch notes."
+- *G-237 names three local models (OpenJEV, DeepSeek-Coder 6.7B, Triplex).
+  Your item 167 said no model downloads now. Still hold?* -- **"Still hold"**:
+  "No downloads; G-237 stays Open and the GGUF import path (G-381) stays the
+  way in."
+
+*Read as: (176 a) R-K2b is decided -- a repeat is the page's and is kept;
+only identical content merges, by the content hash; (b) G-111's billboard
+defect may be fixed inside the reader's uncommitted browser.ts / graph.ts,
+only the lines needed, staged as separate hunks; (c) vault:// pages whose
+note no longer exists are purged from the store; (d) G-237 stays Open, no
+model downloads.*

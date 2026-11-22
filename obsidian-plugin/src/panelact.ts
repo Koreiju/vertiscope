@@ -115,7 +115,7 @@ export function actFromEvent(kind: "click" | "change", el: PanelEl): ActRecord |
   const action = el.act as PanelAction;
   if (kind === "click" && action !== "press" && action !== "toggle") return null;
   if (kind === "change" && action !== "type" && action !== "choose") return null;
-  const at = parseAddressKey(el.address);
+  const at = parseAddressKey(el.address) || parseRenderedKey(el.address);   // stamped by addressTable: five-part now
   if (!at) return null;
   const rec: ActRecord = { key: el.address, url: at.url, xpath: at.xpath, action };
   if (kind === "change") rec.value = String(el.value ?? "");
@@ -158,7 +158,12 @@ export function addressTable(lines: { key?: string; control_key?: string; contro
   for (const l of lines || []) {
     for (const [k, ctl] of [[l.control_key, 1], [l.key, l.control ? 1 : 0]] as [string | undefined, number][]) {
       if (!k) continue;
-      const at = parseAddressKey(k);
+      // A line's key is at the markdown level now (`url|xpath|md|tag|
+      // accessor`, D-2; the store holds 70,632 of those and 0 four-part). Read
+      // with the four-field parse only, the table came out EMPTY, so no
+      // snapshot element carried an address and every pinned panel was inert
+      // (G-111, run 69: billboard, frame and root present, 0 addressed).
+      const at = parseAddressKey(k) || parseRenderedKey(k);
       if (!at) continue;
       const have = out[at.xpath];
       if (have && !(ctl && !have[1])) continue;
