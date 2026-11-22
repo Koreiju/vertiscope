@@ -228,6 +228,78 @@ PLANT_SOURCE_NOT_PROJECTED = [False]
 #: Neither holds the store's lock while encoding, so a projection waits at
 #: most one embed batch -- never a capture's write.
 _ENCODER_LOCK = threading.Lock()
+#: Interactive encodes waiting for `_ENCODER_LOCK` (`/project`). The
+#: background embedder gives way to them between slices (D-40).
+_ENCODER_FG = [0]
+_ENCODER_FG_LOCK = threading.Lock()
+#: Texts the background embedder encodes per hold of the encoder lock.
+_EMBED_SLICE = 16
+#: The browser's `/project` gives up after this; an encode started later
+#: serves no one.
+_PROJECT_CLIENT_S = 8.0
+#: Planted: the whole batch encoded under one hold, as before.
+PLANT_ENCODER_BATCH_HOLD = [False]
+_ENCODER_STATS = {"slices": 0, "gave_way": 0, "gave_way_s": 0.0, "project_stale": 0}
+
+
+class _foreground_encoder:
+    """Hold `_ENCODER_LOCK` for an interactive encode, announced first so the
+    background embedder stops taking slices until it is through."""
+
+    def __enter__(self):
+        with _ENCODER_FG_LOCK:
+            _ENCODER_FG[0] += 1
+        try:
+            _ENCODER_LOCK.acquire()
+        except BaseException:
+            with _ENCODER_FG_LOCK:
+                _ENCODER_FG[0] -= 1
+            raise
+        return self
+
+    def __exit__(self, *exc):
+        _ENCODER_LOCK.release()
+        with _ENCODER_FG_LOCK:
+            _ENCODER_FG[0] -= 1
+        return False
+
+
+def _encode_sliced(workspace, taken, slice_n=None, max_give_way_s: float = 10.0):
+    """The background batch encoded `slice_n` texts per hold of the encoder
+    lock, giving way while an interactive encode waits (D-40: a `/project`
+    for the chunks streaming into the 3D view waited 682 s behind batch
+    encodes, 2026-11-22, the GPU under a game; on a quiet GPU one 64-text
+    batch is about a second, D-40's 1.7 s to_3d). On failure the slices not
+    yet encoded go back to the queue before it raises."""
+    taken = list(taken or ())
+    if PLANT_ENCODER_BATCH_HOLD[0]:
+        with _ENCODER_LOCK:
+            return workspace.encode_taken(taken)
+    n = max(1, int(slice_n or _EMBED_SLICE))
+    produced = {}
+    for i in range(0, len(taken), n):
+        part = taken[i:i + n]
+        t0 = time.monotonic()
+        while _ENCODER_FG[0] > 0 and time.monotonic() - t0 < max_give_way_s:
+            time.sleep(0.005)
+        waited = time.monotonic() - t0
+        if waited > 0.004:
+            _ENCODER_STATS["gave_way"] += 1
+            _ENCODER_STATS["gave_way_s"] = round(_ENCODER_STATS["gave_way_s"] + waited, 3)
+        try:
+            with _ENCODER_LOCK:
+                got = workspace.encode_taken(part)
+        except Exception:
+            rest = taken[i + n:]
+            if rest:
+                try:
+                    workspace.vectors.requeue(rest)
+                except Exception:                   # noqa: BLE001
+                    pass
+            raise
+        _ENCODER_STATS["slices"] += 1
+        produced.update(got or {})
+    return produced
 
 #: Serialises LAYOUT FITTING, which `_WORK_LOCK` does not cover.
 #:
@@ -904,6 +976,7 @@ _PLANTABLE = {
     "uniform-types": ("domvec.codegraph", "PLANT_UNIFORM_TYPES"),             # G-317
     "no-versions": ("domvec.graphstore", "PLANT_NO_VERSIONS"),                # G-253
     "no-requeue": ("domvec.workspace", "PLANT_NO_REQUEUE"),                   # stuck unembedded rows
+    "encoder-batch-hold": ("domvec.obsidian.sidecar", "PLANT_ENCODER_BATCH_HOLD"),  # D-40
     "retire-in-session": ("domvec.obsidian.sidecar", "_PLANT_RETIRE_IN_SESSION"),  # Q.002 / G-120
     "edge-two-match": ("domvec.graphstore", "PLANT_EDGE_TWO_MATCH"),  # 137 (20)
     "record-split-at-window": ("domvec.markdown", "PLANT_RECORD_SPLIT_AT_WINDOW"),  # G-246
@@ -1673,8 +1746,7 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
                     before = len(workspace.vectors)
                     taken = workspace.take_vectors(limit=_EMBED_BATCH)
                 enc_start = time.perf_counter()
-                with _ENCODER_LOCK:
-                    produced = workspace.encode_taken(taken)
+                produced = _encode_sliced(workspace, taken)
                 enc_ms = (time.perf_counter() - enc_start) * 1000
                 stood += _yield_to_foreground()
                 with _WORK_LOCK:
@@ -2788,9 +2860,19 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             try:
                 t0 = time.perf_counter()
-                with _ENCODER_LOCK:
+                with _foreground_encoder():
                     t1 = time.perf_counter()
-                    M = self.workspace.embedder.embed_texts([str(it["text"])[:4000] for it in items])
+                    if t1 - t0 > _PROJECT_CLIENT_S:
+                        # The browser stopped waiting; encoding now would hold
+                        # the GPU for no one.
+                        _ENCODER_STATS["project_stale"] += 1
+                        M = None
+                    else:
+                        M = self.workspace.embedder.embed_texts([str(it["text"])[:4000] for it in items])
+                if M is None:
+                    _profile("project", {"url": url, "n": len(items), "lock": round((t1 - t0) * 1000, 1), "stale": True})
+                    self._send(503, {"error": "waited past the client's timeout", "lock_ms": round((t1 - t0) * 1000, 1)})
+                    return
                 t2 = time.perf_counter()
                 import numpy as np
                 from .projector import projector as _get_projector
