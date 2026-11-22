@@ -2169,8 +2169,21 @@ export function makeChecks(env) {
           ${PREP}
           const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
           b.plant.clear();
-          if (${serial}) b.plant.add("serial-ingest");
+          // One capture per drain takes BOTH merges off: the ride-along at
+          // dequeue (serial-ingest) and the merge at enqueue added after it
+          // (no-enqueue-merge, 2026-10-17). With only the first planted, run
+          // 37's serial arm merged 30 drains -- the same as clean.
+          if (${serial}) { b.plant.add("serial-ingest"); b.plant.add("no-enqueue-merge"); }
           const q = (xs, p) => { if (!xs.length) return null; const s = xs.slice().sort((a, c) => a - c); return Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))]); };
+          // The LOAD, in both arms: each capture holds the store 400 ms
+          // longer, as a settle in its way makes it. Idle, a capture (~200
+          // ms) kept up with a 120 ms drain and serial ingest had nothing to
+          // lose (run 36: serial p95 442 ms, merged 889 -- the planted arm
+          // could not fail). The plant under test stays serial-ingest.
+          const sbase = app.plugins.plugins["domvec-bridge"].settings.sidecar.replace(/\\/+$/, "");
+          const load = (on) => fetch(sbase + "/plant", { method: "POST", headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
+                                                        body: JSON.stringify({ name: "capture-load", on }) });
+          await load(true);
           try {
             const url = ${JSON.stringify(fixtures.origin)} + "/busy_feed.html?every=120&rounds=40&d42=" + (${serial} ? "s" : "m") + Date.now();
             const merged0 = b.mergedCaptures;
@@ -2192,9 +2205,10 @@ export function makeChecks(env) {
             return { serial: ${serial}, url, captures: T.length, merged: b.mergedCaptures - merged0,
                      queue_wait_ms: { p50: q(waits, 0.5), p95: q(waits, 0.95), max: q(waits, 1) },
                      drawn_to_saved_ms: life.drawn_to_saved_ms, backlog_drained_after_ms: drained,
-                     stored_chunks: Object.keys(map.chunks || {}).length, addresses: [...addrs].sort() };
+                     stored_chunks: Object.keys(map.chunks || {}).length, addresses: [...addrs].sort(), load_ms: 400 };
           } finally {
             b.plant.clear();
+            await load(false);
           }
         })()`, { timeout: 150000 });
         try {

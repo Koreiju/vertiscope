@@ -934,7 +934,15 @@ _PLANT_NO_MD_HEAL = [os.environ.get("DOMVEC_PLANT_NO_MD_HEAL") == "1"]
 
 #: Module flags a live check may plant through `POST /plant` -- the planted
 #: arm of a rule that runs in the sidecar's projection, not in the plugin.
+#: A LOAD, not a defect (D-42): each capture holds the write lock 400 ms
+#: longer, as it does when a settle or an embed batch is in its way. D-42
+#: turns it on for BOTH arms -- on an idle sidecar a capture (~200 ms) keeps
+#: up with a 120 ms drain, so one-capture-per-drain had nothing to lose and
+#: the planted arm could not fail (run 36: serial p95 442 ms, merged 889).
+PLANT_CAPTURE_LOAD = [False]
+
 _PLANTABLE = {
+    "capture-load": ("domvec.obsidian.sidecar", "PLANT_CAPTURE_LOAD"),      # D-42 load
     "placeholder-target": ("domvec.markdown", "PLANT_PLACEHOLDER_TARGET"),   # G-197
     "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),
     "no-declump": ("domvec.obsidian.layout", "PLANT_NO_DECLUMP"),            # 137(6)
@@ -4496,6 +4504,8 @@ class _Handler(BaseHTTPRequestHandler):
                 with _foreground(), _WORK_LOCK:
                     phases["lock_wait"] = round(
                         (time.perf_counter() - asked) * 1000, 1)
+                    if PLANT_CAPTURE_LOAD[0]:
+                        time.sleep(0.4)
                     # A code block's text as the page holds it -- the
                     # trie's value, newlines kept -- for the code graph
                     # (G-233); the markdown line has it on one line.
