@@ -39,7 +39,7 @@ import {
 import { installHarness } from "./harness";
 import { TERMINAL_VIEW, TerminalView } from "./terminal";
 import { CODE_VIEW, CodeView } from "./codeview";
-import { BROWSER_FENCE, browserFence, notebookBrowsers } from "./nbbrowser";
+import { BROWSER_FENCE, browserFence, notebookBrowsers, registerNotebookLeaves } from "./nbbrowser";
 import {
   RunHost, RunRequest, livePreviewRunButtons, readingViewRunButtons,
 } from "./runbutton";
@@ -291,6 +291,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       console.warn("domvec: a stale `browser` fence processor is still registered; keeping it", e);
     }
     (window as any).__domvecNotebookBrowsers = notebookBrowsers;
+    // D-54: a notebook browser cell is a browser to the leaf lookup, where it sits.
+    this.register(registerNotebookLeaves(this.app));
 
     this.registerEditorSuggest(
       new RetrievalSuggest(this.app, this.sidecar, () => this.settings,
@@ -1410,7 +1412,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   }
 
   async openBrowser(): Promise<void> {
-    const existing = this.app.workspace.getLeavesOfType(BROWSER_VIEW);
+    // The workspace's own browser leaves: a notebook cell is registered with
+    // the lookup (D-54) but lives in a note, not in the tree to reveal.
+    const existing = this.app.workspace.getLeavesOfType(BROWSER_VIEW).filter((l: any) => !l.__domvecHosted);
     if (existing.length) {
       this.app.workspace.revealLeaf(existing[0]);
       return;

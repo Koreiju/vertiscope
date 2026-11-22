@@ -8017,7 +8017,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-36-notebook",
-      asks: "the browser cell is ONE component with two hosts: a ```browser fence in a notebook renders the same domvec-browser-view the standalone pane is (outside the workspace's tree), loads its page, and its sensor puts that page in the store; dragging the cell's frame resizes the page's viewport, and so does narrowing the notebook's pane; closing the note detaches it; planted (__domvecPlantNoNotebookBrowser) the fence stays plain text",
+      asks: "the browser cell is ONE component with two hosts: a ```browser fence in a notebook renders the same domvec-browser-view the standalone pane is (in the note, and reachable through the workspace's leaf lookup -- D-54, 173 c), loads its page, and its sensor puts that page in the store; dragging the cell's frame resizes the page's viewport, and so does narrowing the notebook's pane; closing the note detaches it; planted (__domvecPlantNoNotebookBrowser) the fence stays plain text",
       async run() {
         // Addendum IV: "the webbrowser notebook cells should be actual electron
         // browser cells, resizable within the notebook, as well as allowing it
@@ -8090,7 +8090,7 @@ export function makeChecks(env) {
           const ok = (a) => Array.isArray(a) && a[0] > 50 && a[1] > 50;
           return {
             pass: !got.error && got.rendered && got.renders.live_browsers === 1 && got.same_component.type === "domvec-browser-view" && got.same_component.in_note
-                  && got.same_component.in_workspace_tree === 0 && got.loaded && got.stored_chunks > 0
+                  && got.same_component.in_workspace_tree === 1 && got.loaded && got.stored_chunks > 0
                   && ok(r.small) && ok(r.tall) && r.tall[1] > r.small[1] + 200 && ok(r.narrow) && ok(r.wide) && r.wide[0] > r.narrow[0] + 50
                   && got.detached && !!got.planted && !got.planted.cell && got.planted.webviews === 0 && got.planted.plain_url,
             evidence: { ...got, purged: await tidyFixtures(fixtures.origin) },
@@ -11605,7 +11605,7 @@ export function makeChecks(env) {
     },
     {
       id: "D-54",
-      asks: "a notebook browser cell scans new chunks as the standalone browser does, and is a regular Obsidian tab (PLUGIN_GOAL 167 e): the same growing page (busy_feed, a paragraph every 1.5 s) in the standalone pane and in a ```browser cell -- the store's chunk count for it grows in both, the cell's growth at least 80% of the pane's; and the cell's view is reachable as a workspace leaf; null arm: a static page in the cell does not grow",
+      asks: "a notebook browser cell scans new chunks as the standalone browser does, and is a regular Obsidian tab (PLUGIN_GOAL 167 e): the same growing page (busy_feed, a paragraph every 1.5 s) in the standalone pane and in a ```browser cell -- the store's chunk count for it grows in both, the cell's growth at least 80% of the pane's; and the cell's view is reachable as a workspace leaf where it sits (planted __domvecPlantNbUnregistered: not), and its pop-out opens the page it shows in a regular tab in the workspace's tree while the cell stays (173 c, both); null arm: a static page in the cell does not grow",
       async run() {
         const fixtures = await serveFixtures();
         try {
@@ -11617,7 +11617,7 @@ export function makeChecks(env) {
             const O = ${JSON.stringify(fixtures.origin)};
             const feed = (tag) => O + "/busy_feed.html?words=60&every=1500&rounds=14&d54=" + tag + Date.now();
             const count = async (u) => (await plugin.sidecar.pageCids(u)).length;
-            const grow = async (u) => { let a = 0, t = 0; for (; t < 12000 && !(a = await count(u)); t += 250) await sleep(250); await sleep(14000); const b = await count(u); return { first_ms: t, early: a, late: b, grew: b - a }; };
+            const grow = async (u) => { let a = 0, t = 0; for (; t < 30000 && !(a = await count(u)); t += 250) await sleep(250); await sleep(14000); const b = await count(u); return { first_ms: t, early: a, late: b, grew: b - a }; };
             const out = {};
             // the standalone pane
             const b = plugin.activeBrowser();
@@ -11627,7 +11627,7 @@ export function makeChecks(env) {
             out.pane = await grow(U1);
             if (back) b.go(back);
             // the notebook cell, and the static null arm
-            const cellArm = async (U) => {
+            const cellArm = async (U, popout) => {
               const folder = "domvec-checks";
               if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
               const file = await app.vault.create(folder + "/d54 " + Date.now() + ".md", "# d54" + NL + NL + F + "browser" + NL + U + NL + F + NL);
@@ -11638,17 +11638,31 @@ export function makeChecks(env) {
                 await until(() => !!cell(), 10000);
                 const c = cell();
                 const r = await grow(U);
-                r.tab = { in_workspace: !!c && app.workspace.getLeavesOfType("domvec-browser-view").includes(c.leaf),
-                          iterate: (() => { let hit = false; app.workspace.iterateAllLeaves((l) => { if (c && l === c.leaf) hit = true; }); return hit; })() };
+                const reach = () => ({ in_workspace: !!c && app.workspace.getLeavesOfType("domvec-browser-view").includes(c.leaf),
+                          iterate: (() => { let hit = false; app.workspace.iterateAllLeaves((l) => { if (c && l === c.leaf) hit = true; }); return hit; })() });
+                r.tab = reach();
+                window.__domvecPlantNbUnregistered = true;
+                try { r.tab_planted = reach(); } finally { window.__domvecPlantNbUnregistered = false; }
+                if (popout && c) {
+                  let shown = ""; try { shown = c.view.webview.getURL(); } catch (e) { /* none */ }
+                  const tab = await c.popOut();
+                  const tabUrl = () => { try { return tab.view.webview.getURL(); } catch (e) { return ""; } };
+                  await until(() => tabUrl().split("#")[0] === shown.split("#")[0], 20000);
+                  r.popout = { same_url: tabUrl().split("#")[0] === shown.split("#")[0], in_tree: !!tab.parent && !!tab.getRoot && tab.getRoot() === app.workspace.rootSplit,
+                               not_the_cell: tab !== c.leaf, cell_kept: [...window.__domvecNotebookBrowsers].includes(c),   /* in the note still; its webview mounts only while seen, by design */ button: !!c.containerEl.querySelector(".domvec-nb-popout") };
+                  try { tab.detach(); } catch (e) { /* gone */ }
+                }
                 return r;
               } finally { try { leaf.detach(); } catch (e) { /* gone */ } try { await window.__domvecPlane.trash(file); } catch (e) { /* gone */ } }
             };
-            out.cell = await cellArm(feed("cell"));
+            out.cell = await cellArm(feed("cell"), true);
             out.static = await cellArm(O + "/media_kinds.html?d54s=" + Date.now());
             return out;
           })()`, { timeout: 240000 });
           const scans = got.pane && got.cell && got.pane.grew > 0 && got.cell.grew >= 0.8 * got.pane.grew;
-          const tab = got.cell && got.cell.tab && got.cell.tab.in_workspace;
+          const tab = got.cell && got.cell.tab && got.cell.tab.in_workspace && got.cell.tab.iterate
+                      && got.cell.tab_planted && !got.cell.tab_planted.in_workspace
+                      && got.cell.popout && got.cell.popout.same_url && got.cell.popout.in_tree && got.cell.popout.not_the_cell && got.cell.popout.cell_kept;
           const nullOk = got.static && got.static.grew === 0;
           return { pass: !!(scans && tab && nullOk), evidence: { ...got, verdict: { scans: !!scans, tab: !!tab, null_static: !!nullOk }, purged: await tidyFixtures(fixtures.origin) } };
         } finally { await fixtures.close(); }

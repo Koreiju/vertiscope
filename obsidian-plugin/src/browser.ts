@@ -1773,6 +1773,11 @@ export class BrowserView extends ItemView {
   /** Hosted in a notebook (G-36's second host, `nbbrowser.ts`): its leaf is
    *  not in the workspace's tree. The standalone pane's leaf always is. */
   get hosted(): boolean {
+    // Marked by the notebook cell that mounts it (D-54): since a cell is
+    // registered with the leaf lookup, "not in the lookup" no longer says
+    // hosted -- read that way, a cell took itself for the standalone pane and
+    // restored the reader's last page over its own.
+    if ((this.leaf as any)?.__domvecHosted) return true;
     return !this.app.workspace.getLeavesOfType(BROWSER_VIEW).includes(this.leaf);
   }
 
