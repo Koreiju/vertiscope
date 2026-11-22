@@ -17822,10 +17822,13 @@ export function makeChecks(env) {
                && got.board_before_had_token === false
                && got.mutated_in_page === true
                && got.db_has_token === true
-               && got.side_has_token === true
+               // PLUGIN_GOAL 133(b): a pin is a stuck panel on the plane -- the
+               // billboard -- not a side card ("the clipboard"); the side must
+               // stay EMPTY through pin, unpin and re-pin, which the old
+               // `side_has_token` could not say once the side was retired.
+               && (got.side_chars || []).length > 0 && got.side_chars.every((n) => n === 0)
                && got.board_has_token === true
                && got.unpin_closed_board === true
-               && got.repinned_side_has_token === true
                && got.repinned_board_has_token === true
                && got.graph_has_node === true
                && got.pages_after === got.pages_before,
