@@ -557,6 +557,7 @@ class ThreeFormIndex:
         count_only: bool = False,
         ref: str = "",
         rank: str = "",
+        scope_urls: Sequence[str] = (),
     ) -> List[Hit]:
         """Rank chunks by the triple product.
 
@@ -735,6 +736,13 @@ class ThreeFormIndex:
             mask = np.zeros(rows, dtype=np.float32)
             mask[self._rows_of_url(scope_url, rows)] = 1.0
             score = score * mask
+        # A SET of pages (G-205's domain scope: a host, a registrable domain,
+        # a page's dual-similarity neighbours) -- the same mask over each.
+        if scope_urls:
+            mask = np.zeros(rows, dtype=np.float32)
+            for u in scope_urls:
+                mask[self._rows_of_url(u, rows)] = 1.0
+            score = score * mask
 
         # **Package retrieval: a vector-centroid pre-filter, then partition-wise
         # ranking** (R-6). Each code root -- `code://pypi/<package>`,
@@ -743,7 +751,7 @@ class ThreeFormIndex:
         # centroids are nearest it and ranks code only within those. Web and
         # vault rows are untouched, and it is a mask inside THIS ranking: the
         # filter is not a second interface.
-        if available and self.code_partitions > 0 and not scope_url:
+        if available and self.code_partitions > 0 and not scope_url and not scope_urls:
             score = self._prefilter_code(score, rows, diag, lexical=lexical)
 
         _lap("scope_and_code")

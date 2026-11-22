@@ -38,7 +38,7 @@ from pathlib import Path
 from collections import deque
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .. import tokens
@@ -944,6 +944,7 @@ PLANT_CAPTURE_LOAD = [False]
 _PLANTABLE = {
     "capture-load": ("domvec.obsidian.sidecar", "PLANT_CAPTURE_LOAD"),      # D-42 load
     "no-shape": ("domvec.typegen", "PLANT_NO_SHAPE"),                         # G-388: every repeat is a type
+    "browse-host-only": ("domvec.browse", "PLANT_DOMAIN_HOST_ONLY"),          # G-205: the domain scope one level only
     "placeholder-target": ("domvec.markdown", "PLANT_PLACEHOLDER_TARGET"),   # G-197
     "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),
     "no-declump": ("domvec.obsidian.layout", "PLANT_NO_DECLUMP"),            # 137(6)
@@ -2190,6 +2191,33 @@ CODEGRAPH = {"graph": None, "ms": 0, "error": ""}
 #: What the browser cell in use shows, as the plugin last told it (G-279).
 BROWSER_STATE: dict = {"url": "", "title": "", "at": 0.0}
 
+#: G-205: the one retrieval artifact per sidecar -- session-only (177 d).
+BROWSE: dict = {"session": None}
+
+
+def browse_session(workspace):
+    """The sidecar's `browse.Session`, made on first use: its search is
+    `search_payload` (the same ranking, collapse and previews the overlay
+    uses) and its forms are the index's page urls with their dual-similarity
+    edges -- the two embeddings, never a layout."""
+    if BROWSE["session"] is None:
+        from .. import browse as _browse, hierank as _hierank
+
+        def _search(query, k, urls):
+            got = search_payload(workspace, query, k, urls=list(urls or ()))
+            return [{"cid": h.get("cid"), "url": h.get("url"), "xpath": h.get("xpath"),
+                     "preview": h.get("preview") or "", "score": h.get("score")}
+                    for h in (got.get("hits") or [])]
+
+        def _forms():
+            urls, lex, sem = workspace.index.page_forms()
+            keep = [i for i, u in enumerate(urls) if _hierank.page_of(u) == u]
+            urls, lex, sem = [urls[i] for i in keep], lex[keep], sem[keep]
+            return urls, (_hierank.dual_similar(urls, lex, sem) if urls else [])
+
+        BROWSE["session"] = _browse.Session(_search, _forms)
+    return BROWSE["session"]
+
 
 def _build_codegraph(workspace) -> None:
     import time as _t
@@ -2263,7 +2291,7 @@ def _in_ego(stored) -> bool:
 def search_payload(workspace, query: str, k: int = 8, *,
                    offset: int = 0, url: str = "",
                    coarse: bool = True, budget: int = 0, where: str = "", trace: int = 0,
-                   ref: str = "", rank: str = "") -> Dict:
+                   ref: str = "", rank: str = "", urls: Sequence[str] = ()) -> Dict:
     """Ranked chunks for the overlay (`G-63`, `G-64`, `G-69`, `G-70`).
 
     Ranking is the store's own three-form retrieval; this adds nothing to it
@@ -2325,7 +2353,8 @@ def search_payload(workspace, query: str, k: int = 8, *,
             try:
                 hits = workspace.search(query, k=want, scope_url=url or "", diagnostics=diag,
                                         **({"ref": ref} if ref else {}),
-                                        **({"rank": rank} if rank else {}))
+                                        **({"rank": rank} if rank else {}),
+                                        **({"scope_urls": list(urls)} if urls else {}))
             except TypeError:                   # an index without diagnostics
                 hits = workspace.search(query, k=want, scope_url=url or "")
         import time as _time
@@ -3052,6 +3081,25 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"name": name, "on": now})
             return
 
+        if route == "browse":
+            # G-205's one tool: a move on the session's retrieval artifact
+            # (`domvec.browse`). Returns {artifact, asks, moved, version}; the
+            # caller carries the asks out in the reader's own browser cell.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                with _foreground():
+                    got = browse_session(self.workspace).call(
+                        query=body.get("query"), scope=str(body.get("scope") or "web"), of=str(body.get("of") or ""),
+                        down=body.get("down"), up=bool(body.get("up")), act=body.get("act"),
+                        k=int(body.get("k") or 10))
+                self._send(200, got)
+            except (ValueError, KeyError) as exc:
+                self._send(400, {"error": str(exc)})
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
         if route == "slate_check":
             # `check(slate)` in a cell (G-377): the dialect's own errors over a
             # slate's text -- duplicates, self-definitions, cycles, references
@@ -3140,7 +3188,12 @@ class _Handler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(length) or b"{}")
                 BROWSER_STATE.update({"url": str(body.get("url") or ""), "title": str(body.get("title") or ""), "at": time.time()})
-                self._send(200, {"ok": True})
+                # G-205: inside a descended result, where the cell goes is a
+                # step of that result's trace -- a diff on the artifact.
+                stepped = None
+                if BROWSE["session"] is not None and BROWSER_STATE["url"]:
+                    stepped = BROWSE["session"].observe(BROWSER_STATE["url"])
+                self._send(200, {"ok": True, **({"browse_version": stepped["version"]} if stepped else {})})
             except Exception as exc:                # noqa: BLE001
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
@@ -6271,6 +6324,20 @@ class _Handler(BaseHTTPRequestHandler):
             # panel should be able to say what WOULD be available.
             from .shell import interpreters
             self._send(200, interpreters())
+            return
+
+        if segments[0] == "browse":
+            # The artifact as it stands, and the diffs after `since`.
+            params = parse_qs(parts.query)
+            sess = BROWSE["session"]
+            if sess is None:
+                self._send(200, {"artifact": None, "version": 0, "changes": []})
+            else:
+                try:
+                    since = int((params.get("since") or ["0"])[0])
+                except ValueError:
+                    since = 0
+                self._send(200, {"artifact": sess.artifact, **sess.since(since)})
             return
 
         if segments[0] == "rank_levels":

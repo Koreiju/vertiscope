@@ -197,6 +197,25 @@ if "similar" not in globals():
         _domvec_asks.append({"attach": str(cid)})
         return {"asked": "attach", "cid": str(cid), "pending": True}
 
+    def browse(query=None, scope="web", of="", down=None, up=False, act=None, k=10):
+        """The browser centroid's ONE tool (G-205): every move is this call.
+        `query`+`scope` ("web" | "domain" | "page", `of` a page url) makes the
+        retrieval artifact -- domain widens host -> registrable domain ->
+        dual-embedding neighbours; `down=cid` opens that result's page in the
+        browser cell at its address; `up=True` returns toward the query;
+        `act={"address", "value"}` acts on a control in place. Returns the
+        artifact; the cell's moves are carried out when this cell ends."""
+        body = {"query": query, "scope": scope, "of": of, "down": down, "up": bool(up), "act": act, "k": int(k)}
+        req = _ur.Request(%(base)r + "/browse", data=_json.dumps(body).encode(),
+                          headers={"content-type": "application/json"})
+        try:
+            with _ur.urlopen(req, timeout=300) as r:
+                got = _json.load(r) or {}
+        except _ue.HTTPError as e:
+            raise ValueError((_json.loads(e.read() or b"{}") or {}).get("error") or str(e))
+        _domvec_asks.extend(got.get("asks") or [])
+        return got.get("artifact")
+
     def view(v):
         """The ego view in first or third person ("first" / "third")."""
         if str(v) not in ("first", "third"):

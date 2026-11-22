@@ -11977,6 +11977,51 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-205",
+      asks: "browse, the browser centroid's ONE tool (PLUGIN_GOAL 132, 177): a domain query widens host -> registrable domain -> dual-embedding neighbours, each result labelled with its level; down=cid opens the result's page in the reader's OWN browser cell (carried by the plugin's carryToolAsk); where the cell goes next streams into that result's trace as a diff; up returns to the results; planted browse-host-only: the domain scope never leaves the host",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const p = app.plugins.plugins["domvec-bridge"], base = p.settings.sidecar.replace(/\\/+$/, "");
+          const post = async (path, body) => (await fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+          const OF = "https://aesthetics.fandom.com/wiki/Hipster", Q = "90s aesthetic fashion";
+          const levelsOf = (a) => [...new Set(((a && a.results) || []).map((h) => h.level))].sort();
+          const clean = await post("/browse", { query: Q, scope: "domain", of: OF, k: 30 });
+          await post("/plant", { name: "browse-host-only", on: true });
+          let planted;
+          try { planted = await post("/browse", { query: Q, scope: "domain", of: OF, k: 30 }); }
+          finally { await post("/plant", { name: "browse-host-only", on: false }); }
+          const art = (await post("/browse", { query: Q, scope: "domain", of: OF, k: 30 })).artifact || {};
+          const b = p.activeBrowser();
+          if (!b) return { error: "no browser cell", clean: levelsOf(clean.artifact), planted: levelsOf(planted.artifact) };
+          const here = String(b.shownUrl ? b.shownUrl() : b.webview.getURL());
+          const target = (art.results || []).find((h) => h.url !== here) || (art.results || [])[0];
+          const down = await post("/browse", { down: target.cid });
+          const said = [];
+          for (const a of down.asks || []) said.push(await p.carryToolAsk(a));
+          let arrived = "";
+          for (let i = 0; i < 40; i++) { arrived = String(b.shownUrl ? b.shownUrl() : b.webview.getURL()); if (arrived.split("#")[0] === String(target.url).split("#")[0]) break; await sleep(500); }
+          const v = down.version;
+          const onward = (art.results || []).map((h) => h.url).find((u) => u.split("#")[0] !== String(target.url).split("#")[0]) || "https://en.wikipedia.org/wiki/Trie";
+          b.go(onward);
+          let changes = [];
+          for (let i = 0; i < 30; i++) {
+            await sleep(1000);
+            changes = ((await (await fetch(base + "/browse?since=" + v)).json()).changes || []).filter((c) => c.move === "trace");
+            if (changes.some((c) => String(c.url).split("#")[0] === onward.split("#")[0])) break;
+          }
+          const up = await post("/browse", { up: true });
+          return { clean: levelsOf(clean.artifact), planted: levelsOf(planted.artifact), results: (art.results || []).length,
+                   target: target.url, said, arrived, onward, trace: changes.map((c) => c.url), cursor_after_up: up.artifact && up.artifact.cursor };
+        })()`);
+        const same = (a, b) => String(a || "").split("#")[0] === String(b || "").split("#")[0];
+        return { pass: !got.error && got.clean.includes("host") && got.clean.some((l) => l !== "host")
+                       && got.planted.length === 1 && got.planted[0] === "host"
+                       && same(got.arrived, got.target) && got.trace.some((u) => same(u, got.onward))
+                       && got.cursor_after_up && got.cursor_after_up.at === "results", evidence: got };
+      },
+    },
+    {
       id: "G-386",
       asks: "the editor's own calls from a kernel cell (PLUGIN_GOAL 172 [3]; mortegon 3A.7, the cards are the API): one cell calls create, link, invoke, commit and review, and the plane holds two new cards linked, the invoked card's output written into it, a subgraph card linking both, and a review question on the first, the subgraph and the invoked card stored as vault:// pages (G-382); a link to a card that does not exist is refused, not invented; planted (plantNoCarry) no card appears",
       async run() {

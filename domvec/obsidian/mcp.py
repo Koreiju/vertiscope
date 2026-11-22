@@ -325,6 +325,32 @@ TOOLS: List[Dict] = [
         },
     },
     {
+        "name": "browse",
+        "title": "Browse: the browser centroid's one tool (G-205)",
+        "description": "ONE tool whose arguments are the moves over a session-only "
+                       "retrieval artifact. query+scope ('web' | 'domain' | 'page', "
+                       "`of` the page url for domain/page) makes it: domain widens "
+                       "host -> registrable domain -> dual-embedding neighbours, "
+                       "each result labelled with its level. down=<cid> opens that "
+                       "result's page in the READER'S OWN browser cell at its "
+                       "address, and where the cell goes next streams into the "
+                       "result's trace. up=true returns toward the query. "
+                       "act={address, value} acts on a control in place through its "
+                       "trie address. One move per call.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "scope": {"type": "string", "enum": ["web", "domain", "page"]},
+                "of": {"type": "string", "description": "The page url a domain or page scope is relative to"},
+                "down": {"type": "string", "description": "A result's cid to descend into"},
+                "up": {"type": "boolean"},
+                "act": {"type": "object", "properties": {"address": {"type": "string"}, "value": {"type": "string"}}},
+                "k": {"type": "integer"},
+            },
+        },
+    },
+    {
         "name": "chunk",
         "title": "Read a chunk",
         "description": "Every line of one chunk with its content address, "
@@ -501,6 +527,7 @@ class DomvecMCP:
         self.cdp_url = cdp_url
         self.handlers: Dict[str, Callable] = {
             "search": self._search,
+            "browse": self._browse,
             "chunk": self._chunk,
             "affordances": self._affordances,
             "resolve_address": self._resolve,
@@ -746,6 +773,23 @@ class DomvecMCP:
             })
         return {"query": query, "hits": hits, "count": len(hits)}
 
+    def _browse(self, args: Dict) -> Dict:
+        """G-205 from an agent: the move goes to the sidecar's session, and
+        what it asks of the reader's cell is carried by the PLUGIN's own
+        `carryToolAsk` -- the same road a kernel cell's asks take -- so an
+        agent and a cell drive the cell identically."""
+        body = {k: args.get(k) for k in ("query", "scope", "of", "down", "up", "act", "k") if args.get(k) is not None}
+        got = self.live().post("/browse", body)
+        carried = []
+        for ask in got.get("asks") or []:
+            carried.append(self.live().evaluate(
+                "(async () => { const p = app.plugins.plugins['domvec-bridge'];"
+                " return p ? await p.carryToolAsk(%s) : 'no plugin'; })()" % json.dumps(ask)))
+        art = got.get("artifact") or {}
+        slim = dict(art, results=[{k: h.get(k) for k in ("cid", "url", "xpath", "level", "host", "domain", "score", "trace")}
+                                  | {"preview": (h.get("preview") or "")[:200]} for h in art.get("results") or []])
+        return {"moved": got.get("moved"), "version": got.get("version"), "carried": carried, "artifact": slim}
+
     def _chunk(self, args: Dict) -> Dict:
         if self.ws is not None:
             payload = chunk_payload(self.ws, args["cid"])
@@ -858,7 +902,10 @@ class DomvecMCP:
                         "Search first, then read a chunk by its cid. Every "
                         "line carries a content address; `resolve_address` "
                         "turns one back into the chunk that draws it. "
-                        "Read-only: affordances are reported, never pressed.",
+                        "Read-only, with ONE exception: `browse` (G-205) "
+                        "with `down` or `act` moves the reader's own browser "
+                        "cell, as the reader chose (PLUGIN_GOAL 177 b). "
+                        "Elsewhere affordances are reported, never pressed.",
                 }
             elif method in ("notifications/initialized", "notifications/cancelled"):
                 return None

@@ -1786,11 +1786,13 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    */
   /** Planted (G-377): the toolspaces' asks are dropped -- the cell runs, the world does not change. */
   plantNoToolAsks = false;
+  /** G-205: the last result `browse(down=...)` opened in the cell. */
+  browseLast: { url: string; cid: string; found: boolean | null; at: number } | null = null;
   async carryToolAsk(a: any): Promise<string> {
     if (!a || typeof a !== "object") return "";
     const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;
     const browser: any = this.activeBrowser();
-    const kind = ["focus", "unfold", "attach", "view", "pin", "act"].find((k) => a[k] !== undefined);
+    const kind = ["focus", "unfold", "attach", "view", "pin", "act", "reveal"].find((k) => a[k] !== undefined);
     if (!kind) return "";
     if (this.plantNoToolAsks) return "";
     this.toolAskStats[kind] = (this.toolAskStats[kind] || 0) + 1;
@@ -1825,6 +1827,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       // was refused as "not in this workspace" (G-377b, run 64).
       const r = browser && typeof browser.actOnAddress === "function" ? await browser.actOnAddress(String(v.address), action, v.value ?? undefined) : { error: "no browser cell" };
       said = r && !(r as any).error ? `act: ${action} done` : `act: ${(r as any)?.error || "failed"}`;
+    } else if (kind === "reveal") {
+      // G-205 `browse(down=cid)`: the reader's OWN cell (177 b) opens the
+      // result's page at its address. Where it goes next streams into the
+      // artifact's trace through the 2 s browser_state the plugin already sends.
+      const v = a.reveal || {};
+      const found = browser && typeof browser.reveal === "function" ? await browser.reveal(String(v.url || ""), String(v.xpath || "")) : undefined;
+      said = found === undefined ? "reveal: no browser cell" : `reveal: ${String(v.url || "").slice(0, 60)} ${found ? "at its address" : "(address not found in the document)"}`;
+      this.browseLast = { url: String(v.url || ""), cid: String(v.cid || ""), found: found ?? null, at: Date.now() };
     }
     this.toolAskLast = { kind, said, at: Date.now() };
     this.toolAskLog.push(this.toolAskLast); if (this.toolAskLog.length > 20) this.toolAskLog.shift();
