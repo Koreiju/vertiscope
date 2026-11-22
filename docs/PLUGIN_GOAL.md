@@ -5986,3 +5986,40 @@ review -- on the plane:*
 
 > yes to all 3
 
+
+### 173. (2026-11-22) The stick-shaped layout, re-fits that change nothing, and three rulings
+
+*2026-11-22 (verbatim), with a screenshot of the 3D view -- a long vertical
+column of glowing nodes:*
+
+> Why are our UMAP clusters so long and clumpy? is it perplexity or another parameter? For more widely varied web content that is more self-similar and uniform, how could we see more of the detail being clumped together? Making more of the 3D aspect and less linear?
+
+> also, re-fits seem like they don't do anything/much change at all
+
+*Then three answers to questions put (verbatim choices):*
+
+*(a) The store's WAL had sat at 11.8 MB, over the 8 MB restart bar, with two
+finished live checks waiting on a sidecar restart:*
+
+> Restart once over 8 MB
+
+*(b) A real from-scratch re-fit, the vectors centred and the 2 shared
+directions removed first (1.33:1 on pages in a fresh fit, against the live
+21:1), redrawing every node once:*
+
+> Build it and re-fit (Recommended)
+
+*(c) D-54, a notebook browser cell is not a regular Obsidian tab -- pop out
+to a real tab, register the cell's leaf in place, or both:*
+
+> Both
+
+*Read as (173) -- a reading, to be confirmed:*
+*(a) one forced restart, for this occasion, not a change to the 8 MB rule;*
+*(b) the re-fit control starts over -- a new model and a new axis scaling --
+and the input to the fit has its mean and its 2 dominant directions removed,
+fitted once and replayed for every later point, so live placement agrees
+with the fit;*
+*(c) the in-note browser cell is reachable by Obsidian's leaf APIs and the
+plugin's "browser in use" where it sits, AND it offers a pop-out that opens
+the same page in a regular workspace tab.*
