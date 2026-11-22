@@ -5512,7 +5512,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-21",
-      asks: "nodes never overlap, with billboards sized as panels not spheres",
+      asks: "nodes never overlap, with billboards sized as panels not spheres (planted: a node moved onto its nearest neighbour, in one synchronous block, is caught)",
       async run() {
         const got = await inPane(`
           // The SETTLED picture: a freshly built view is sized to its room a
@@ -5572,14 +5572,33 @@ export function makeChecks(env) {
               }
             }
           }
+          // Planted: one sampled node moved onto its nearest neighbour, the
+          // same overlap test run for it, and the node put back -- all in one
+          // synchronous block, so no frame draws it moved. The scorer must
+          // see the overlap it was handed; the radius function is untouched
+          // (the pane's own plants that overlap nodes also shrink it).
+          let planted = null;
+          if (sample.length >= 2) {
+            const a = sample[0];
+            let b = sample[1], bd = Infinity;
+            for (const o of sample.slice(1)) { const dd = Math.hypot(a.x-o.x, a.y-o.y, a.z-o.z); if (dd < bd) { bd = dd; b = o; } }
+            const was = [b.x, b.y, b.z];
+            try {
+              b.x = a.x + radius(a) * 0.25; b.y = a.y; b.z = a.z;
+              let found = 0;
+              for (const o of sample) { if (o === b) continue;
+                if (Math.hypot(o.x-b.x, o.y-b.y, o.z-b.z) - radius(o) - radius(b) < 0) found++; }
+              planted = { moved: String(b.id).slice(-48), onto: String(a.id).slice(-48), overlaps_found: found };
+            } finally { b.x = was[0]; b.y = was[1]; b.z = was[2]; }
+          }
           return { sampled: sample.length,
                    checked: sample.length * (sample.length - 1) / 2,
                    overlapping: pairs, worst: Math.round(worst * 100) / 100,
-                   involving_a_panel: panels, inside_clearance_band: inBand, pairs: why,
+                   involving_a_panel: panels, inside_clearance_band: inBand, pairs: why, planted,
                    radius_from: v.drawnRadiusOf ? "pane" : "formula" };
         `);
         if (got.error) return { pass: false, evidence: got };
-        return { pass: got.overlapping === 0, evidence: got };
+        return { pass: got.overlapping === 0 && !!got.planted && got.planted.overlaps_found >= 1, evidence: got };
       },
     },
     {
