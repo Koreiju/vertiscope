@@ -931,6 +931,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     intoCraft: (path) => { const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view; return !!g?.flyToCraft?.(path); },
     chatStream: (prompt: string, ctx: string[], onTok: (t: string) => void) => this.sidecar.chatStream(prompt, ctx, onTok),
     codeNodes: (q: string) => this.sidecar.codeNodes(q),
+    typeNodes: (q: string) => this.minedTypes(q),
+    openType: (pattern: string) => { void this.typeFromPattern(pattern, this.typeName(pattern)); },
     haloQuery: (path, q) => { void this.halo.open(path, q); },
     egoNotes: () => {
       const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;
@@ -1766,14 +1768,62 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     await this.useWorkspace("default", !this.workspaceList()["default"]);
   }
 
-  typegenStats = { asked: 0, made: 0, last: null as any };
+  typegenStats = { asked: 0, made: 0, last: null as any, mined_asks: 0, mined_fetches: 0 };
+  /** G-388: the patterns `/typegen?mine=1` found, kept 5 minutes -- mining
+   *  reads every address row (5.2 s on 245k), so the retrieval bar must not
+   *  pay it per keystroke. One fetch in flight however many ask. */
+  private mined: { at: number; types: any[] } | null = null;
+  private mining: Promise<any[]> | null = null;
+  async minedTypes(q: string, fresh = false): Promise<any[]> {
+    this.typegenStats.mined_asks++;
+    if (fresh || !this.mined || Date.now() - this.mined.at > 300000) {
+      if (!this.mining) {
+        this.typegenStats.mined_fetches++;
+        const base = String(this.settings.sidecar || "").replace(/\/+$/, "");
+        this.mining = fetch(`${base}/typegen?mine=1&limit=200`).then((x) => x.json())
+          .then((r) => { const t = Array.isArray(r?.types) ? r.types : []; this.mined = { at: Date.now(), types: t }; return t; })
+          .catch(() => []).finally(() => { this.mining = null; });
+      }
+      await this.mining;
+    }
+    const s = q.trim().toLowerCase();
+    return (this.mined?.types || []).filter((t: any) => !s || "type".startsWith(s) || "types".startsWith(s)
+      || String(t.pattern).toLowerCase().includes(s) || (t.fields || []).some((f: string) => f.includes(s))).slice(0, 12);
+  }
+  /** A class name from a pattern's record root: `.../article[*]` -> `Article`. */
+  typeName(pattern: string): string {
+    const last = String(pattern).split("/").filter(Boolean).pop() || "item";
+    const tag = last.replace(/\[\*\]$/, "").replace(/\W/g, "") || "item";
+    return tag.charAt(0).toUpperCase() + tag.slice(1);
+  }
   async typeFromPattern(pattern: string, name = "Item"): Promise<any> {
     this.typegenStats.asked++;
     const base = String(this.settings.sidecar || "").replace(/\/+$/, "");
     const r = await fetch(`${base}/typegen?name=${encodeURIComponent(name)}&pattern=${encodeURIComponent(pattern.trim())}`).then((x) => x.json()).catch((e) => ({ error: String(e) }));
     if (!r || r.error) { new Notice("domvec: " + (r?.error || "no answer")); return r; }
     const BT = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
-    await this.desk.create("notebook", { text: [`${r.instances} instances on ${r.pages} pages of \`${pattern}\``, "", BT + "python", r.source.trimEnd(), BT, ""].join(NL) });
+    // G-388: the node shows the type three ways -- its strict model, a table
+    // of its fields each linked to the address it was read from (the trie
+    // leaf, not only the name made of it), and a type -> fields graph.
+    const types: Record<string, string> = r.types || {}, prov: Record<string, string[]> = r.provenance || {};
+    const optional = (f: string) => String(r.source).includes(`    ${f}: Optional[`);
+    const esc = (x: string) => String(x).replace(/[|\[\]]/g, " ");
+    const rows = Object.keys(types).map((f) => {
+      const [u, x, acc] = prov[f] || ["", "", ""];
+      return `| ${f} | ${types[f]} | ${optional(f) ? "" : "yes"} | ${u ? `[${esc(x.split("/").slice(-3).join("/"))}](${u})` : ""} ${acc ? "`" + esc(acc).split(" ")[0] + "`" : ""} |`;
+    });
+    // The graph holds the 24 most common fields (the model lists them
+    // commonest first); the table holds every one. 159 boxes is not a view.
+    const shown = Object.keys(types).slice(0, 24), more = Object.keys(types).length - shown.length;
+    const graph = ["graph LR", `  T["${r.class} · ${r.instances} on ${r.pages} pages"]`,
+      ...shown.map((f, i) => `  T ${optional(f) ? "-.->" : "-->"} f${i}["${f}: ${types[f]}"]`),
+      ...(more > 0 ? [`  T -.-> more["+${more} more fields"]`] : [])];
+    await this.desk.create("notebook", { text: ["---", "domvec: type", `pattern: "${String(pattern).replace(/"/g, "")}"`, "---", "",
+      `${r.instances} instances on ${r.pages} pages of \`${pattern}\``, "",
+      // The graph FIRST: a live-preview card draws only what is on screen,
+      // and below a 161-row table the graph was never drawn (G-388, run 55).
+      BT + "mermaid", ...graph, BT, "", BT + "python", r.source.trimEnd(), BT, "",
+      "| field | type | required | read from |", "| --- | --- | --- | --- |", ...rows, ""].join(NL) });
     this.typegenStats.made++; this.typegenStats.last = { instances: r.instances, pages: r.pages, fields: r.fields };
     return r;
   }

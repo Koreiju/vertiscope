@@ -42,6 +42,10 @@ export interface PlaneHost {
   opened?(file: TFile): void;
   /** The retrieval bar's code nodes by name (PLUGIN_GOAL 133). */
   codeNodes?(q: string): Promise<any[]>;
+  /** G-388: mined trie-path pattern TYPES matching the query; one picked
+   *  opens as its own node on the plane (`openType`). */
+  typeNodes?(q: string): Promise<any[]>;
+  openType?(pattern: string): void;
   /** The `+ browser` tool: the browser cell as a panel (item 71). */
   openBrowser?(): void;
   /** A click (no drag) on a panel's header node: its halo (item 81). */
@@ -157,7 +161,7 @@ export class PlaneDesk {
   /** Planted (133): the three create buttons, as before the retrieval bar. */
   plantToolButtons = false;
   plantNoChatEntry = false;
-  retrieveStats = { queries: 0, node_hits: 0, picked: 0, last_kind: "" };
+  retrieveStats = { queries: 0, node_hits: 0, type_hits: 0, picked: 0, last_kind: "" };
   /**
    * The RETRIEVAL BAR (PLUGIN_GOAL 133: "Instead of buttons for creating only
    * three different notebook-level cells ... a retrieval bar for the different
@@ -202,12 +206,19 @@ export class PlaneDesk {
       const hits = general.filter((g) => !q || g.label.includes(q));
       let nodes: any[] = [];
       if (q.length >= 2 && this.host.codeNodes) nodes = await this.host.codeNodes(q).catch(() => []);
+      let types: any[] = [];
+      if (q.length >= 2 && this.host.typeNodes) types = await this.host.typeNodes(q).catch(() => []);
       if (my !== seq) return;
       this.retrieveStats.node_hits = nodes.length;
       const BT = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
       for (const n of nodes) hits.push({ label: `${n.qname || n.name}`, kind: String(n.kind || "node"), act: () => {
         void this.create("notebook", { text: [`${n.kind} [${n.qname || n.name}](${n.url}${n.line ? "#L" + n.line : ""})`, "", BT + "python", `# ${n.qname || n.name}`, BT, ""].join(NL) });
       } });
+      // G-388: a mined type is a node kind of its own -- an aggregate of trie
+      // paths across pages -- listed with what it aggregates.
+      this.retrieveStats.type_hits = types.length;
+      for (const t of types) hits.push({ label: `${t.pattern}  (${t.instances} on ${t.pages} pages)`, kind: "type",
+        act: () => { this.host.openType?.(t.pattern); } });
       show(hits);
     };
     input.oninput = () => { void run(); };

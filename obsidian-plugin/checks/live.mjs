@@ -7989,6 +7989,79 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-388",
+      asks: "a mined trie-path pattern type is a node on the 2D plane (PLUGIN_GOAL 186f, 175 a): typing 'type' in the plane's retrieval bar lists mined types; picking one opens a cell holding its strict pydantic model, a table of its fields each linked to the address it was read from, and a type -> fields graph, with the instance count the miner reported; every mined type spans 2+ pages with 2+ shared fields; planted (no-shape) the miner admits single-page or shapeless repeats",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const SIDE = String(plugin.settings.sidecar).replace(/[/]+$/, "");
+          const H = { "content-type": "application/json", "X-Domvec-Client": "obsidian-plugin" };
+          const plant = (name, on) => fetch(SIDE + "/plant", { method: "POST", headers: H, body: JSON.stringify({ name, on }) });
+          const mine = async () => { const t0 = performance.now(); const r = await fetch(SIDE + "/typegen?mine=1&limit=200").then((x) => x.json());
+            const T = r.types || [];
+            return { n: T.length, ms: Math.round(performance.now() - t0), ms_mine: r.ms_mine, rows: r.rows,
+                     unshaped: T.filter((t) => t.pages < 2 || (t.fields || []).length < 2).length }; };
+          const out = {};
+          out.clean_miner = await mine();
+          await plant("no-shape", true);
+          try { out.planted_miner = await mine(); } finally { await plant("no-shape", false); }
+          await window.__domvec.act("open", "graph"); await sleep(1200);
+          const D = window.__domvecPlane;
+          for (const t of document.querySelectorAll(".domvec-plane-tools")) t.remove();
+          D.toolsEl = null; D.ensureTools(); await sleep(400);
+          const input = document.querySelector(".domvec-plane-retrieve");
+          if (!input) return { ...out, error: "no retrieval bar" };
+          await plugin.minedTypes("", true);
+          input.focus(); input.value = "type"; input.dispatchEvent(new Event("input"));
+          const typeHits = () => [...document.querySelectorAll(".domvec-plane-retrieve-hit")].filter((h) => /^type/.test(h.textContent));
+          await until(() => typeHits().length > 0, 20000);
+          const hits = typeHits();
+          out.type_hits = hits.length; out.first_hit = hits[0] ? hits[0].textContent.slice(0, 140) : "";
+          if (!hits.length) return out;
+          const m = /[(]([0-9]+) on ([0-9]+) pages[)]/.exec(out.first_hit);
+          out.hit_instances = m ? +m[1] : null;
+          const before = new Set(app.vault.getMarkdownFiles().map((f) => f.path));
+          let made = null;
+          hits[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+          await until(() => !!(made = app.vault.getMarkdownFiles().find((f) => !before.has(f.path))), 30000);
+          if (!made) return { ...out, error: "no node opened" };
+          await sleep(2500);
+          try {
+            const text = await app.vault.read(made);
+            const NL = String.fromCharCode(10);
+            out.frontmatter = String(app.metadataCache.getFileCache(made)?.frontmatter?.domvec || "");
+            const im = /^([0-9]+) instances on ([0-9]+) pages/m.exec(text);
+            out.node_instances = im ? +im[1] : null;
+            out.strict = text.includes("strict=True") && text.includes('extra="forbid"');
+            const rows = text.split(NL).filter((l) => /^[|] [a-z_][a-z0-9_]* [|]/.test(l) && !/^[|] field [|]/.test(l));
+            out.field_rows = rows.length;
+            out.rows_linked = rows.filter((l) => /[(]https?:[/][/][^)]+[)]/.test(l)).length;
+            out.graph_edges = text.split(NL).filter((l) => /^  T (-->|-[.]->) f[0-9]+/.test(l)).length;
+            out.graph_more = text.split(NL).some((l) => /^  T -[.]-> more/.test(l));
+            const card = [...document.querySelectorAll(".domvec-panel-card")].find((c) => c.dataset.path === made.path);
+            out.on_plane = !!card;
+            await until(() => !!(card && card.querySelector(".mermaid svg, svg[id^=mermaid]")), 8000);
+            out.graph_drawn = !!(card && card.querySelector(".mermaid svg, svg[id^=mermaid]"));
+            out.graph_nodes_drawn = card ? card.querySelectorAll(".mermaid svg .node, svg[id^=mermaid] .node").length : 0;
+            out.card_mode = card ? (card.querySelector(".markdown-reading-view:not([style*='none'])") ? "reading" : card.querySelector(".cm-editor") ? "editor" : "other") : "";
+          } finally {
+            const p = D.panelOf(made.path); if (p) p.leaf.detach();
+            await app.vault.trash(made, true);
+            for (const t of document.querySelectorAll(".domvec-plane-tools")) t.remove(); D.toolsEl = null; D.ensureTools();
+          }
+          return out;
+        })()`, { timeout: 180000 });
+        const ok = !got.error && got.clean_miner.n > 0 && got.clean_miner.unshaped === 0 && got.planted_miner.unshaped > 0
+          && got.type_hits > 0 && got.frontmatter === "type" && got.strict && got.on_plane
+          && got.field_rows >= 2 && got.rows_linked === got.field_rows
+          && got.graph_edges === Math.min(24, got.field_rows) && got.graph_more === (got.field_rows > 24)
+          && got.graph_drawn && got.node_instances === got.hit_instances;
+        return { pass: ok, evidence: got };
+      },
+    },
+    {
       id: "P-C5",
       asks: "a saved edit to a module is a live delta in both halves and the 3D view: the trie side re-reads the store and marks exactly the chunk that changed (not its neighbour), and that chunk reaches the projector's delta stream; planted (plantNoTrieRefresh) the trie side keeps the old text, planted (source-not-projected) the chunk never reaches the stream",
       async run() {

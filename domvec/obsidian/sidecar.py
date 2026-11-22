@@ -943,6 +943,7 @@ PLANT_CAPTURE_LOAD = [False]
 
 _PLANTABLE = {
     "capture-load": ("domvec.obsidian.sidecar", "PLANT_CAPTURE_LOAD"),      # D-42 load
+    "no-shape": ("domvec.typegen", "PLANT_NO_SHAPE"),                         # G-388: every repeat is a type
     "placeholder-target": ("domvec.markdown", "PLANT_PLACEHOLDER_TARGET"),   # G-197
     "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),
     "no-declump": ("domvec.obsidian.layout", "PLANT_NO_DECLUMP"),            # 137(6)
@@ -5891,9 +5892,13 @@ class _Handler(BaseHTTPRequestHandler):
             if not pattern.startswith("/"):
                 self._send(400, {"error": "pattern must be an xpath, e.g. /html/body/main/article[*]"})
                 return
+            # The prefix is usually just `/html/body/` -- nearly every row.
+            # At LIMIT 200000 on a 245k-row store the type silently lost 35
+            # of 2,505 instances the miner had counted (G-388 check, run 54);
+            # the bound is the miner's, so the two count the same rows.
             rows = self.workspace.store._rows(
                 "MATCH (a:Address) WHERE starts_with(a.xpath, $p) "
-                "RETURN a.url, a.xpath, a.accessor, a.value LIMIT 200000", {"p": _tg.prefix_of(pattern)})
+                "RETURN a.url, a.xpath, a.accessor, a.value LIMIT 400000", {"p": _tg.prefix_of(pattern)})
             self._send(200, _tg.model(rows, pattern, name))
             return
         if segments[0] == "page_status":
