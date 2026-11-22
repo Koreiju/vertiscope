@@ -5975,3 +5975,14 @@ between a token being generated and being shown;*
 *(c) a model streams continuously -- other work on the GPU (the embedder, a
 second model) does not block or stall it.*
 
+### 172. (2026-11-21) Yes to the three open items after the chat-cell wiring
+
+*2026-11-21 (verbatim). The three items as put: (1) confirm in the app by
+restarting Obsidian with its debug port (closes the window), reloading the
+plugin, running the live checks and minimising it again; (2) tool panels go
+into the store as their own pages under a `tool://` address, purgeable by
+prefix; (3) build the agent's editor calls -- create, link, invoke, commit,
+review -- on the plane:*
+
+> yes to all 3
+
