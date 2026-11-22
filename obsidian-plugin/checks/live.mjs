@@ -8062,6 +8062,83 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-389",
+      asks: "rank-dominance collapse on the 2D plane's craft (PLUGIN_GOAL 175 b): the rule folds a node's lower-ranked neighbours whose top neighbour it is, with their own, and not a node another outranking neighbour owns (planted DOMINANCE_PLANT.all takes it); a real right-click on a craft node on screen hides exactly what it dominates, labels it (+k), keeps the fold through a rebuild, and a second right-click restores every node; planted (plantNoFold) the right-click changes nothing",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          const out = {};
+          // 1. The rule on a graph whose answer is known: P has five chunks,
+          //    c1 has two of its own; x hangs off both P and Q, and Q (seven
+          //    neighbours) outranks P (six), so x is Q's, not P's.
+          const R = window.__domvecDominance;
+          if (!R) return { error: "no rule on window" };
+          const E = [];
+          for (let i = 1; i <= 5; i++) E.push({ a: "P", b: "c" + i });
+          E.push({ a: "c1", b: "s1" }, { a: "c1", b: "s2" }, { a: "P", b: "x" }, { a: "Q", b: "x" });
+          for (let i = 1; i <= 6; i++) E.push({ a: "Q", b: "q" + i });
+          const ids = [...new Set(E.flatMap((e) => [e.a, e.b]))];
+          out.rule_clean = R.dominatedBy(ids, E, "P").sort();
+          R.DOMINANCE_PLANT.all = true;
+          try { out.rule_planted = R.dominatedBy(ids, E, "P").sort(); } finally { R.DOMINANCE_PLANT.all = false; }
+          // 2. The plane: a real right-click on a craft node.
+          await window.__domvec.act("open", "graph"); await sleep(800);
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, c = window.__domvecCraft;
+          if (!g || !c) return { ...out, error: "no graph or craft" };
+          const mode0 = g.agent.mode;
+          try {
+            g.agent.setMode("map"); await sleep(600);
+            c.folds.clear(); await c.fresh(); for (let i = 0; i < 4; i++) await frame();
+            const screen = (n) => { const cam = g.graph.camera(), cr = g.canvasEl.getBoundingClientRect(); c.group.updateMatrixWorld(true);
+              const v = n.mesh.position.clone().project(cam); return { x: cr.left + (v.x + 1) / 2 * cr.width, y: cr.top + (1 - v.y) / 2 * cr.height, z: v.z }; };
+            const right = (n) => { const p = screen(n); g.canvasEl.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, button: 2 })); };
+            const cands = c.nodes.filter((n) => n.kind !== "ego" && n.mesh).map((n) => ({ n, d: c.dominatedOf(n.id) }))
+              .filter((x) => x.d.length > 0).sort((a, b) => b.d.length - a.d.length);
+            out.candidates = cands.length;
+            let pick = null;
+            for (const x of cands) { const p = screen(x.n); if (p.z < 1 && c.nodeAt(p.x, p.y) === x.n) { pick = x; break; } }
+            if (!pick) return { ...out, error: "no dominating craft node hittable on screen" };
+            const id = pick.n.id, dom = pick.d, n0 = c.nodes.length, label0 = pick.n.label;
+            out.root = { id: id.slice(-60), kind: pick.n.kind, dominates: dom.length, nodes_before: n0 };
+            right(pick.n); for (let i = 0; i < 3; i++) await frame();
+            const now = () => new Set(c.nodes.map((n) => n.id));
+            let ids1 = now();
+            out.nodes_folded = c.nodes.length;
+            out.dominated_still_drawn = dom.filter((d) => ids1.has(d)).length;
+            const r1 = c.nodes.find((n) => n.id === id);
+            out.label = r1 ? r1.label.slice(-30) : null;
+            out.labelled = !!r1 && r1.label.endsWith("(+" + dom.length + ")");
+            await c.fresh(); for (let i = 0; i < 3; i++) await frame();
+            ids1 = now();
+            out.after_rebuild_drawn = dom.filter((d) => ids1.has(d)).length;
+            const r2 = c.nodes.find((n) => n.id === id);
+            if (r2 && r2.mesh) { right(r2); for (let i = 0; i < 3; i++) await frame(); }
+            out.nodes_unfolded = c.nodes.length;
+            out.restored = dom.every((d) => now().has(d)) && !c.folds.size;
+            // 3. Planted: the right-click on the same node changes nothing.
+            c.plantNoFold = true;
+            const r3 = c.nodes.find((n) => n.id === id);
+            const n3 = c.nodes.length;
+            if (r3 && r3.mesh) { right(r3); for (let i = 0; i < 3; i++) await frame(); }
+            out.planted_nodes_hidden = n3 - c.nodes.length;
+            out.planted_folds = c.folds.size;
+            out.stats = { ...c.foldStats2 };
+            return out;
+          } finally {
+            c.plantNoFold = false; c.folds.clear(); await c.fresh();
+            g.agent.setMode(mode0);
+          }
+        })()`, { timeout: 90000 });
+        const want = ["c1", "c2", "c3", "c4", "c5", "s1", "s2"].join();
+        const ok = !got.error && (got.rule_clean || []).join() === want && (got.rule_planted || []).includes("x")
+          && got.dominated_still_drawn === 0 && got.nodes_folded === got.root.nodes_before - got.root.dominates && got.labelled
+          && got.after_rebuild_drawn === 0 && got.restored && got.nodes_unfolded === got.root.nodes_before
+          && got.planted_nodes_hidden === 0 && got.planted_folds === 0;
+        return { pass: ok, evidence: got };
+      },
+    },
+    {
       id: "P-C5",
       asks: "a saved edit to a module is a live delta in both halves and the 3D view: the trie side re-reads the store and marks exactly the chunk that changed (not its neighbour), and that chunk reaches the projector's delta stream; planted (plantNoTrieRefresh) the trie side keeps the old text, planted (source-not-projected) the chunk never reaches the stream",
       async run() {

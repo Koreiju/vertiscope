@@ -39,6 +39,7 @@ import { App, TFile } from "obsidian";
 import { findFences } from "./fences";
 import { COCKPIT_PATH } from "./cockpit";
 import { PLANE_FOLDER } from "./planepanels";
+import { dominatedBy } from "./dominance";
 /** Where the live checks write their scratch notes. */
 export const CHECKS_FOLDER = "domvec-checks";
 
@@ -195,6 +196,52 @@ export class Craft {
   plantNoNoteLinks = false;
   /** Planted (item 67): the craft's nodes unlinked -- no edges inside it. */
   plantNoLinks = false;
+  /**
+   * G-389 (PLUGIN_GOAL 175 b: "Every node can fold its dominated neighbours,
+   * in 2D and 3D alike"): a right-click on a craft node folds the craft
+   * nodes it dominates by rank (`dominance.ts`) into it, labelled `(+k)`;
+   * again, they come back. The craft is one graph drawn on the 2D plane and
+   * in 3D, so the fold is one state for both. Kept across rebuilds (a fold
+   * is the reader's, not the build's); the ego is never folded away.
+   * Planted `plantNoFold`: the right-click does nothing here.
+   */
+  folds = new Set<string>();
+  plantNoFold = false;
+  foldStats2 = { folded: 0, unfolded: 0, hidden: 0, last: 0 };
+  private allNodes: CraftNode[] = [];
+  private allEdges: CraftEdge[] = [];
+  dominatedOf(id: string): string[] {
+    const keep = new Set(this.allNodes.filter((n) => n.kind === "ego").map((n) => n.id));
+    return dominatedBy(this.allNodes.map((n) => n.id), this.allEdges, id, keep);
+  }
+  private applyFolds(): void {
+    const hidden = new Set<string>(), counts = new Map<string, number>();
+    for (const r of this.folds) {
+      if (hidden.has(r)) continue;
+      const d = this.dominatedOf(r);
+      counts.set(r, d.length);
+      for (const x of d) hidden.add(x);
+    }
+    this.nodes = this.allNodes.filter((n) => !hidden.has(n.id))
+      .map((n) => (counts.get(n.id) ? { ...n, label: `${n.label} (+${counts.get(n.id)})` } : n));
+    this.edges = this.allEdges.filter((e) => !hidden.has(e.a) && !hidden.has(e.b));
+    this.foldStats2.hidden = hidden.size;
+  }
+  toggleFold(n: CraftNode): boolean {
+    if (this.plantNoFold || !n || n.kind === "ego") return false;
+    if (!this.allNodes.length) { this.allNodes = this.nodes; this.allEdges = this.edges; }
+    if (this.folds.has(n.id)) {
+      this.folds.delete(n.id); this.foldStats2.unfolded++;
+    } else {
+      const d = this.dominatedOf(n.id);
+      if (!d.length) return false;
+      this.folds.add(n.id); this.foldStats2.folded++; this.foldStats2.last = d.length;
+    }
+    this.applyFolds();
+    this.layout();
+    this.rebuildScene();
+    return true;
+  }
   /** Per note: the distinct inputs its readout has been fed (item 96). */
   readoutInputs: Record<string, number> = {};
   /** Planted (item 89): instances drawn with no link to their code. */
@@ -534,8 +581,9 @@ export class Craft {
       // only once it is placed and drawn (published before this await, a
       // reader saw nodes with no mesh, G-299).
       const proj = this.host.egoProjection ? await this.within("projection", this.host.egoProjection().then((p) => (p ? (this.lastProj = p) : p)), this.lastProj) : null;
-      this.nodes = nodes;
-      this.edges = this.plantNoLinks ? [] : edges;
+      this.allNodes = nodes;
+      this.allEdges = this.plantNoLinks ? [] : edges;
+      this.applyFolds();              // G-389: the reader's folds survive the rebuild
       this.places = proj?.places || {};
       this.stats.projection = proj?.method || "none";
       this.layout();

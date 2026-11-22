@@ -611,6 +611,14 @@ export class GraphView extends ItemView {
       if (now - this.haloRightAt < 450) { this.haloRightAt = 0; this.haloDrop(h); }
       else this.haloRightAt = now;
     }, true);
+    // G-389 (175 b): a right-click on a CRAFT node -- the ego graph, on the
+    // 2D plane or in 3D -- folds the craft nodes it dominates by rank into
+    // it, or unfolds them. The world's nodes keep T-16 / G-110 below.
+    canvas.addEventListener("contextmenu", (e: MouseEvent) => {
+      if (!this.craft || !this.onScene(e)) return;
+      const cn = this.craft.nodeAt(e.clientX, e.clientY);
+      if (cn && this.craft.toggleFold(cn)) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
     // A right-click on a bisector folds / unfolds what it dominates (G-282).
     canvas.addEventListener("contextmenu", (e: MouseEvent) => {
       const hit = this.onScene(e) ? this.bisectorAt(e.clientX, e.clientY) : null;
