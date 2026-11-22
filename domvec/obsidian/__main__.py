@@ -31,6 +31,10 @@ def main(argv=None) -> int:
         i = rest.index("--workspace")
         workspace = Path(rest[i + 1])
         return supervise(workspace, rest[:i] + rest[i + 2:])
+    # `purge` talks to a RUNNING sidecar over HTTP; it never opens the store.
+    if argv[:1] == ["purge"]:
+        from .purge_prefix import main as purge_main
+        return purge_main(argv[1:])
     # Only past `supervise`: the supervisor must not load the store or the
     # sidecar (numpy, scipy, kuzu and their thread pools) -- it starts and
     # watches one child, nothing more.
