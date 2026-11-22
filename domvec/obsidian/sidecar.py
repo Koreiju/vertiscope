@@ -4366,8 +4366,12 @@ class _Handler(BaseHTTPRequestHandler):
                     _counts = _got[1] if isinstance(_got, tuple) and len(_got) > 1 and isinstance(_got[1], dict) else {}
                     _profile("settle", {"url": url, "lock_wait": round((_tl - _ts) * 1000, 1),
                                         "held": round((_te - _tl) * 1000, 1), "chunks": len(before),
+                                        # The row counts beside the times (2026-11-22: settles of an
+                                        # already-captured page held the lock 20-24 s, ms_anchors_plain
+                                        # 4.5-5.7 s, and nothing said how many rows that wrote or why).
                                         **{k: v for k, v in _counts.items()
-                                           if k.startswith("ms_") or k in ("chunks", "anchors", "contains", "contains_parts", "retired")}})
+                                           if k.startswith("ms_") or k.startswith("n_") or k.startswith("addresses_")
+                                           or k.startswith("anchors_") or k in ("chunks", "anchors", "contains", "contains_parts", "retired")}})
                     _forget_controls(url)
                 # Durability is the checkpoint thread's (`_checkpoint_forever`):
                 # on this 32 GB store a checkpoint took 10-19 s, and run here
