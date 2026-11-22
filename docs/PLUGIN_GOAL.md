@@ -6172,3 +6172,37 @@ link-graph rank term (`rank=none`); the flat and hierarchical ranks stay
 reachable through `rank=` so the question can be re-measured as the link
 graph grows. The code graph's own rank (PLUGIN_GOAL 93) is a different rank
 and is not what was asked about; it stays as it was in the measured `none` arm.*
+
+### 179. (2026-11-22) Through-stacks deprecated; four answers on `docs/THROUGH_STACK_DESIGN.md`
+
+*Asked in the question dialog (2026-11-22), on G-239's draft 1:*
+
+- *Should a through-stack BE a vault note, or a code module on disk?* -- the
+  reader's own words (verbatim):
+
+> idea is deprecated, design decisions might still be useful. i think this was
+> about quantized language model workflows and assembling them as an example of
+> an intelligent agent architecture in the graph editor. I could be wrong.
+
+- *A through-stack's 'promise': what is it?* -- **"Type + check cell
+  (Recommended)"**: "A tool's declared output type (a strict pydantic model)
+  plus a check cell; validated when the check passes on the tool's real
+  output. The base promise: a cpg_mutate diff that compiles and passes its
+  check."
+- *When an `ask` over the stacks' surfaces finds no tool that answers the
+  query?* -- **"Propose, you approve (Recommended)"**: "A new stack note is
+  drafted (docstring + signature wireframe, natural-language first, G-238) and
+  shown on the plane; the model completes it only after you accept."
+- *Which local model drives a through-stack by default?* -- **"Per role, when
+  downloads allowed"**: "OpenJEV for typed choices, DeepSeek-Coder for code,
+  Triplex for triples (item 166) -- needs G-237's downloads; Qwen until then."
+
+*Read as (179) -- a reading, to be confirmed: (a) the through-stack idea
+(item 168) is DEPRECATED and is not built; (b) what it was for, in the
+reader's own reading and held loosely ("I could be wrong"): quantized
+language-model workflows assembled, in the graph editor, as an EXAMPLE of an
+intelligent agent architecture; (c) the three decisions stand for whatever
+replaces it -- a promise is a declared type plus a check cell; a query no tool
+answers is proposed to the reader, never constructed unasked; models are
+chosen per role once downloads are allowed, the on-disk Qwen2.5-Coder-7B
+until then.*

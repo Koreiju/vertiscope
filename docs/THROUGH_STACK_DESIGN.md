@@ -1,5 +1,7 @@
 # Through-stack agents — design draft 1 (G-239, with G-238 and G-240)
 
+> **Deprecated by the reader, 2026-11-22 (PLUGIN_GOAL 179):** "idea is deprecated, design decisions might still be useful." Kept as a record of the decisions taken on it (a promise = type + check cell; unresolved queries proposed, not constructed; models per role). Not to be built.
+
 *2026-11-22. A draft for the reader to correct, not a decision. G-239's row
 says "Design with the reader first", so nothing below is built. Every reading
 of the verbatim is marked as mine. The other assistant's names pasted on
