@@ -12069,6 +12069,63 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-392",
+      asks: "propose, the reader approves (PLUGIN_GOAL 179-180, synthesis 1d): a cell's create + review puts a card with a question and an answer slot on the plane; answer(card) is None until the reader writes in the slot (in the card's own editor), then returns that text to the next cell; planted plantNoAnswerSlot: the review has no slot and a typed reply is never returned",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const tok = (${planted} ? "p" : "c") + Date.now().toString(36);
+          const card = "g392 proposal " + tok, driver = "domvec/graph/g392 driver " + tok + ".md";
+          const cell = async (code) => {
+            const r = await plugin.onRunFence({ lang: "python", code, line: 0, path: driver });
+            const so = String((r && r.stdout) || ""), i = so.indexOf("G392"), j = so.indexOf("G392END");
+            return i >= 0 && j > i ? JSON.parse(so.slice(i + 4, j)) : { error: String((r && r.error) || so).slice(-300) };
+          };
+          plugin.editorCalls && (plugin.editorCalls.plantNoAnswerSlot = ${planted});
+          const ec = plugin.editorCalls || plugin.editor;
+          if (ec) ec.plantNoAnswerSlot = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path: driver, text: F + "python" + NL + "pass" + NL + F + NL });
+            out.ask = await cell(["import json", "create(" + JSON.stringify(card) + ", 'a proposed tool: summarise a page')",
+                                  "review(" + JSON.stringify(card) + ", 'build it?')", "print('G392' + json.dumps({'ok': True}) + 'G392END')"].join(NL));
+            await sleep(1500);
+            const path = "domvec/graph/" + card + ".md";
+            out.before = await cell(["import json", "print('G392' + json.dumps({'a': answer(" + JSON.stringify(card) + ")}) + 'G392END')"].join(NL));
+            // The reader answers in the card's own editor.
+            let v = d.viewOf(path);
+            if (!v) { const f = app.vault.getAbstractFileByPath(path); if (f) { await d.open(f); await sleep(800); v = d.viewOf(path); } }
+            const ed = v && v.editor;
+            if (!ed) return { ...out, error: "no editor for the card" };
+            const text = ed.getValue(), slot = text.lastIndexOf("**answer:**");
+            if (slot >= 0) { const at = ed.offsetToPos(slot + "**answer:**".length); ed.replaceRange(" yes, build it", at, at); }
+            else { const at = ed.offsetToPos(text.length); ed.replaceRange(NL + "> yes, build it", at, at); }
+            await v.save(); await sleep(800);
+            out.slot = slot >= 0;
+            out.after = await cell(["import json", "print('G392' + json.dumps({'a': answer(" + JSON.stringify(card) + ")}) + 'G392END')"].join(NL));
+            return out;
+          } finally {
+            if (ec) ec.plantNoAnswerSlot = false;
+            for (const p of [driver, "domvec/graph/" + card + ".md"]) {
+              try { d.panelOf(p)?.leaf.detach(); } catch (e) {}
+            }
+            for (let k = 0; k < 3; k++) {
+              await sleep(2500);
+              let left = 0;
+              for (const p of [driver, "domvec/graph/" + card + ".md"]) { const f = app.vault.getAbstractFileByPath(p); if (f) { left++; await app.vault.trash(f, true); } }
+              if (!left) break;
+            }
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: !clean.error && clean.slot && clean.before && clean.before.a === null && clean.after && clean.after.a === "yes, build it"
+                       && !planted.error && planted.slot === false && planted.after && planted.after.a === null,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-391",
       asks: "tool calls are runs of the dependency graph (THROUGH_STACK_SYNTHESIS 1c, PLUGIN_GOAL 180): a browse move is recorded as a Run keyed by its CALLER (line -1) whose inputs are its results, /inverse_map from a result finds it, and a kernel cell's focus ask is recorded under the cell's note with the chunk it named; planted no-call-runs: the same move records nothing",
       async run() {

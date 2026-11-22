@@ -37,6 +37,8 @@ const UNSAFE = /[\\/:*?"<>|#^[\]]/g;
 
 export class EditorCalls {
   stats = { create: 0, link: 0, invoke: 0, commit: 0, review: 0, refused: 0, last: null as any };
+  /** Planted: a review written without its answer slot, as before 180. */
+  plantNoAnswerSlot = false;
   /** Planted: the asks are recognised but not carried out. */
   plantNoCarry = false;
   /** Cards being invoked now: an invoke that reaches one again is a cycle (§3A.5). */
@@ -166,7 +168,10 @@ export class EditorCalls {
     if (!p) throw new Error(`no card ${name}`);
     if (!question.trim()) throw new Error("a review needs a question");
     const f = this.host.app.vault.getAbstractFileByPath(p) as TFile;
-    const callout = ["> [!question] review", ...question.trim().split(NL).map((l) => "> " + l)].join(NL);
+    // The answer SLOT is the callout's last line: the reader writes after it,
+    // and a cell's `answer(name)` reads it back (PLUGIN_GOAL 180; synthesis 1d).
+    const callout = ["> [!question] review", ...question.trim().split(NL).map((l) => "> " + l),
+      ...(this.plantNoAnswerSlot ? [] : ["> **answer:** "])].join(NL);
     await this.append(f, callout);
     new Notice(`domvec: review asked on ${name} -- ${question}`, 8000);
     return { path: p, said: `asked on ${name}` };

@@ -396,6 +396,42 @@ if "Vault" not in globals():
     Vault = _Vault(%(root)r)
 Vault.here = Vault._at("/" + %(folder)r) if %(folder)r else Vault.root
 _os.chdir(Vault.here)
+
+if "answer" not in globals():
+    import re as _re_answer
+
+    def _domvec_card_path(name):
+        """A card's vault path: the path itself, else `domvec/graph/<name>.md` (where
+        `create` puts every card), else a card there whose name matches as the plane
+        keys names (`editorcalls.ts` pathOf). Never a walk of the whole vault: run 89's
+        first `answer` walked `build/` (250k+ files) and timed out at 60 s."""
+        n = str(name)
+        for cand in (n if n.endswith(".md") else n + ".md", "domvec/graph/" + (n if n.endswith(".md") else n + ".md")):
+            if (Vault.root / cand).is_file():
+                return cand
+        key = lambda s: _re_answer.sub(r"\s+", "_", s.strip().lower())
+        k = key(n[:-3] if n.endswith(".md") else n)
+        folder = Vault.root / "domvec" / "graph"
+        if folder.is_dir():
+            for f in sorted(folder.glob("*.md")):
+                if key(f.stem) == k:
+                    return "domvec/graph/" + f.name
+        return None
+
+    def answer(name):
+        """The reader's answer to the LAST review asked on a card (`review(name, question)`):
+        the text after its `**answer:**`, or None while the reader has not written one.
+        With `create` and `review`, the propose-and-approve loop (PLUGIN_GOAL 179, 180)."""
+        p = _domvec_card_path(name)
+        if not p:
+            raise ValueError("no card %%s" %% name)
+        text = Vault.read("/" + p)
+        blocks = _re_answer.findall(r"(?m)^> \[!question\] review\n((?:>.*\n?)*)", text)
+        if not blocks:
+            return None
+        m = _re_answer.search(r"(?m)^> \*\*answer:\*\*[ \t]*(.*(?:\n> (?!\*\*answer).*)*)", blocks[-1])
+        got = "\n".join(l[2:] if l.startswith("> ") else l for l in (m.group(1) if m else "").split("\n")).strip()
+        return got or None
 '''
 
 
