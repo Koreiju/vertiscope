@@ -375,6 +375,10 @@ what was built before 168 (`domvec/dataflow.py`); §10a places it.
 
 ### 10a. What the verbatim converges on -- a reading, to be confirmed
 
+*Corrected by §11b (2026-11-21): mortegon's older verbatim puts the two faces
+as PANEL and GRAPH form, with the code entering both as typed rows -- not a
+separate code face.*
+
 168 a names the convergence: "to graphically design python programs and
 modules with a dual interface on kernel cells". Gathered from the record,
 the parts it converges from:
@@ -521,3 +525,152 @@ Sources: [smolagents](https://github.com/huggingface/smolagents) (read through C
 [memory tutorial](https://github.com/huggingface/smolagents/blob/main/docs/source/en/tutorials/memory.md),
 [llama.cpp GBNF guide](https://raw.githubusercontent.com/ggml-org/llama.cpp/HEAD/grammars/README.md),
 [llama-server structured output](https://dominguesm.github.io/llama-crab/en/server/structured/).
+
+## 11. The mortegon docs, read against the computation graph editor (2026-11-21, asked in PLUGIN_GOAL 169)
+
+Asked for: "for our computation graph spec, methodically go through all parts
+of the mortegon docs that touch on similar things, and allow that to inform
+further architecture consolidation and design research."
+
+### 11a. Method, and what earlier passes had already recovered
+
+The mortegon docs are the local clone `C:\Users\isaac\Documents\web_fiber_haptics\docs`
+(branch `feat/v3.0-phase-9-cascaded-renderer`, last commit 2026-09-13): 112
+markdown files, 1,871 sections. Their own precedence puts the verbatim first
+(`USER_REQUIREMENTS_VERBATIM.md`, cited **UR**), then `DOMAIN_MODEL.md` (**DM**),
+then objects, features, constraints, architecture, specs (`DOC_MAP.md` §0.1).
+
+1. Every section of every file was scored against nine editor themes (graph
+   editor, node/edge, card/slate/panel, cell/notebook/kernel, Python object and
+   compile, agent/model/tool, dual/black box/collapse, ref/dataflow, ego/3D).
+2. Read in full, in the docs' own order of authority: UR §E, §F, §I, §J, §M,
+   §N, §O, §P, §Q, §R, §S, §T (every editor-bearing verbatim section); then DM
+   §7.8 (the reservoir), §9.6 (Python-native API trees), §12.2, §12.6 (the
+   agent's tick, the user and agent authoring together), §16.4, §16.6;
+   `ontological_warp.md` §3A.2-§3A.7 (base objects, compile, agents).
+3. Measured which UR items domvec's design docs (`RESERVOIR_DESIGN`,
+   `GRAPH_WORKBENCH_DESIGN`, `DESIGN_VISION`, `DESIGN_SPACE`,
+   `NOTEBOOK_PANEL_DESIGN`, this spec) already cite: **57 of the 111 numbered
+   items in §E-§T; 54 not.** The count is by citation pattern, so a paraphrase
+   without its number reads as uncited.
+
+Of the 54, these bear on 166-168 directly, and §11b-§11d use them:
+F.3, F.6 (the Agent's signature; the read-only sentinel), N.11 (computation
+graphs and agents in one "unified conceptual program model"), N.14 (rank-1
+minimalism), O.20-O.21 (typed agent templates), O.22 (one search space over
+data AND computation), P.1, P.5, P.11, P.12 (the reservoir rollout), S.1-S.2
+(no separate editor fixture), E.8, E.10 (SLM-sized chunks, token streaming),
+J.3-J.5 (the RAG, round-trip and iterated-compile scenarios).
+
+### 11b. What mortegon says about the dual interface -- and what it corrects in §10a
+
+§10a read the dual interface as a **code face** (the note read top to
+bottom) and a **graph face**. Mortegon's verbatim draws the two faces
+differently, and is the older record:
+
+* **The two faces are PANEL form and GRAPH form.** "If a panel is double left
+  clicked, it is compiled into computation graph form, which has similar
+  folding over right click properties, but in graph space with pure links
+  between nodes" (UR M.7). "I create a new node that is technically both
+  computation and panel-based as a singular field primitive that is simply
+  visually restructured in regards to its context graph" (N.2).
+* **They commute.** "integrate a new functionality that commutes the
+  node-panel dual-representation" (R.1) -- an edit in either form round-trips
+  into the other; graph form stays "in node-count parity" with the panel
+  (O.1); markdown gestures (dashes, tabs, numbers, newlines) restructure the
+  graph (R.5).
+* **Python programs enter BOTH faces as trees of typed rows.** "Module
+  structures ... are completely translated to recursive structures of
+  computation graph nodes of singular values with memory reference from other
+  nodes to build the original object model" (M.2); the panel form is
+  `name: Type = {ref}` rows (M.3, DM §9.6.1). A property whose type is a class
+  unfolds into that class (M.4); a function is "automatic memory lookup to
+  inputs" (M.3), its output type inferred from what it is wired to (M.5, E.6).
+* **`{ref}` is a memory-access activation.** "any curly brace field, really
+  just means an activation to a memory access procedure somewhere else in the
+  app" (N.10). Compile walks those references lazily, revealing each node "as
+  the computation reaches them" (O.9); cycles are refused
+  (`ontological_warp` §3A.5).
+* **The panel is a black markdown slate.** "a tree-structured graph editor that
+  is completely in-text and parsed with specialized editor-specific syntaxes"
+  (T.5), the data connections "only under-the-hood" (T.6).
+
+So, corrected reading: **the code is not a third face beside these two.** A
+Python program enters the editor as a tree of typed rows. The rows read as a
+panel (the slate's text) or as a graph (singular fields joined by lines), and a
+gesture flips between the two. 167's "regular code artifacts ... would have the
+full capabilities of exploring and graph editing" is this unfolding applied to
+a code artifact. The slate dialect domvec already has (`{ref}`, names with
+spaces, a binding refused twice, `slate_module.py`) is mortegon's panel
+syntax carried over.
+
+### 11c. Architecture consolidation -- mortegon's parts, domvec's state, and what library integrates each
+
+| Mortegon part (verbatim) | What it is | In domvec now | Row | Integrates with |
+|---|---|---|---|---|
+| `{ref}` as memory-access activation (N.10); names with spaces (N.7) | the slate's reference | `slate_module.py` resolves and compiles `{ref}` | G-379 | -- |
+| compile = lazy back-reference walk, reveal-as-it-walks, cycles refused (§3A.5, O.9, O.13) | the execution order | `dataflow.py`: order, stale set, `CycleError` | G-380 | marimo's rules for the static half; mortegon adds the lazy reveal |
+| functions as memory lookup; closest-inverse lookup (E.6, M.5, DM §7.7) | an unbound input found from its output's type | forward-inverse, G-279 | -- | not in marimo, smolagents or any library surveyed -- domvec's own |
+| a Python object materialised read-only: `read_only`, `no_datablock`, `backing_pointer` to the live callable (F.5, F.6, DM §9.6) | the **tool panel** | `kernel_objects.py` objects; the §8 surfaces | G-378 | Python's `inspect` and `typing` for the typed rows; the body is never shown, as F.6 and 167 c both say |
+| user-authored panels that compile; edits written back (R.1) | the **regular code artifact** | slate, `compile_module` | G-378 | LibCST (installed) for writing a graph edit back into Python source losslessly |
+| the panel / graph commute, node-count parity, undirected lines, no arrowheads (R.1, O.1, O.16) | the plane's two forms | the plane, `planepanels.ts` | the standing goal | a node editor (litegraph.js) only if it can draw undirected, arrowless links and stay in parity with the slate |
+| the agent uses the user's own primitives: `create_card`, `link`, `invoke`, `commit_subgraph`, `request_user_review`; "the cards *are* the API" (§3A.2, §3A.7, DM §12.6.1) | co-authorship | -- | 166 d | smolagents `CodeAgent`: those five become tool-surface calls, and each agent step is a cell |
+| the editor is not a separate fixture -- its mutations are intrinsic to the panel scheme (S.1, S.2) | no editor object | -- | -- | the editor's calls sit on the same routes the plane's gestures use |
+| the Agent's `template`: one typed template fills the prompt AND parses the output, written in the slate's own text pattern, not raw JSON schema (F.3, O.20, O.21) | typed model I/O | -- | 166 d | a llama.cpp grammar or JSON schema made from the slate's typed rows; smolagents `final_answer_checks` |
+| perceive -> transform -> emit, one tick; emitter actions are editor calls (DM §12.2) | the agent loop | -- | 166 d | smolagents' step loop; `step_callbacks` write each step as a cell |
+| token streaming from the agent (E.10) | live output | `/chat_stream` | -- | `CodeAgent(stream_outputs=True)` |
+| outputs larger than a chunk are chunked again for the SLM (E.8) | sizing for small models | the chunker | 166 c | the 25-line surface is the same idea for tools |
+| the 3D map is the world; the compute graph is a reservoir; its typed readouts are the perimeter, streamed into 3D as deltas; a computation-graph node on the bisector of input and output centroids (M.1, P.3-P.10, DM §7.8) | the computational reservoir | `RESERVOIR_DESIGN.md` | the standing goal | -- |
+| one search space over data AND computation: panels, functional objects and whole subgraphs embedded beside chunks, so a task can find the subgraph that does it (O.22) | finding the right tool | -- | 166 c | see question 1 below |
+| rank-1 minimalism is a pro-pattern (N.14); "recursive minimalism with memory-function maximalism" (R.3) | the governing principle | -- | 166 c | -- |
+
+### 11d. What this changes
+
+1. **One principle, said twice.** 166 asks for agents "slim on context and
+   maximal on capabilities"; mortegon asked for "recursive minimalism with
+   memory-function maximalism" (R.3) and called rank-1 minimalism "extremely
+   important" (N.14). The ~25-line tool surface is rank-1 minimalism applied
+   to the toolspace: each line one capability, nothing below it shown.
+2. **The tool panel already had a precise definition.** Mortegon's
+   materialised Python object -- `read_only`, the body never projected
+   (`no_datablock`), a pointer to the live callable -- is 167's tool panel
+   ("special read-only and no way of exploring the underlying codebase ...
+   implicit calls into the world itself"), five months earlier. Those three
+   invariants are what G-378 can be tested against.
+3. **The agent needs the editor's own calls.** Mortegon's agent authors with
+   the user's primitives, and the cards ARE its API (§3A.2). So the §8 surfaces
+   lack one surface: the editor's own -- `create`, `link`, `invoke`, `commit`,
+   `review`. Added below as `new`, for the reader to correct.
+4. **smolagents takes LangGraph's place in the same role.** Mortegon
+   integrated GPT4All under LangGraph (E.10) and read a LangGraph node as a
+   card (§3A.6). smolagents' step is the same unit in code form: a step is a
+   cell, its observation the cell's output, and its tool calls are calls on
+   the surfaces. The typed template (O.21) is what a grammar enforces for a
+   small model.
+5. **§10a is corrected by §11b.** The two faces are panel and graph, the code
+   enters as typed rows, and the dual commutes.
+
+```python
+# the editor -- the graph itself, by the same calls the gestures make (mortegon §3A.7, S.1)
+create("scan for duckduckgo url", "{scan}")  # new: a node, panel and graph at once (N.2)
+link("DuckDuckGo", "scanner")              # new: left-click-drag in graph form (N.4)
+invoke("DuckDuckGo")                       # new: run the walk; nodes reveal as reached (O.9)
+commit("research agent")                   # new: keep a subgraph as one node (3A.7)
+review("DuckDuckGo", "is this the right source?")  # new: ask the reader before going on (3A.7)
+```
+
+### 11e. For the reader -- three questions the record does not settle
+
+1. **Are tool panels and subgraphs embedded and searchable?** O.22 put
+   panels, functional objects and whole subgraphs in the same retrieval space
+   as chunks, so a task finds the subgraph that does it. 166 removed the
+   codebase from the projector and kept "only the most base interfaces as
+   code tools". Do those tool panels (and user subgraphs) get vectors and a
+   place in 3D, as O.22 had it -- or are they found only by name?
+2. **Direction in graph form.** O.16: "no arrowheads anywhere", links are
+   undirected lines. marimo-style dataflow (167 f) has a direction -- definer
+   to reader. Is the direction computed but drawn undirected, as O.16 says?
+3. **The agent loop.** Mortegon's tick was perceive -> transform -> emit
+   under LangGraph. Does smolagents' code-writing step replace it -- each step
+   a cell in the note -- or does the tick stay as the outer loop with
+   smolagents inside the transform?
