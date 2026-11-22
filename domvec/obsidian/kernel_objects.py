@@ -40,6 +40,7 @@ if "Database" not in globals():
             self._base = base
 
         def search(self, query, k=5, where=""):
+            """Ranked chunks from the store: [{cid, url, text}]."""
             url = self._base + "/search?q=" + _up.quote(str(query)) + "&k=" + str(int(k))
             if where:
                 url += "&where=" + _up.quote(str(where))
@@ -49,6 +50,7 @@ if "Database" not in globals():
                     for h in (got.get("hits") or [])]
 
         def cypher(self, query):
+            """A read-only Cypher query over the store; writes are refused."""
             req = _ur.Request(self._base + "/cypher", data=_json.dumps({"query": str(query)}).encode(),
                               headers={"content-type": "application/json"})
             try:
@@ -98,19 +100,23 @@ if "WebBrowser" not in globals():
 
         @property
         def url(self):
+            """The url the browser cell shows now."""
             with _ur.urlopen(self._base + "/browser_state", timeout=30) as r:
                 return (_json.load(r) or {}).get("url") or ""
 
         @property
         def title(self):
+            """The title of the page the browser cell shows."""
             with _ur.urlopen(self._base + "/browser_state", timeout=30) as r:
                 return (_json.load(r) or {}).get("title") or ""
 
         def go(self, url):
+            """Ask the browser cell to open a url; carried out when the cell ends."""
             _domvec_asks.append({"go": str(url)})
             return {"asked": str(url), "pending": True}
 
         def chunks(self, url=None):
+            """The chunk ids the store holds for a page (default: the one shown)."""
             u = url or self.url
             if not u:
                 return []
@@ -135,6 +141,7 @@ if "Agent" not in globals():
             self.model = ""
 
         def ask(self, prompt, context=None):
+            """The local model's reply to a prompt, given chunks as context."""
             ctx = []
             for i, c in enumerate(context or []):
                 if isinstance(c, str):
@@ -206,19 +213,23 @@ if "Vault" not in globals():
             return p
 
         def ls(self, path="."):
+            """The entries of a vault folder."""
             p = self._at(path)
             return sorted((c.name + ("/" if c.is_dir() else "")) for c in p.iterdir() if c.name not in self._GUARDED)
 
         def read(self, path):
+            """A vault file's text."""
             return self._at(path).read_text(encoding="utf-8")
 
         def write(self, path, text):
+            """Write a vault file (inside the vault, never .obsidian or .git)."""
             p = self._at(path, writing=True)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(str(text), encoding="utf-8")
             return p.relative_to(self.root).as_posix()
 
         def glob(self, pattern):
+            """Vault paths matching a glob pattern."""
             return sorted(c.relative_to(self.root).as_posix() for c in self.root.rglob("*")
                           if c.is_file() and _fn.fnmatch(c.relative_to(self.root).as_posix(), pattern)
                           and c.relative_to(self.root).parts[0] not in self._GUARDED)

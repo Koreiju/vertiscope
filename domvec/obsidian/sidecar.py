@@ -3425,6 +3425,31 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, res)
             return
 
+        if route == "tool_panels":
+            # G-382 (PLUGIN_GOAL 170 a, 172 [2]): the kernel's tool panels as
+            # pages at tool://kernel/<Name> -- searchable, embedded and placed
+            # in 3D like any page. The SERVER renders them from the kernel's
+            # own bootstrap; the client sends no text, so this is not a way
+            # for a probe to write arbitrary pages (D-39). Gated as a capture.
+            if self.workspace is None or not self.capture_allowed:
+                self._send(403, {"error": "capture is off"})
+                return
+            from .. import tool_panels as _tp
+            try:
+                t0 = time.time()
+                with _foreground(), _WORK_LOCK:
+                    got = _tp.index(self.workspace)
+                for g in got:
+                    _project_page(self.workspace, g["url"])
+                _LAST_WRITE[0] = time.time()
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+                return
+            out = {"panels": got, "ms": round((time.time() - t0) * 1000)}
+            _profile("tool_panels", {"n": len(got), "ms": out["ms"]})
+            self._send(200, out)
+            return
+
         if route == "package":
             # G-375 (PLUGIN_GOAL 166 a, 167 a "Layout and indexer"): this
             # repository and installed packages are no longer indexed or
