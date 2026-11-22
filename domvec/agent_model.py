@@ -24,13 +24,11 @@ from smolagents.monitoring import TokenUsage
 
 MODELS_DIR = Path(os.environ.get("DOMVEC_GGUF_DIR") or Path.home() / "AppData" / "Local" / "nomic.ai" / "GPT4All")
 
-#: spec §10c -- the task -> the file on disk that suits it (a reading, not a measurement)
-TASK_MODELS = {
-    "code": "qwen2.5-coder-7b-instruct-q4_0.gguf",
-    "chat": "Nous-Hermes-2-Mistral-7B-DPO.Q4_0.gguf",
-    "plan": "DeepSeek-R1-Distill-Qwen-7B-Q4_0.gguf",
-    "long": "Meta-Llama-3.1-8B-Instruct-128k-Q4_0.gguf",
-}
+#: spec §10c -- the task -> its file, READ FROM the one model table
+#: (`models.ROLES`, THROUGH_STACK_SYNTHESIS 1b): this was a second table that
+#: disagreed with it on "chat".
+from . import models as _models
+TASK_MODELS = {t: _models.ROLES[t]["file"] for t in ("code", "chat", "plan", "long")}
 
 #: One step, one cell: a thought line, then exactly one ```python block whose
 #: lines never open with a backtick (so the block cannot be closed early).
@@ -60,7 +58,7 @@ class LlamaCppModel(Model):
 
     @classmethod
     def for_task(cls, task: str, **kw) -> "LlamaCppModel":
-        return cls(MODELS_DIR / TASK_MODELS[task], **kw)
+        return cls(_models.find(TASK_MODELS[task]) or MODELS_DIR / TASK_MODELS[task], **kw)
 
     def _load(self):
         if self._llm is None:

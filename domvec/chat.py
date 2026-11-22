@@ -33,8 +33,10 @@ from typing import Callable, Dict, List, Optional
 
 PLANT_RESEND = [False]
 
-#: L-1 (`docs/PLUGIN_PRD.md`): Nous Hermes 2 DPO 7B, quantized, local CUDA.
-MODEL_FILE = "Nous-Hermes-2-Mistral-7B-DPO.Q4_0.gguf"
+#: L-1 (`docs/PLUGIN_PRD.md`): Nous Hermes 2 DPO 7B, quantized, local CUDA --
+#: read from the one model table (`models.ROLES["chat"]`).
+from . import models as _models_table
+MODEL_FILE = _models_table.ROLES["chat"]["file"]
 SYSTEM = ("<|im_start|>system\nYou are a careful research assistant inside a web browser. The reader pins "
           "parts of web pages as markdown and asks about them. Answer in markdown, from the pinned material "
           "when it is relevant, and say so when it does not contain the answer.<|im_end|>\n")

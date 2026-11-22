@@ -12069,6 +12069,43 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-393",
+      asks: "a TYPED model role from a kernel cell over the one model table (THROUGH_STACK_SYNTHESIS 1a-b, PLUGIN_GOAL 181): run_role('triplex', cid=...) returns the role's type -- entities and triples -- for a stored chunk, and the job is a run of model://triplex reading that chunk (G-391); run_role('jev') is refused with its reason, never coerced",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge"), base = plugin.settings.sidecar.replace(/[/]+$/, "");
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const hit = ((await (await fetch(base + "/search?q=" + encodeURIComponent("radix tree patricia trie") + "&k=3")).json()).hits || [])[0];
+          if (!hit) return { error: "no chunk" };
+          const tok = Date.now().toString(36), driver = "domvec/graph/g393 driver " + tok + ".md";
+          const code = ["import json",
+            "r = run_role('triplex', cid=" + JSON.stringify(hit.cid) + ")",
+            "v = r['value'] or {}",
+            "try:", "    run_role('jev', prompt='x'); jev = None", "except ValueError as e:", "    jev = str(e)",
+            "print('G393' + json.dumps({'ok': r['ok'], 'error': r['error'], 'entities': len(v.get('entities') or {}), 'triples': len(v.get('triples') or []), 'jev': jev}) + 'G393END')"].join(NL);
+          const before = ((await (await fetch(base + "/runs?note=" + encodeURIComponent("model://triplex"))).json()).runs || []).length;
+          let out = {};
+          try {
+            await d.create("notebook", { path: driver, text: F + "python" + NL + code + NL + F + NL });
+            const reply = await plugin.onRunFence({ lang: "python", code, line: 0, path: driver });
+            const so = String((reply && reply.stdout) || ""), i = so.indexOf("G393"), j = so.indexOf("G393END");
+            out = i >= 0 && j > i ? JSON.parse(so.slice(i + 4, j)) : { error: String((reply && reply.error) || so).slice(-400) };
+          } finally {
+            try { d.panelOf(driver)?.leaf.detach(); } catch (e) {}
+            for (let k = 0; k < 3; k++) { await sleep(2500); const f = app.vault.getAbstractFileByPath(driver); if (!f) break; await app.vault.trash(f, true); }
+          }
+          const runs = ((await (await fetch(base + "/runs?note=" + encodeURIComponent("model://triplex"))).json()).runs || []);
+          out.runs_added = runs.length - before;
+          out.run_reads_chunk = runs.length ? (runs[0].inputs || []).some((x) => x.cid === hit.cid) : false;
+          out.cid = hit.cid;
+          return out;
+        })()`, { timeout: 240000 });
+        return { pass: !got.error && got.ok === true && got.entities > 0 && got.triples > 0 && got.runs_added === 1 && got.run_reads_chunk
+                       && typeof got.jev === "string" && got.jev.includes("logits"), evidence: got };
+      },
+    },
+    {
       id: "G-392",
       asks: "propose, the reader approves (PLUGIN_GOAL 179-180, synthesis 1d): a cell's create + review puts a card with a question and an answer slot on the plane; answer(card) is None until the reader writes in the slot (in the card's own editor), then returns that text to the next cell; planted plantNoAnswerSlot: the review has no slot and a typed reply is never returned",
       async run() {

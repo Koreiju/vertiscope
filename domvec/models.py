@@ -28,17 +28,49 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 MODEL_DIR = Path(os.environ.get("DOMVEC_MODEL_DIR") or (Path.home() / ".cache" / "gpt4all"))
+#: GPT4All's own app directory, where the agent's models were installed
+#: (`agent_model.MODELS_DIR`). Searched second: ONE table, two places a file
+#: may be (THROUGH_STACK_SYNTHESIS 1b).
+APP_DIR = Path(os.environ.get("DOMVEC_GGUF_DIR") or Path.home() / "AppData" / "Local" / "nomic.ai" / "GPT4All")
+MODEL_DIRS = [MODEL_DIR, APP_DIR]
+
+
+def find(file: str) -> Optional[Path]:
+    """Where a model file is on this machine, or None. Nothing is downloaded."""
+    for d in MODEL_DIRS:
+        p = Path(d) / file
+        if p.exists():
+            return p
+    return None
 #: The GPU by default: Triplex on a paragraph took 37-65 s on CPU and 1.8-3.2 s
 #: on CUDA (RTX 4070 Laptop, 2026-10-18). A model that will not load there
 #: (memory) falls back to CPU rather than failing the run.
 MODEL_DEVICE = os.environ.get("DOMVEC_MODEL_DEVICE") or "cuda"
 
+#: THE model table (THROUGH_STACK_SYNTHESIS 1b, PLUGIN_GOAL 181): every role
+#: the system runs a local model for, one file each. It replaced three that
+#: disagreed: this one had chat = DeepSeek-Coder, `agent_model.TASK_MODELS`
+#: and `chat.MODEL_FILE` had chat = Nous Hermes 2 DPO (L-1, the chat cell).
+#: Chat is Hermes; DeepSeek-Coder keeps its own role, `coder` (item 166).
+#: `agent_model` and `chat` read their files from here.
 ROLES: Dict[str, Dict[str, Any]] = {
     "triplex": {"file": "triplex-Q4_K_M.gguf", "template": "<|user|>\n{msg}<|end|>\n<|assistant|>\n",
                 "inputs": {"text": "str", "entity_types": "list[str]", "predicates": "list[str]"},
                 "outputs": {"entities": "dict[int, {type, name}]", "triples": "list[{s, p, o}]"}},
-    "chat": {"file": "deepseek-coder-6.7b-instruct.Q4_K_M.gguf",
-             "template": "You are an AI programming assistant.\n### Instruction:\n{msg}\n### Response:\n",
+    "chat": {"file": "Nous-Hermes-2-Mistral-7B-DPO.Q4_0.gguf",
+             "template": "<|im_start|>user\n{msg}<|im_end|>\n<|im_start|>assistant\n",
+             "inputs": {"prompt": "str"}, "outputs": {"prose": "str", "code": "list[{lang, text, kg?}]"}},
+    "coder": {"file": "deepseek-coder-6.7b-instruct.Q4_K_M.gguf",
+              "template": "You are an AI programming assistant.\n### Instruction:\n{msg}\n### Response:\n",
+              "inputs": {"prompt": "str"}, "outputs": {"prose": "str", "code": "list[{lang, text, kg?}]"}},
+    "code": {"file": "qwen2.5-coder-7b-instruct-q4_0.gguf",
+             "template": "<|im_start|>user\n{msg}<|im_end|>\n<|im_start|>assistant\n",
+             "inputs": {"prompt": "str"}, "outputs": {"prose": "str", "code": "list[{lang, text, kg?}]"}},
+    "plan": {"file": "DeepSeek-R1-Distill-Qwen-7B-Q4_0.gguf",
+             "template": "<｜User｜>{msg}<｜Assistant｜>",
+             "inputs": {"prompt": "str"}, "outputs": {"prose": "str", "code": "list[{lang, text, kg?}]"}},
+    "long": {"file": "Meta-Llama-3.1-8B-Instruct-128k-Q4_0.gguf",
+             "template": "<|start_header_id|>user<|end_header_id|>\n\n{msg}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
              "inputs": {"prompt": "str"}, "outputs": {"prose": "str", "code": "list[{lang, text, kg?}]"}},
     "jev": {"file": "OpenJev-Flash-9B-Q4_K_M.gguf", "alt": "OpenJev-Q4_K_M.gguf",
             "inputs": {"state": "str", "questions": "dict[str, {type: choice|score|noul, instructions, criteria}]"},
@@ -161,10 +193,11 @@ def _model(role: str, device: Optional[str] = None):
     device = device or MODEL_DEVICE
     key = "%s@%s" % (spec["file"], device)
     if key not in _LOADED:
-        if not (MODEL_DIR / spec["file"]).exists():
-            raise FileNotFoundError("%s is not installed in %s" % (spec["file"], MODEL_DIR))
+        path = find(spec["file"])
+        if path is None:
+            raise FileNotFoundError("%s is not installed in %s" % (spec["file"], " or ".join(map(str, MODEL_DIRS))))
         try:
-            _LOADED[key] = GPT4All(spec["file"], model_path=str(MODEL_DIR), allow_download=False, device=device, n_ctx=4096)
+            _LOADED[key] = GPT4All(spec["file"], model_path=str(path.parent), allow_download=False, device=device, n_ctx=4096)
         except Exception:                           # noqa: BLE001 -- no room on the GPU: the CPU
             if device == "cpu":
                 raise
@@ -192,9 +225,14 @@ def run_triplex(text: str, entity_types: List[str], predicates: List[str], devic
     return parse_triplex(raw, predicates)
 
 
-def run_chat(prompt: str, device: Optional[str] = None, max_tokens: int = 800) -> TypedResult:
-    raw = _model("chat", device).generate(ROLES["chat"]["template"].format(msg=prompt), max_tokens=max_tokens, temp=0.0)
-    return parse_chat(raw)
+def run_chat(prompt: str, device: Optional[str] = None, max_tokens: int = 800, role: str = "chat") -> TypedResult:
+    """A prompt -> prose + code role (chat, coder, code, plan, long), parsed to its type."""
+    if ROLES.get(role, {}).get("outputs", {}).get("code") is None:
+        return TypedResult(role, error="%s is not a prompt -> prose + code role" % role)
+    raw = _model(role, device).generate(ROLES[role]["template"].format(msg=prompt), max_tokens=max_tokens, temp=0.0)
+    res = parse_chat(raw)
+    res.role = role                                 # the role RUN, not the parser's name
+    return res
 
 
 def installed() -> Dict[str, Dict[str, Any]]:
@@ -202,7 +240,7 @@ def installed() -> Dict[str, Dict[str, Any]]:
     out = {}
     for role, spec in ROLES.items():
         files = [spec["file"]] + ([spec["alt"]] if spec.get("alt") else [])
-        on = {f: (MODEL_DIR / f).stat().st_size for f in files if (MODEL_DIR / f).exists()}
+        on = {f: find(f).stat().st_size for f in files if find(f) is not None}
         out[role] = {"files": on, "inputs": spec["inputs"], "outputs": spec["outputs"],
                      "runnable": spec.get("runnable", True) and bool(on), "why": spec.get("why", "")}
     return out

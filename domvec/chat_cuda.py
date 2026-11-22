@@ -103,7 +103,7 @@ def model(path: Optional[str] = None):
         if _MODEL[0] is None:
             from .agent_model import LlamaCppModel
             _free_gpt4all()
-            _MODEL[0] = LlamaCppModel(path or str(_models.MODEL_DIR / _chat.MODEL_FILE),
+            _MODEL[0] = LlamaCppModel(path or str(_models.find(_chat.MODEL_FILE) or _models.MODEL_DIR / _chat.MODEL_FILE),
                                       grammar=None, temperature=0.3, n_ctx=8192)
             _MODEL[0]._load()
             STATS["loads"] += 1

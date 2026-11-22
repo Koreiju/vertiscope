@@ -547,7 +547,7 @@ def _model_job(workspace, jid: str, body: Dict) -> None:
                                      list(body.get("predicates") or ["IS_A", "PART_OF", "LOCATED_IN", "CREATED_BY", "USED_FOR", "RELATED_TO"]))
             job["source"] = {"cid": cid, "url": rows[0][1] if rows else ""}
         else:
-            res = models.run_chat(str(body.get("prompt") or ""))
+            res = models.run_chat(str(body.get("prompt") or ""), role=job["role"])
         job.update(state="done" if res.ok else "error", result=res.to_json(), error=res.error,
                    s=round(time.time() - t0, 1))
     except Exception as exc:                        # noqa: BLE001
@@ -2978,8 +2978,17 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "bad body: %s" % exc})
                 return
             role = str(body.get("role") or "")
-            if role not in ("triplex", "chat") or self.workspace is None:
-                self._send(400, {"error": "role triplex or chat, with a workspace"})
+            from .. import models as _mt
+            # Every RUNNABLE role of the one model table (synthesis 1b): triplex
+            # over a chunk, the prose + code roles over a prompt. `jev` needs
+            # logits gpt4all does not give, and says so.
+            runnable = [r for r, sp in _mt.ROLES.items() if sp.get("runnable", True)]
+            if role in _mt.ROLES and role not in runnable:
+                # Its own reason, from the table -- not a list of other roles.
+                self._send(400, {"error": "%s is not runnable here: %s" % (role, _mt.ROLES[role].get("why") or "no reason recorded")})
+                return
+            if role not in runnable or self.workspace is None:
+                self._send(400, {"error": "role one of %s, with a workspace" % ", ".join(runnable)})
                 return
             jid = "%s:%s:%d" % (role, body.get("cid") or "prompt", int(time.time() * 1000))
             _MODEL_JOBS[jid] = {"state": "running", "id": jid, "role": role, "cid": body.get("cid")}

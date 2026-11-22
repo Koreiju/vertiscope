@@ -204,6 +204,28 @@ if "similar" not in globals():
         _domvec_asks.append({"view": str(v)})
         return {"asked": "view", "view": str(v), "pending": True}
 
+if "run_role" not in globals():
+    def run_role(role, prompt=None, cid=None, timeout=600, **inputs):
+        """A local model ROLE run, TYPED (THROUGH_STACK_SYNTHESIS 1a-b): `chat`, `coder`,
+        `code`, `plan`, `long` over a prompt -> {prose, code}; `triplex` over a chunk (cid)
+        -> {entities, triples}. Returns {role, ok, value, error}: the role's type, or the
+        reason it is not -- never coerced. The promise's TYPE half; check it in the next cell."""
+        import time as _t
+        body = dict(inputs, role=str(role), prompt=prompt, cid=cid)
+        req = _ur.Request(%(base)r + "/model_run", data=_json.dumps(body).encode(),
+                          headers={"content-type": "application/json"})
+        try:
+            with _ur.urlopen(req, timeout=60) as r:
+                job = _json.load(r)
+        except _ue.HTTPError as e:
+            raise ValueError((_json.loads(e.read() or b"{}") or {}).get("error") or str(e))
+        t0 = _t.time()
+        while job.get("state") == "running" and _t.time() - t0 < timeout:
+            _t.sleep(1.0)
+            job = _domvec_get("/model_job?id=" + _up.quote(job["id"], safe="")) or job
+        res = job.get("result") or {"role": role, "ok": False, "value": None, "error": job.get("error") or job.get("state")}
+        return {k: res.get(k) for k in ("role", "ok", "value", "error")}
+
 # Its own guard: a kernel already holding the calls above (`similar` defined)
 # would otherwise never receive `browse` without a restart.
 if "browse" not in globals():
