@@ -1248,6 +1248,8 @@ PLANT_CODE_SYNC_PREPARE_LOCKED = [False]
 PLANT_NO_PLUGIN_SOURCE = [False]
 #: Planted: the repository's code-sync thread runs again (G-375 retired it).
 PLANT_CODE_SYNC = [False]
+#: Planted: the `/package` route indexes this repository and installed packages again (G-375 closed it).
+PLANT_PACKAGE_ROUTE = [False]
 
 
 def _sync_code(workspace, *, limit: Optional[int] = None, forget=()) -> Dict:
@@ -3422,6 +3424,15 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if route == "package":
+            # G-375 (PLUGIN_GOAL 166 a, 167 a "Layout and indexer"): this
+            # repository and installed packages are no longer indexed or
+            # queued into the projector from the app -- only code scanned in
+            # the browser is. `packages.index_tree` stays a library function
+            # (tests, analytics). Planted `PLANT_PACKAGE_ROUTE`: open again.
+            if not PLANT_PACKAGE_ROUTE[0]:
+                self._send(410, {"error": "repository and package code is not indexed (G-375)",
+                                 "why": "only code scanned in the browser reaches the store's index and the projector"})
+                return
             if not self.capture_allowed or self.workspace is None:
                 self._send(403, {"error": "package indexing is off",
                                  "why": "start the sidecar with --capture to let it write the workspace"})

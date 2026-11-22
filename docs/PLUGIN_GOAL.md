@@ -5927,3 +5927,17 @@ design vision;*
 realised by INTEGRATING existing libraries, chosen and composed so that the
 result is complete to the vision.*
 
+### 169. (2026-11-21) Answers to the four decisions after G-375 and spec §10
+
+*2026-11-21 (verbatim), numbered as the decisions were put: (1) restart the
+sidecar and reload the plugin to confirm G-375 live; (2) delete the 216
+stored repository pages, which cannot be undone; (3) does spec §10a's
+reading state the vision; (4) install smolagents and llama-cpp-python:*
+
+> on your decisions: 
+>
+> 1. yes
+> 2. yes
+> 3. double-check and explain to me in my own terms 
+> 4. yss
+
