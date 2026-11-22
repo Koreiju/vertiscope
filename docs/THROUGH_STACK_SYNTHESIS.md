@@ -137,4 +137,4 @@ run drawn in the signal flow. No new subsystem.
 * **Item 1 -- every call a run:** G-391, live run 88 (`50e79b4`).
 * **Item 3 -- review's answer path:** G-392, live run 90 (`caded6c`).
 * **Item 4 -- slots:** tested, held for the reader (1g above).
-* **Item 2 -- one model table:** waits on which file is "chat".
+* **Item 2 -- one model table:** G-393, live run 92 (`2bf4b0a`); chat = Hermes, my choice after "[No preference]" (PLUGIN_GOAL 181).

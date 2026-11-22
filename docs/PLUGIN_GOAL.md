@@ -6221,3 +6221,23 @@ they are useful, through the APIs that already exist rather than as a new
 subsystem; the synthesis ranks four uses, of which (1) -- every tool call a run
 of the dependency graph -- needs no decision and is taken first (G-391). The
 model table (2) waits on which file is "chat".*
+
+### 181. (2026-11-22) Two questions, no preference: the model table and core names
+
+*Asked after 180: which file is "chat" (Nous Hermes 2 DPO, as `chat.py` and
+`agent_model` had it, or DeepSeek-Coder, as `models.ROLES` had it), and what
+the kernel does when a cell takes a core call's name (synthesis 1g). The
+reader's answers (verbatim):*
+
+> [No preference]
+>
+> [No preference]
+
+*No direction was given, so nothing here is the reader's ruling. The choices
+below are MINE, recorded as such and reversible on a word:*
+
+* *Chat = Nous Hermes 2 DPO, in ONE table (`models.ROLES`); DeepSeek-Coder
+  keeps its own role, `coder`. Built as G-393 (`2bf4b0a`).*
+* *Core names: not changed. The behaviour stays as found and tested
+  (`tests/test_kernel_slots.py`) -- a cell's own definition or variable
+  replaces a core call for good -- until the reader rules.*
