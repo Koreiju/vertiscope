@@ -773,8 +773,8 @@ plugins not to claim one, and a conflict is silent.
 | R-C3 | "matching cartesian coordinates kind of thing on the page (as in we keep all our structures distilled, but localized enough still such that we can render them as their intended cohesive structures)" | **Partial** — see the constraint below |
 | R-C4 | "switch to a more generalized xpath structure that keeps absolute structure with agnostic array indices for multiple/repeat fields like menu items, paragraphs, search results" | Done — as a second field, not a replacement Evidence (cited 2026-11-16): `tests/test_address_shape.py` -- the shape is kept as a second dimension beside the absolute address (23,654 addresses, 2,831 shapes, 79.2% of multi-element shapes covering different content), `test_the_shape_survives_an_inserted_sibling`. |
 | R-C5 | "chunks should be at their context window limits and measured using markdown renderings for token counts" | Done — worst_overflow_ratio 1.49x (bar 1.5x) on 60 frozen-corpus pages, was 8.88x; over-long single lines split into `~offset` sub-addresses (tests/test_line_split.py, planted PLANT_NO_LINE_SPLIT) |
-| R-C6 | "Our chunking should be such that, for example, we get search results as singular chunks" | Done |
-| R-C7 | "…and semantic + frequency vectors" | Done |
+| R-C6 | "Our chunking should be such that, for example, we get search results as singular chunks" | Done Evidence (cited 2026-11-21): `tests/test_record_chunks.py` (`test_one_search_result_is_one_chunk`, `test_the_window_alone_would_not_have_done_it`). |
+| R-C7 | "…and semantic + frequency vectors" | Done Evidence (cited 2026-11-21): `tests/test_vectors_and_store.py` (`test_freq_matrix_round_trips_and_stays_appendable`, `test_semantic_absence_is_reported_not_faked`). |
 
 ### Acceptance criteria for the partials
 
@@ -980,7 +980,7 @@ until the user says which of those two directions matters.
 |---|---|---|
 | R-G1 | "Selenium navigations ported from interactions with the shadow DOM distilled in its Obsidian form" | Done |
 | R-G2 | "so the user scrolls and interacts in Obsidian while the Selenium remote browser does the real scanning" | **Superseded** — answered the other way and better: the reader scrolls and interacts in a browser that is INSIDE Obsidian, and the same surface does the scanning (`G-47`, `P-B2` — `live_capture_on` true while navigating). There is no remote browser to drive, which removes the round trip this row was designing around |
-| R-G3 | "or the graph RAG database purely when offline" | Done |
+| R-G3 | "or the graph RAG database purely when offline" | Done Evidence (cited 2026-11-21): `tests/test_offline_pages.py` (`test_the_trace_alone_draws_the_page_with_its_pictures`: the page drawn from the store alone, no connection). |
 
 **R-G1** is the one write path in the bridge and it is off by default, behind
 four gates: the server flag (`--enact`), the refusal set mirrored from
