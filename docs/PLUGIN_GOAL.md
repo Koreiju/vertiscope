@@ -6023,3 +6023,24 @@ with the fit;*
 *(c) the in-note browser cell is reachable by Obsidian's leaf APIs and the
 plugin's "browser in use" where it sits, AND it offers a pop-out that opens
 the same page in a regular workspace tab.*
+
+### 174. (2026-11-22) An open page's chunks keep their fit; overlap inside the cloud is allowed
+
+*Asked in the question dialog (2026-11-22 05:56), after a collision pass for
+open pages was built and measured but not committed: Thunderbirds' 421 chunks
+held 11,143 overlapping pairs at the raw fit and 226 as drawn; the pass took
+G-21 from 2,236 overlapping pairs to 1 and the pages level of G-4 from 19% to
+100% clear, at the cost of 459 of 488 chunks leaving their exact fit direction
+(228 order swaps by distance) -- which item 121 ("No nudging nodes") forbids.
+Which should hold for an open page's chunks?*
+
+> Keep fit, overlap ok
+
+*The option as offered: "Item 121 stands: chunks stay exactly on their UMAP
+fit plus the hole shift. I drop the collision pass, and G-21/G-4 are re-scoped
+to say overlaps inside an open page's cloud are expected."*
+
+*Read as: (174) the collision pass is dropped; within ONE open page's chunk
+cloud overlap is expected and reported, not judged; G-21 and G-4 judge every
+other pair -- page against page, chunk against another page's node or
+chunk -- as before. Item 121 and G-94h's exact-direction bar stand.*

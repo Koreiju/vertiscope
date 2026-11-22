@@ -5560,7 +5560,13 @@ export function makeChecks(env) {
           const ns = d.nodes.filter(n => Number.isFinite(n.x) && !n.force);
           const sample = ns.slice(0, 1200);
           const C = v.collider || { safety: 1.25, margin: 0 };
-          let pairs = 0, worst = 0, panels = 0, inBand = 0;
+          let pairs = 0, worst = 0, panels = 0, inBand = 0, inCloud = 0;
+          // PLUGIN_GOAL 174 ("Keep fit, overlap ok", 2026-11-22): two chunks
+          // of ONE open page keep their fit, and overlap among them is
+          // expected -- reported, not judged. Every other pair is judged.
+          const openDocs = new Set(String(v.lastExpanded || "").split("\\n").filter(Boolean).map((u) => u.split("#")[0]));
+          const docOf = (n) => String(n.url || "").split("#")[0];
+          const sameCloud = (a, b) => a.level !== "page" && b.level !== "page" && docOf(a) === docOf(b) && openDocs.has(docOf(a));
           // Each overlap NAMED with the state that could explain it: a
           // picture whose drawn size changed after it was placed (drawnHalf
           // is the size its place was relaxed at), a glide or a halo in
@@ -5568,12 +5574,15 @@ export function makeChecks(env) {
           const why = [];
           const state = (n, r) => ({ id: String(n.id).slice(-48), level: n.level || "chunk", picture: !!(n.image && n.image.src),
                                      r: Math.round(r * 100) / 100, placed_at_r: Number.isFinite(n.drawnHalf) ? Math.round(n.drawnHalf * 100) / 100 : null,
-                                     gliding: !!n.__glide, halo: !!n.__halo, pinned: Number.isFinite(n.fx) });
+                                     gliding: !!n.__glide, halo: !!n.__halo, pinned: Number.isFinite(n.fx),
+                                     hole_cut_at_r: Number.isFinite(n.__holeR) ? Math.round(n.__holeR * 100) / 100 : null,
+                                     hole_age_s: Number.isFinite(n.__holeAt) ? Math.round((performance.now() - n.__holeAt) / 100) / 10 : null });
           for (let i = 0; i < sample.length; i++) {
             for (let j = i + 1; j < sample.length; j++) {
               const a = sample[i], b = sample[j];
               const d = Math.hypot(a.x-b.x, a.y-b.y, a.z-b.z);
               const ra = radius(a), rb = radius(b);
+              if (d - ra - rb < 0 && sameCloud(a, b)) { inCloud++; continue; }
               if (d - ra - rb < 0) {
                 pairs++; worst = Math.max(worst, ra + rb - d);
                 if (why.length < 8) why.push({ by: Math.round((ra + rb - d) * 100) / 100, a: state(a, ra), b: state(b, rb) });
@@ -5595,12 +5604,12 @@ export function makeChecks(env) {
           if (sample.length >= 2) {
             const a = sample[0];
             let b = sample[1], bd = Infinity;
-            for (const o of sample.slice(1)) { const dd = Math.hypot(a.x-o.x, a.y-o.y, a.z-o.z); if (dd < bd) { bd = dd; b = o; } }
+            for (const o of sample.slice(1)) { if (sameCloud(a, o)) continue; const dd = Math.hypot(a.x-o.x, a.y-o.y, a.z-o.z); if (dd < bd) { bd = dd; b = o; } }
             const was = [b.x, b.y, b.z];
             try {
               b.x = a.x + radius(a) * 0.25; b.y = a.y; b.z = a.z;
               let found = 0;
-              for (const o of sample) { if (o === b) continue;
+              for (const o of sample) { if (o === b || sameCloud(o, b)) continue;
                 if (Math.hypot(o.x-b.x, o.y-b.y, o.z-b.z) - radius(o) - radius(b) < 0) found++; }
               planted = { moved: String(b.id).slice(-48), onto: String(a.id).slice(-48), overlaps_found: found };
             } finally { b.x = was[0]; b.y = was[1]; b.z = was[2]; }
@@ -5609,6 +5618,7 @@ export function makeChecks(env) {
                    checked: sample.length * (sample.length - 1) / 2,
                    overlapping: pairs, worst: Math.round(worst * 100) / 100,
                    involving_a_panel: panels, inside_clearance_band: inBand, pairs: why, planted,
+                   within_open_cloud_reported: inCloud, open_pages: openDocs.size,
                    radius_from: v.drawnRadiusOf ? "pane" : "formula" };
         `);
         if (got.error) return { pass: false, evidence: got };
@@ -6525,7 +6535,12 @@ export function makeChecks(env) {
         // nearest neighbour's. In WORLD space, so depth is not conflated
         // (D-25) and the bar holds at every zoom; "most" read as 95%.
         const got = await inPane(`
+          const openDocs = () => new Set(String(v.lastExpanded || "").split("\\n").filter(Boolean).map((u) => u.split("#")[0]));
+          const docOf = (n) => String(n.url || "").split("#")[0];
+          let OPEN = new Set(), inCloud = 0;
+          const sameCloud = (a, b) => v.level !== "chunk" && a.level !== "page" && b.level !== "page" && docOf(a) === docOf(b) && OPEN.has(docOf(a));
           const census = () => {
+            OPEN = openDocs(); inCloud = 0;
             const ns = v.graph.graphData().nodes.filter((n) => Number.isFinite(n.x) && !n.force);
             const rad = ns.map((n) => v.drawnRadiusOf(n));
             const rs = [...rad].sort((a, b) => a - b);
@@ -6542,6 +6557,10 @@ export function makeChecks(env) {
                 for (const j of grid.get((cx + dx) + "," + (cy + dy) + "," + (cz + dz)) || []) {
                   if (j === i) continue;
                   const o = ns[j];
+                  // PLUGIN_GOAL 174: within one open page's cloud the chunks
+                  // keep their fit and may overlap; a chunk's neighbour for
+                  // this bar is anything else.
+                  if (sameCloud(n, o)) { inCloud++; continue; }
                   const d = Math.hypot(o.x - n.x, o.y - n.y, o.z - n.z);
                   if (d < best) { best = d; bj = j; }
                 }
@@ -6553,7 +6572,7 @@ export function makeChecks(env) {
               if (r >= 1) clear++; else touching++;
             });
             ratio.sort((a, b) => a - b);
-            return { level: v.level || "pages", drawn: drawn(), nodes: ns.length, clear, touching, coincident,
+            return { level: v.level || "pages", drawn: drawn(), nodes: ns.length, clear, touching, coincident, same_cloud_neighbours_skipped: inCloud,
                      share: Math.round(clear / ns.length * 1000) / 1000,
                      gap_over_radii_p50: ratio.length ? Math.round(ratio[Math.floor(ratio.length / 2)] * 100) / 100 : null };
           };
@@ -6563,9 +6582,17 @@ export function makeChecks(env) {
           // lands. Run 2026-11-22 01:36 (GPU saturated) read the chunk
           // picture twice more -- "pages_rebuilt" 6475 nodes, and the planted
           // arm identical to clean, the plants never drawn.
+          // At the pages level an OPEN page draws its chunks beside the
+          // pages -- by design, not a stale picture -- so the composition
+          // asked of that level is "every chunk drawn belongs to an open
+          // page" (run 31: 429 chunks of the page the cell had just
+          // scrolled; the old "no chunks" bar also timed the wait out at
+          // 120 s every run).
           const drawn = () => { const ns = (v.graph ? v.graph.graphData().nodes : []).filter((n) => !n.force);
                                 const pg = ns.filter((n) => n.level === "page").length;
-                                return { nodes: ns.length, pages: pg, chunks: ns.length - pg }; };
+                                const open = new Set(String(v.lastExpanded || "").split("\\n").filter(Boolean).map((u) => u.split("#")[0]));
+                                const stray = ns.filter((n) => n.level !== "page" && !open.has(String(n.url || "").split("#")[0])).length;
+                                return { nodes: ns.length, pages: pg, chunks: ns.length - pg, chunks_not_of_an_open_page: stray, open_pages: open.size }; };
           const toChunk = async () => {
             if (v.level !== "chunk") toggle();
             for (let i = 0; i < 240; i++) { await sleep(500); const d = drawn(); if (v.level === "chunk" && d.chunks > 50 && d.pages === 0) break; }
@@ -6573,7 +6600,7 @@ export function makeChecks(env) {
           };
           const toPages = async () => {
             if (v.level === "chunk") toggle();
-            for (let i = 0; i < 240; i++) { await sleep(500); const d = drawn(); if (v.level !== "chunk" && d.pages > 0 && d.chunks === 0) break; }
+            for (let i = 0; i < 240; i++) { await sleep(500); const d = drawn(); if (v.level !== "chunk" && d.pages > 0 && d.chunks_not_of_an_open_page === 0) break; }
             await sleep(2000);
           };
           // The SETTLED picture: a rebuilt view glides its nodes to their
@@ -6626,7 +6653,7 @@ export function makeChecks(env) {
         // Each census of the level it names (a stale picture scored twice is
         // not a measurement).
         const ok = (c) => c && c.nodes > 0 && c.share >= 0.95
-                       && (c.level === "chunk" ? c.drawn.pages === 0 : c.drawn.chunks === 0);
+                       && (c.level === "chunk" ? c.drawn.pages === 0 : c.drawn.chunks_not_of_an_open_page === 0);
         return {
           pass: ok(got.pages) && ok(got.chunk) && ok(got.pages_rebuilt) && differentText === 0
              && !!got.planted && got.planted.level === "chunk" && got.planted.drawn.pages === 0
@@ -11356,13 +11383,43 @@ export function makeChecks(env) {
           v.plantNoHole = ${planted};
           try {
             // The pass that places open pages, run now under this arm.
+            // Run straight after a level switch (run 42, after G-4) the rebuilt
+            // view had no fitted chunk yet and this read 0 open pages: wait
+            // for an open page's chunks to carry their fit, up to 30 s.
+            const opened = () => { const o = new Set(String(v.lastExpanded || "").split("\\n").filter(Boolean).map((u) => u.split("#")[0]));
+                                   return v.graph.graphData().nodes.filter((c) => !c.force && c.level !== "page" && Number.isFinite(c.fitX) && o.has(String(c.url || "").split("#")[0])).length; };
+            for (let i = 0; i < 60 && opened() < 5; i++) await sleep(500);
+            // The STANDING picture, before this check forces a pass: a pass
+            // run here cannot show a chunk left inside its page between
+            // passes (G-21 run 43: a Thunderbirds chunk 2.35 inside its page
+            // seconds after a reload; this check, forcing its own pass, read
+            // 0). Reported with the radius the hole was cut at, beside the
+            // radius drawn now; not yet judged -- its cause is not known.
+            const standing = (() => {
+              const o = new Set(String(v.lastExpanded || "").split("\\n").filter(Boolean).map((u) => u.split("#")[0]));
+              const all = v.graph.graphData().nodes, out = { inside: 0, pages: [] };
+              for (const p of all) {
+                if (p.force || p.level !== "page" || !o.has(String(p.url || "").split("#")[0])) continue;
+                const rp = v.drawnRadiusOf(p); let k = 0;
+                for (const c of all) if (!c.force && c.level !== "page" && Number.isFinite(c.x) && String(c.url || "").split("#")[0] === String(p.url).split("#")[0]
+                                        && Math.hypot(c.x - p.x, c.y - p.y, (c.z || 0) - (p.z || 0)) < rp + v.drawnRadiusOf(c) - 1e-3) k++;
+                out.inside += k;
+                out.pages.push({ url: String(p.url).slice(-40), inside: k, r_now: Math.round(rp * 100) / 100,
+                                 hole_cut_at_r: Number.isFinite(p.__holeR) ? Math.round(p.__holeR * 100) / 100 : null,
+                                 hole_age_s: Number.isFinite(p.__holeAt) ? Math.round((performance.now() - p.__holeAt) / 100) / 10 : null });
+              }
+              return out;
+            })();
             v.fitChunkSizes(v.graph.graphData());
-            await sleep(800);
+            await sleep(3000);                // the glides land
             const ns = v.graph.graphData().nodes;
-            const pages = new Map(ns.filter((n) => !n.force && n.level === "page" && n.url).map((p) => [p.url, p]));
+            // A chunk's url carries its #fragment; its page's does not (run
+            // 40 matched none: open_pages 0 in both arms, a check of nothing).
+            const doc = (u) => String(u || "").split("#")[0];
+            const pages = new Map(ns.filter((n) => !n.force && n.level === "page" && n.url).map((p) => [doc(p.url), p]));
             const byUrl = new Map();
-            for (const c of ns) { if (c.force || c.level === "page" || !c.url || !Number.isFinite(c.x) || !Number.isFinite(c.fitX) || !pages.has(c.url)) continue;
-              (byUrl.get(c.url) || byUrl.set(c.url, []).get(c.url)).push(c); }
+            for (const c of ns) { if (c.force || c.level === "page" || !c.url || !Number.isFinite(c.x) || !Number.isFinite(c.fitX) || !pages.has(doc(c.url))) continue;
+              (byUrl.get(doc(c.url)) || byUrl.set(doc(c.url), []).get(doc(c.url))).push(c); }
             let open = 0, chunks = 0, inside = 0, offDir = 0, inversions = 0, fullSize = 0;
             for (const [url, cs] of byUrl) {
               const p = pages.get(url); open++;
@@ -11380,7 +11437,7 @@ export function makeChecks(env) {
               rows.sort((a, b) => a[0] - b[0]);
               for (let i = 1; i < rows.length; i++) if (rows[i][0] > rows[i - 1][0] + 1e-6 && rows[i][1] < rows[i - 1][1] - 1e-3) inversions++;
             }
-            return { planted: ${planted}, open_pages: open, chunks, inside, off_direction: offDir, order_inversions: inversions, pages_full_size: fullSize, stats: v.holeStats };
+            return { planted: ${planted}, open_pages: open, chunks, inside, off_direction: offDir, order_inversions: inversions, pages_full_size: fullSize, stats: v.holeStats, standing };
           } finally {
             v.plantNoHole = false;
             v.fitChunkSizes(v.graph.graphData());

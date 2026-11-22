@@ -4799,6 +4799,11 @@ export class GraphView extends ItemView {
     let rcMax = 0;
     for (const c of chunks) if (!c.force && c.level !== "page") rcMax = Math.max(rcMax, this.drawnRadiusOf ? this.drawnRadiusOf(c) : drawnRadius(c, relSize, media));
     const hole = rp + rcMax;
+    // The page radius this hole was cut at. A chunk later found inside the
+    // page's sphere names whether the page's drawn radius moved since (G-21,
+    // 2026-11-22: a Thunderbirds chunk 2.35 inside its page, a few seconds
+    // after a reload, gone after the next pass).
+    page.__holeR = rp; page.__holeAt = performance.now();
     let n = 0, inB = 0, inA = 0;
     for (const c of chunks) {
       if (c.force || !Number.isFinite(c.fitX) || c.level === "page") continue;
