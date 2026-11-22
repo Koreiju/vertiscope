@@ -289,3 +289,83 @@ machinery. Two rows decide their shape: `G-378` (a tool panel is read-only
 and cannot open the code behind it) and `G-380` (marimo-style: a call that
 changes the world in place -- `go`, `pin`, `act`, `attach` -- is invisible to
 name dataflow, so each returns a value that names what changed).
+
+## 9. Research: permissive libraries against the verbatim (2026-11-21)
+
+Asked for: "keep researching on marimo and other permissive libraries that
+would help with our true design verbatim". Each entry names the row it could
+serve, what the project's own pages say (with the link), and -- marked as
+such -- how it might fit. Nothing here is adopted; every "fit" is a reading.
+
+| Library | Licence | Serves | What its own pages say |
+|---|---|---|---|
+| **marimo** | Apache-2.0 | `G-380`, `G-378` | Dependencies read statically, a DAG over cells (§5a). `app.embed()` runs a notebook and returns its output and **defined variables**; values passed in through `defs` replace the cells that would define them; `clone()` gives independent copies. Functions and classes defined in a notebook can be imported by other programs. Stored as pure `.py`. |
+| **smolagents** | Apache-2.0 | 166 (c, d), `G-377` | `CodeAgent` writes its tool calls **as Python** (the default); one step can loop over several tool calls; the project claims ~30% fewer steps than JSON tool calls (its own claim). Runs local small models (Transformers, Ollama) but calls a 3B model "a bit weak for agentic behaviours", and raises Ollama's 2,048 context to 8,192. Its local executor "must not be used as a security boundary". |
+| **Jupytext** | MIT | `G-379` | A notebook as plain text: `# %% [markdown]` and `# %%` cell markers (percent format), or markdown formats for prose-heavy notebooks; a text file paired with the `.ipynb`, the text holding the inputs, the `.ipynb` the outputs. |
+| **LibCST** | MIT | `G-378`, `G-377` | A lossless concrete syntax tree: reprints the exact input, comments and whitespace kept; a statement owns the comments directly above it and its trailing same-line comment. |
+| **litegraph.js** | MIT | the plane | Canvas2D node editor, no component framework; graphs export as JSON; the engine runs in the browser or Node. |
+| **xyflow** (React/Svelte/Vue Flow) | MIT | the plane | Component-framework node UIs; asks (does not require) attribution. |
+| **Rete.js**, **BaklavaJS** | MIT | the plane | Framework-style visual-programming editors (BaklavaJS on Vue, in TypeScript). |
+| **gguf** (from llama.cpp) | MIT | `G-381` | Reads and writes GGUF; `gguf_dump` and `examples/reader.py` print a file's key-value metadata and tensors. Python 3.10+. |
+| **llama-cpp-python** | MIT | `G-381` | Runs GGUF models; its chat formatting reads `tokenizer.chat_template` from the file's metadata. |
+
+Sources: [marimo App API](https://docs.marimo.io/api/app/),
+[marimo FAQ](https://github.com/marimo-team/marimo/blob/main/docs/faq.md?plain=true),
+[marimo licence](https://github.com/marimo-team/marimo/blob/main/LICENSE),
+[smolagents](https://github.com/huggingface/smolagents),
+[smolagents guided tour](https://github.com/huggingface/smolagents/blob/main/docs/source/en/guided_tour.md),
+[Jupytext](https://jupytext.readthedocs.io/),
+[Jupytext formats](https://jupytext.readthedocs.io/en/latest/formats-scripts.html),
+[LibCST](https://github.com/Instagram/LibCST),
+[LibCST docs](https://libcst.readthedocs.io/),
+[litegraph.js](https://github.com/jagenjo/litegraph.js/),
+[xyflow licence](https://github.com/xyflow/xyflow/blob/main/LICENSE),
+[Rete.js](https://github.com/retejs/rete/),
+[BaklavaJS](https://github.com/newcat/baklavajs),
+[gguf-py](https://github.com/ggml-org/llama.cpp/blob/master/gguf-py/README.md),
+[llama-cpp-python](https://github.com/abetlen/llama-cpp-python).
+
+### 9a. How these could fit -- readings, not decisions
+
+- **The tool surface IS what a code agent emits.** 166 (d) wants "quantized
+  language model input and output formats that include their own code
+  artifacts". smolagents' `CodeAgent` is exactly that loop: the model reads
+  tool signatures and writes Python calling them. A §8 surface -- calls only,
+  a comment per line -- is then both the tool's documentation AND a sample of
+  the code the agent is expected to write back. The open risk is model size:
+  the project itself finds a 3B model weak and 2,048 tokens too small, which
+  is the case for keeping each surface to ~25 lines (`G-377`).
+- **A notebook becomes a callable tool.** marimo's `app.embed(defs=...)` is
+  the shape 166 (e) asks for -- "lightweight and modules composition of
+  python programs": a notebook's free names are its inputs, its definitions
+  its outputs, and another cell can call it. In this project's terms that is
+  a slate or notebook appearing as ONE node whose hard links (2026-11-15 164)
+  are its free names in and its definitions out.
+- **Use marimo's rules, or marimo?** Its public API is the App level; the
+  dataflow analysis is internal. Two paths: depend on marimo and store
+  notebooks as its `.py`; or keep the slate dialect (`G-379`) and compute the
+  same def/use DAG with the standard `ast` module, marimo's rules (§5a) as
+  the specification. The second keeps the dialect intact; the first gets
+  marimo's runtime. This is the reader's call.
+- **Graph edits that keep the code readable.** A regular code artifact is
+  graph-editable (`G-378`); an edit made on the graph has to be written back
+  into the cell without destroying it. LibCST reprints code losslessly, and
+  its rule that a statement owns its trailing same-line comment is the exact
+  form of a tool surface line (`G-377`).
+- **The plane's editor.** The plane is already drawn in the 3D view
+  (2026-11-01 50). Of the node editors, litegraph.js is the only one without a
+  component framework -- the plugin uses none -- and it exports JSON; the
+  others would bring React or Vue into the plugin. Whether any replaces the
+  plane's own drawing is open.
+- **GGUF as an artifact.** The `gguf` reader gives a downloaded model's
+  architecture, quantisation and chat template from its metadata, without
+  loading the weights -- enough for its panel (`G-381`) to say what it is
+  before anything runs it; `llama-cpp-python` would run it.
+
+### 9b. For the reader to decide
+
+1. marimo as a dependency (its `.py` format and runtime), or marimo's rules
+   implemented over the slate dialect?
+2. smolagents' `CodeAgent` as the agent loop over the tool surfaces, or the
+   loop written in the editor itself, as cells?
+3. A node-editor library for the plane, or keep drawing it ourselves?
