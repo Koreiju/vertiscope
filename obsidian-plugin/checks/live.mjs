@@ -11656,7 +11656,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-387",
-      asks: "a re-fit the reader asks for starts over (PLUGIN_GOAL 173 b: 're-fits seem like they don't do anything'): the drawn cloud's robust aspect (p10-p90 spread along its longest principal axis over its shortest) is measured, the pane's refit is asked, and once the projector has finished and the pane has redrawn the aspect is measured again -- the fresh fit drops it below 6 and the projector counts a fresh fit; planted (incremental-refit) the same request takes the old path and the aspect stays within 20% of where it was",
+      asks: "a re-fit the reader asks for starts over (PLUGIN_GOAL 173 b: 're-fits seem like they don't do anything'): the drawn cloud's robust aspect (p10-p90 spread along its longest principal axis over its shortest) is measured, the pane's refit is asked, and once the projector has finished and the pane has redrawn the aspect is measured again -- the fresh fit MOVES the cloud (the same nodes' median displacement over a fifth of its middle spread) and leaves no stick (aspect under 8); planted (incremental-refit) the same request takes the old path and the nodes move under 5%",
       async run() {
         const plant = (on) => fetch(`${SIDECAR}/plant`, { method: "POST", headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
                                                           body: JSON.stringify({ name: "incremental-refit", on }) });
@@ -11667,8 +11667,9 @@ export function makeChecks(env) {
               const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
               const plugin = app.plugins.getPlugin("domvec-bridge"), base = plugin.settings.sidecar.replace(/\\/+$/, "");
               const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
-              const shape = () => {
-                const P = v.graph.graphData().nodes.filter((n) => Number.isFinite(n.x)).map((n) => [n.x, n.y, n.z]);
+              const ids = () => new Set(v.graph.graphData().nodes.filter((n) => Number.isFinite(n.x)).map((n) => String(n.id)));
+              const shape = (keep) => {
+                const P = v.graph.graphData().nodes.filter((n) => Number.isFinite(n.x) && (!keep || keep.has(String(n.id)))).map((n) => [n.x, n.y, n.z]);
                 const m = [0, 1, 2].map((k) => P.reduce((s, p) => s + p[k], 0) / P.length);
                 let A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
                 for (const p of P) for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) A[i][j] += (p[i] - m[i]) * (p[j] - m[j]) / P.length;
@@ -11687,7 +11688,11 @@ export function makeChecks(env) {
                 return { n: P.length, spreads: spread.map((x) => Math.round(x)), aspect: +(spread[0] / Math.max(1, spread[2])).toFixed(2) };
               };
               const proj = async () => await (await fetch(base + "/projector")).json();
-              const before = shape(), p0 = await proj(), e0 = v.projEpoch;
+              const ids0 = ids(), p0 = await proj(), e0 = v.projEpoch;
+              const at0 = new Map(v.graph.graphData().nodes.filter((n) => Number.isFinite(n.x)).map((n) => [String(n.id), [n.x, n.y, n.z]]));
+              const shapeAt0 = (keep) => { const saved = v.graph.graphData().nodes.map((n) => [n, n.x, n.y, n.z]);
+                for (const [n] of saved) { const q = at0.get(String(n.id)); if (q) { n.x = q[0]; n.y = q[1]; n.z = q[2]; } }
+                const r = shape(keep); for (const [n, x, y, z] of saved) { n.x = x; n.y = y; n.z = z; } return r; };
               const t0 = performance.now();
               await plugin.sidecar.layout(3, v.space, v.level, true);
               let started = false, p1 = p0;
@@ -11701,16 +11706,25 @@ export function makeChecks(env) {
               const fitMs = Math.round(performance.now() - t0);
               for (let i = 0; i < 30 && v.projEpoch === e0; i++) await sleep(1000);
               await sleep(3000);
-              return { before, after: shape(), fit_ms: fitMs, started, epoch_changed: v.projEpoch !== e0,
+              // the SAME nodes before and after: the pane's node set moves with the stream
+              const ids1 = ids(), both = new Set([...ids0].filter((x) => ids1.has(x)));
+              const beforeShape = shapeAt0(both);
+              // how far the same nodes moved, over the median spread of the cloud before
+              const d = []; for (const n of v.graph.graphData().nodes) { const q = at0.get(String(n.id)); if (q && both.has(String(n.id)) && Number.isFinite(n.x)) d.push(Math.hypot(n.x - q[0], n.y - q[1], n.z - q[2])); }
+              d.sort((a, b) => a - b);
+              const moved_rel = +((d[Math.floor(d.length / 2)] || 0) / Math.max(1, beforeShape.spreads[1])).toFixed(3);
+              return { before: beforeShape, after: shape(both), moved_rel, fit_ms: fitMs, started, epoch_changed: v.projEpoch !== e0,
                        engine: p1.engine, scope: p1.scope, fit_error: p1.fit_error || null };
             })()`, { timeout: 720000 });
           } finally { await plant(false); }
         };
         const planted = await arm(true);
         const clean = await arm(false);
-        const near = (a, b) => Math.abs(a - b) <= 0.2 * b;
-        return { pass: !!clean && clean.started && clean.epoch_changed && clean.after.aspect < 6
-                       && !!planted && near(planted.after.aspect, planted.before.aspect),
+                // The discriminating property is the reader's complaint: a fresh re-fit MOVES the
+        // cloud (median node moved over a fifth of its middle spread); the incremental
+        // path holds it (under 5%). Shape: no longer a stick (aspect under 8).
+        return { pass: !!clean && clean.started && clean.epoch_changed && clean.moved_rel > 0.2 && clean.after.aspect < 8
+                       && !!planted && planted.moved_rel < 0.05,
                  evidence: { planted, clean } };
       },
     },
