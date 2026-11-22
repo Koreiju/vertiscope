@@ -14047,7 +14047,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-311",
-      asks: "zoom passes through the cockpit (PLUGIN_GOAL 75, G-274): in the ego view's third person, wheel-in over the 3D view closes the chase on the vehicle and passes INTO the cockpit -- first person, the camera at the vehicle -- and wheel-out from that cockpit backs out to third person; a wheel-out in a cockpit entered by the keyboard is the ordinary zoom -- and its leftover momentum does not carry into the chase or the cockpit after V (the chase only closes, the cockpit is AT the vehicle); planted (plantNoZoomThrough) the wheel never changes the view, (plantKeepMomentum) the controls' damped zoom keeps moving the placed camera; a recentre's camera tween still in flight, and its deferred tighten, do not overwrite the chase or the cockpit (planted plantKeepTween + plantLateTighten: they do); a zoom floor the map left (the focus node's fit) does not clamp the chase -- planted plantFloorInChase it does",
+      asks: "zoom passes through the cockpit (PLUGIN_GOAL 75, G-274): in the ego view's third person, wheel-in over the 3D view closes the chase on the vehicle and passes INTO the cockpit -- first person, the camera at the vehicle -- and wheel-out from that cockpit backs out to third person; a wheel-out in a cockpit entered by the keyboard is the ordinary zoom -- and its leftover momentum does not carry into the chase or the cockpit after V (the chase only closes, the cockpit is AT the vehicle); planted (plantNoZoomThrough) the wheel never changes the view, (plantKeepMomentum) the controls' damped zoom keeps moving the placed camera; a recentre's camera tween still in flight, and its deferred tighten, do not overwrite the chase or the cockpit (planted plantKeepTween + plantLateTighten: they do); a zoom floor the map left (the focus node's fit) does not clamp the chase -- planted plantFloorInChase it does; the chase is D behind and 0.35 D up PERPENDICULAR to the heading even when the camera's up leans along it -- planted plantLeanUp it is not (run 96)",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -14080,6 +14080,21 @@ export function makeChecks(env) {
             // then wheel in. Each arm both ways: the agent clears the controls'
             // momentum when it places the camera (plantKeepMomentum: it doesn't).
             const dist = (q) => cam.position.distanceTo(new cam.position.constructor(q.x, q.y, q.z));
+            // A camera up that LEANS along the heading (a roll, the plane on
+            // the camera): the chase is still D behind and 0.35 D up,
+            // perpendicular to the heading (run 96: 0.99 D, from the last
+            // roll). Planted plantLeanUp: the up used as found.
+            out.lean = {};
+            for (const keep of [true, false]) {
+              a.plantLeanUp = keep;
+              a.setView("first");
+              const lk = ctl.target.clone().sub(cam.position).normalize();
+              cam.up.copy(cam.up.clone().normalize().add(lk.multiplyScalar(0.6)).normalize());
+              a.setView("third");
+              const D = a.chaseD || Math.max(20, a.vmax * 0.6), want = D * Math.hypot(1, 0.35);
+              out.lean[keep ? "planted" : "clean"] = { want: Math.round(want * 10) / 10, drawn: Math.round(dist(a.vehicle.p) * 10) / 10 };
+            }
+            a.plantLeanUp = false;
             out.momentum = {};
             for (const keep of [true, false]) {
               a.plantKeepMomentum = keep;
@@ -14158,7 +14173,9 @@ export function makeChecks(env) {
         const tweenWins = !tp.entered || tp.max_dev > 2 || tp.at_vehicle > 1;
         const fl = (clean && clean.floor) || {}, fc = fl.clean || {}, fp = fl.planted || {};
         const floorYields = fc.want > 0 && Math.abs(fc.drawn - fc.want) < 0.5 && fp.drawn > fp.want + 50;
-        return { pass: ok(clean) && !!planted && !planted.entered && steadyChase && thrown && tweenHalted && tweenWins && floorYields, evidence: { clean, planted } };
+        const ln = (clean && clean.lean) || {}, lc = ln.clean || {}, lp = ln.planted || {};
+        const upSquare = lc.want > 0 && Math.abs(lc.drawn - lc.want) < 0.5 && Math.abs(lp.drawn - lp.want) > 2;
+        return { pass: ok(clean) && !!planted && !planted.entered && steadyChase && thrown && tweenHalted && tweenWins && floorYields && upSquare, evidence: { clean, planted } };
       },
     },
     {

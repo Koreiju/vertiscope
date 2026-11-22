@@ -481,6 +481,9 @@ export class UserAgent {
   plantKeepTween = false;
   /** Planted (G-311): the wheel's zoom floor clamps the chase camera. */
   plantFloorInChase = false;
+  /** Planted (G-311, run 96): the chase offsets along the camera's up as
+   *  found, not perpendicular to the heading. */
+  plantLeanUp = false;
   /** Every time the agent places the camera: a deferred camera move begun
    *  before (the recentre's tighten, 450 ms on) yields to it. */
   placements = 0;
@@ -498,7 +501,18 @@ export class UserAgent {
     if (!ctl || !this.vehicle) return;
     this.settle(ctl);
     const D = this.chaseD || Math.max(20, this.vmax * 0.6), v = this.vehicle;
-    const up = v3(cam.up.x, cam.up.y, cam.up.z);
+    // "Up" PERPENDICULAR to the heading: the camera's up is only a hint, and
+    // after a roll (E/Q) or the plane riding on the camera (item 159) it
+    // leaned 0.2 along the heading, so the chase sat at 0.99 D instead of
+    // D behind and 0.35 D up -- and its distance depended on the last roll
+    // (G-311, run 96). Planted `plantLeanUp`: the hint used as found.
+    let up = v3(cam.up.x, cam.up.y, cam.up.z);
+    if (!this.plantLeanUp) {
+      const k = up.x * v.dir.x + up.y * v.dir.y + up.z * v.dir.z;
+      const o = v3(up.x - v.dir.x * k, up.y - v.dir.y * k, up.z - v.dir.z * k);
+      const n = Math.hypot(o.x, o.y, o.z);
+      if (n > 1e-6) up = v3(o.x / n, o.y / n, o.z / n);
+    }
     // The wheel's floor (item 38) is the READER's zoom toward a node; the
     // chase's distance is the agent's. A floor left by the map view -- the
     // focus node's fit, ~180 -- clamped every chase placement inside it in
