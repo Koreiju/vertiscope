@@ -171,6 +171,10 @@ def _unit(v: np.ndarray) -> np.ndarray:
 
 #: Planted (`G-2`, through the sidecar's `/plant`): a kept fit in another
 #: scope than the process wants is left as it is.
+#: Planted (173 b): a new parametric model is fitted on the input as given.
+PLANT_NO_DEBIAS = [False]
+#: Planted (173 b): a re-fit the reader asks for takes the incremental path.
+PLANT_INCREMENTAL_REFIT = [False]
 PLANT_NO_SCOPE_SWITCH = [False]
 
 
@@ -349,7 +353,7 @@ class ChunkProjector:
         self.on_fit: Optional[Callable[[Dict], None]] = None
 
     # -- the fit ------------------------------------------------------------
-    def fit(self, workspace) -> Dict:
+    def fit(self, workspace, fresh: bool = False) -> Dict:
         """Fit on a sample of the drawable chunks and place every one of them.
 
         Runs off the request path. The previous fit (if any) keeps answering
@@ -1370,6 +1374,16 @@ class PageProjector(ChunkProjector):
         use = triple if (self.centroid == "triple" and triple is not None) else semantic
         return urls, use
 
+    #: PLUGIN_GOAL 173 (b): dominant input directions removed before the net
+    #: (`pumap.ParametricUMAP.debias`). OFF, measured: on the-fit with THIS
+    #: model (`analytics.layout_shape --parametric`) a fresh fit of the input as
+    #: given is already 2.55:1 against the live 21:1 -- the stick was the
+    #: model's incremental history -- and de-biasing 2 directions rounds it to
+    #: 1.77:1 but costs 10-NN kept 0.384 -> 0.329 (chunks), 0.604 -> 0.470
+    #: (pages). umap-learn kept them (0.410 both); the parametric net does not.
+    #: The reader decides; 2 turns it on for the next fresh fit.
+    DEBIAS = None
+
     #: A first fit over every chunk of a large corpus would run epochs x
     #: edges/batch steps (60,000 at 15,000 rows); the global scope caps it.
     GLOBAL_FIT_STEPS = 4000
@@ -1390,7 +1404,8 @@ class PageProjector(ChunkProjector):
                 from .pumap import ParametricUMAP, Whitened
                 self.pumap = ParametricUMAP(n_components=want,
                                             n_neighbors=min(15, n_pages - 1),
-                                            min_dist=0.25, seed=self.seed)
+                                            min_dist=0.25, seed=self.seed,
+                                            debias=None if PLANT_NO_DEBIAS[0] else self.DEBIAS)
                 raw = np.asarray(self.pumap.fit(X, max_steps=max_steps).embedding_, dtype=np.float32)
                 # Decorrelate the drawn axes once; replayed for every point.
                 self._whiten = Whitened(self.pumap, dims=self.dims)
@@ -2094,7 +2109,7 @@ class PageProjector(ChunkProjector):
     NEIGHBOURHOOD = 0.45
 
     # -- the fit ------------------------------------------------------------
-    def fit(self, workspace) -> Dict:
+    def fit(self, workspace, fresh: bool = False) -> Dict:
         from . import layout as L
         started = time.perf_counter()
         with self.lock:
@@ -2151,7 +2166,17 @@ class PageProjector(ChunkProjector):
             # Moving into or out of the global scope is a fresh fit: its
             # model is one over rows the others never held.
             switched = scope != self.scope and "global" in (scope, self.scope)
-            if (scope == "pages" and self.scope == "chunks") or switched:
+            # PLUGIN_GOAL 173 (b): a re-fit the reader ASKS for starts over --
+            # a new model, a new axis scaling, a new de-bias. The incremental
+            # paths below retrain only what changed and hold the rest by
+            # landmarks, so a re-fit with no new pages moved nothing ("re-fits
+            # seem like they don't do anything", 2026-11-22), and the shape the
+            # first fit drew -- 21:1 on the-fit -- was kept for ever.
+            # Planted PLANT_INCREMENTAL_REFIT: the old behaviour.
+            if fresh and not PLANT_INCREMENTAL_REFIT[0]:
+                online = None
+                self.fresh_fits = getattr(self, "fresh_fits", 0) + 1
+            elif (scope == "pages" and self.scope == "chunks") or switched:
                 online = None
             elif scope == "global":
                 online = self._refit_global(urls, X, chunks_at_fit, chunk_ids, C, vec, url_of)

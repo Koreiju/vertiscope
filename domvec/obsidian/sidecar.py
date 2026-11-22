@@ -869,6 +869,7 @@ _PLANTABLE = {
     "lead-in-python": ("domvec.graphstore", "PLANT_LEAD_IN_PYTHON"),         # 143 fit read
     "zero-group-dropped": ("domvec.graphstore", "PLANT_ZERO_GROUP_DROPPED"),  # G-270 drawable set
     "no-reconcile": ("domvec.obsidian.projector", "PLANT_NO_RECONCILE"),     # G-270
+    "incremental-refit": ("domvec.obsidian.projector", "PLANT_INCREMENTAL_REFIT"),  # 173 b
     "replace-unchanged": ("domvec.obsidian.projector", "PLANT_REPLACE_UNCHANGED"),  # hover jump
     "purge-keeps-projected": ("domvec.obsidian.sidecar", "PLANT_PURGE_KEEPS_PROJECTED"),  # G-270
     "outputs-everywhere": ("domvec.obsidian.sidecar", "PLANT_OUTPUTS_EVERYWHERE"),  # T-13
@@ -5079,6 +5080,19 @@ class _Handler(BaseHTTPRequestHandler):
                              "matching": matching, "phases": phases, "ms": ms})
             return
 
+        if segments[0] == "lead_vectors":
+            # The rows the projector is fitted on (`store.lead_vectors`), for an
+            # instrument outside the app (`analytics.layout_shape --sidecar`):
+            # a running sidecar holds the store as a writer and excludes
+            # readers, so this is the only way to measure the store in use.
+            # Read-only; values rounded to 5 places.
+            if self.workspace is None:
+                self._send(503, {"error": "no workspace"})
+                return
+            rows = self.workspace.store.lead_vectors()
+            self._send(200, {"rows": [[c, u, [round(float(x), 5) for x in v]] for c, u, v in rows]})
+            return
+
         if segments[0] == "vectors":
             # The embed queue's cumulative counters (P-N6): `skipped` is a
             # chunk offered again with the text it was embedded from -- the
@@ -5917,7 +5931,8 @@ class _Handler(BaseHTTPRequestHandler):
                 from .projector import projector as _get
                 proj = _get()
                 if proj is not None and refit_asked and not proj.fitting:
-                    threading.Thread(target=proj.fit, args=(self.workspace,),
+                    # A re-fit ASKED for starts over (PLUGIN_GOAL 173 b).
+                    threading.Thread(target=proj.fit, args=(self.workspace,), kwargs={"fresh": True},
                                      name="domvec-refit", daemon=True).start()
                 if proj is not None and proj.projection is not None:
                     _t0 = time.perf_counter()

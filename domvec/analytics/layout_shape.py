@@ -122,8 +122,22 @@ def embed(Z: np.ndarray, arm: str, seed: int) -> np.ndarray:
     return np.asarray(r.fit_transform(Z), dtype=np.float32)
 
 
-def level(X: np.ndarray, name: str, seed: int, width: int) -> Dict:
+def pumap_arm(X: np.ndarray, debias, seed: int, steps: int = 4000) -> np.ndarray:
+    """The projector's own model on unit rows, as it is fitted live (no SVD)."""
+    from ..obsidian.pumap import ParametricUMAP, Whitened
+    m = ParametricUMAP(n_components=6, n_neighbors=int(max(2, min(15, len(X) - 1))), min_dist=0.25,
+                       seed=seed, debias=debias)
+    raw = np.asarray(m.fit(_unit(X), max_steps=steps).embedding_, dtype=np.float32)
+    return Whitened(m, dims=3).fit_whitening(raw)
+
+
+def level(X: np.ndarray, name: str, seed: int, width: int, parametric: bool = False) -> Dict:
     out: Dict[str, Dict] = {}
+    if parametric:
+        for arm, k in (("pumap", None), ("pumap_debias", 2)):
+            t = time.perf_counter()
+            Y = pumap_arm(X, k, seed)
+            out[arm] = {**aspect(Y), "kept10": kept10(X, Y), "ms": round((time.perf_counter() - t) * 1000)}
     for arm in ARMS:
         t = time.perf_counter()
         Z = prepare(X, arm, width, seed)
@@ -144,6 +158,12 @@ def planted(seed: int = 0) -> Dict:
 
 
 def load(workspace: str):
+    if workspace.startswith("http://") or workspace.startswith("https://"):
+        # A store a running sidecar holds (a writer excludes readers): its rows
+        # through `GET /lead_vectors`.
+        import urllib.request
+        with urllib.request.urlopen(workspace.rstrip("/") + "/lead_vectors", timeout=600) as r:
+            return [tuple(x) for x in json.load(r)["rows"]]
     from ..workspace import Workspace
     ws = Workspace(workspace, read_only=True)
     try:
@@ -153,7 +173,7 @@ def load(workspace: str):
     return rows
 
 
-def run(workspace: str, chunk_sample: int = 2500, seed: int = 0, width: int = 64) -> Dict:
+def run(workspace: str, chunk_sample: int = 2500, seed: int = 0, width: int = 64, parametric: bool = False) -> Dict:
     rows = load(workspace)
     vec = np.asarray([r[2] for r in rows], dtype=np.float32)
     urls = [r[1] for r in rows]
@@ -167,8 +187,8 @@ def run(workspace: str, chunk_sample: int = 2500, seed: int = 0, width: int = 64
               "drawn_live": {"spreads_p10_90": [5201, 653, 245], "aspect": 21.2, "n": 6132,
                              "source": "obsidian_eval on the graph pane, 2026-11-22"},
               "planted": planted(seed),
-              "page": level(pages, "page", seed, width),
-              "chunk": level(vec[take], "chunk", seed, width)}
+              "page": level(pages, "page", seed, width, parametric),
+              "chunk": level(vec[take], "chunk", seed, width, parametric)}
     p = report["planted"]
     report["arms_discriminate"] = bool(p["planted_stick"]["aspect"] > 5 and p["planted_ball"]["aspect"] < 2)
     return report
@@ -176,12 +196,13 @@ def run(workspace: str, chunk_sample: int = 2500, seed: int = 0, width: int = 64
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="domvec.analytics.layout_shape")
-    ap.add_argument("--workspace", required=True)
+    ap.add_argument("--workspace", required=True, help="a workspace path, or a running sidecar's url")
     ap.add_argument("--chunks", type=int, default=2500)
     ap.add_argument("--width", type=int, default=64)
+    ap.add_argument("--parametric", action="store_true", help="also the projector's own model (CUDA): pumap and pumap_debias")
     ap.add_argument("--out", default="build_analytics/layout_shape.json")
     a = ap.parse_args(argv)
-    rep = run(a.workspace, a.chunks, width=a.width)
+    rep = run(a.workspace, a.chunks, width=a.width, parametric=a.parametric)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(rep, indent=1))
     for lv in ("page", "chunk"):

@@ -11655,6 +11655,66 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-387",
+      asks: "a re-fit the reader asks for starts over (PLUGIN_GOAL 173 b: 're-fits seem like they don't do anything'): the drawn cloud's robust aspect (p10-p90 spread along its longest principal axis over its shortest) is measured, the pane's refit is asked, and once the projector has finished and the pane has redrawn the aspect is measured again -- the fresh fit drops it below 6 and the projector counts a fresh fit; planted (incremental-refit) the same request takes the old path and the aspect stays within 20% of where it was",
+      async run() {
+        const plant = (on) => fetch(`${SIDECAR}/plant`, { method: "POST", headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
+                                                          body: JSON.stringify({ name: "incremental-refit", on }) });
+        const arm = async (planted) => {
+          await plant(planted);
+          try {
+            return await evaluate(`(async () => {
+              const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+              const plugin = app.plugins.getPlugin("domvec-bridge"), base = plugin.settings.sidecar.replace(/\\/+$/, "");
+              const v = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+              const shape = () => {
+                const P = v.graph.graphData().nodes.filter((n) => Number.isFinite(n.x)).map((n) => [n.x, n.y, n.z]);
+                const m = [0, 1, 2].map((k) => P.reduce((s, p) => s + p[k], 0) / P.length);
+                let A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+                for (const p of P) for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) A[i][j] += (p[i] - m[i]) * (p[j] - m[j]) / P.length;
+                let V = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+                const mul = (X, Y) => X.map((r, i) => [0, 1, 2].map((j) => r.reduce((s, _, k) => s + X[i][k] * Y[k][j], 0)));
+                for (let it = 0; it < 60; it++) {
+                  let p = 0, q = 1; for (const [a, b] of [[0, 1], [0, 2], [1, 2]]) if (Math.abs(A[a][b]) > Math.abs(A[p][q])) { p = a; q = b; }
+                  if (Math.abs(A[p][q]) < 1e-9) break;
+                  const th = 0.5 * Math.atan2(2 * A[p][q], A[q][q] - A[p][p]), c = Math.cos(th), s = Math.sin(th);
+                  const J = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]; J[p][p] = c; J[q][q] = c; J[p][q] = s; J[q][p] = -s;
+                  const Jt = J[0].map((_, i) => J.map((r) => r[i])); A = mul(mul(Jt, A), J); V = mul(V, J);
+                }
+                const spread = [0, 1, 2].map((k) => { const ax = [V[0][k], V[1][k], V[2][k]];
+                  const s = P.map((p) => (p[0] - m[0]) * ax[0] + (p[1] - m[1]) * ax[1] + (p[2] - m[2]) * ax[2]).sort((a, b) => a - b);
+                  return s[Math.floor(0.9 * (s.length - 1))] - s[Math.floor(0.1 * (s.length - 1))]; }).sort((a, b) => b - a);
+                return { n: P.length, spreads: spread.map((x) => Math.round(x)), aspect: +(spread[0] / Math.max(1, spread[2])).toFixed(2) };
+              };
+              const proj = async () => await (await fetch(base + "/projector")).json();
+              const before = shape(), p0 = await proj(), e0 = v.projEpoch;
+              const t0 = performance.now();
+              await plugin.sidecar.layout(3, v.space, v.level, true);
+              let started = false, p1 = p0;
+              for (let i = 0; i < 600; i++) {               // up to 10 minutes
+                await sleep(1000);
+                p1 = await proj();
+                if (p1.fitting) started = true;
+                if (started && !p1.fitting) break;
+                if (!started && i > 20) break;                // the request never started a fit
+              }
+              const fitMs = Math.round(performance.now() - t0);
+              for (let i = 0; i < 30 && v.projEpoch === e0; i++) await sleep(1000);
+              await sleep(3000);
+              return { before, after: shape(), fit_ms: fitMs, started, epoch_changed: v.projEpoch !== e0,
+                       engine: p1.engine, scope: p1.scope, fit_error: p1.fit_error || null };
+            })()`, { timeout: 720000 });
+          } finally { await plant(false); }
+        };
+        const planted = await arm(true);
+        const clean = await arm(false);
+        const near = (a, b) => Math.abs(a - b) <= 0.2 * b;
+        return { pass: !!clean && clean.started && clean.epoch_changed && clean.after.aspect < 6
+                       && !!planted && near(planted.after.aspect, planted.before.aspect),
+                 evidence: { planted, clean } };
+      },
+    },
+    {
       id: "G-368",
       asks: "a page's fit sent by the projector is where the page is drawn, even if an earlier parting pass had moved it aside (G-94 run 130: an online update moved Radix_tree's fit ~34 units, its chunks followed, the page went back to the old fit); planted (plantStaleHomeFit): the parting pass's old home restored over the new fit",
       async run() {

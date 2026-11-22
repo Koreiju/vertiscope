@@ -125,8 +125,19 @@ class ParametricUMAP:
                  min_dist: float = 0.25, hidden: int = 256, seed: int = 0,
                  epochs: int = 200, update_epochs: int = 120,
                  landmark_weight: float = 10.0, negative_rate: int = 5,
-                 batch_edges: int = 1024) -> None:
+                 batch_edges: int = 1024, debias: Optional[int] = None) -> None:
         self.n_components = n_components
+        #: PLUGIN_GOAL 173 (b): the input with its mean and its `debias`
+        #: dominant directions removed before the net sees it ("all but the
+        #: top"). Encoder vectors of self-similar web text share a few
+        #: directions -- on the-fit's chunks the first carries 69% of the
+        #: energy -- and a fit on them draws a stick (`analytics.layout_shape`:
+        #: 3.8:1 fresh, 1.38:1 with 2 removed, the same 10-NN kept). Fitted
+        #: ONCE on the first fit's rows and replayed for every row after,
+        #: so placement, updates and the fit agree. None: the input as given.
+        self.debias = debias
+        self._mu: Optional[np.ndarray] = None
+        self._top: Optional[np.ndarray] = None
         self.n_neighbors = n_neighbors
         self.min_dist = min_dist
         self.hidden = hidden
@@ -163,10 +174,32 @@ class ParametricUMAP:
             torch.nn.Linear(h, self.n_components),
         ).to(_device())
 
+    def _fit_debias(self, X: np.ndarray) -> None:
+        k = getattr(self, "debias", None)
+        if not k:
+            self._mu, self._top = None, None
+            return
+        X = np.asarray(X, dtype=np.float64)
+        self._mu = X.mean(axis=0).astype(np.float32)
+        _u, _s, vt = np.linalg.svd(X - self._mu, full_matrices=False)
+        self._top = vt[:int(k)].astype(np.float32)
+
+    def _in(self, X: np.ndarray) -> np.ndarray:
+        """What the net sees of `X`: the input, de-biased when the model is."""
+        X = np.asarray(X, dtype=np.float32)
+        mu, top = getattr(self, "_mu", None), getattr(self, "_top", None)
+        if mu is None:
+            return X
+        Z = X - mu
+        if top is not None and len(top):
+            Z = Z - (Z @ top.T) @ top
+        return Z.astype(np.float32)
+
     def transform(self, X: np.ndarray) -> np.ndarray:
         import torch
         if self.net is None:
             raise RuntimeError("not fitted")
+        X = self._in(X)
         self.net.eval()
         out = []
         with (nullcontext() if _shared_capture_planted() else GPU_LOCK), torch.no_grad():
@@ -245,6 +278,7 @@ class ParametricUMAP:
         import torch
         dev = _device()
         started = time.perf_counter()
+        X = self._in(X)
         head, tail, w = self._graph(X)
         self.stats["graph_s"] = round(time.perf_counter() - started, 3)
         if not len(head):
@@ -319,6 +353,7 @@ class ParametricUMAP:
 
     def fit(self, X: np.ndarray, max_steps: Optional[int] = None) -> "ParametricUMAP":
         X = np.asarray(X, dtype=np.float32)
+        self._fit_debias(X)
         self._build(X.shape[1])
         secs = self._train(X, self.epochs, max_steps=max_steps)
         self._raw = X
@@ -427,13 +462,13 @@ class ParametricUMAP:
         held = held[~np.isin(held, active)]
         t = time.perf_counter()
         m = len(active)
-        Xa = torch.as_tensor(self._raw[active], dtype=torch.float32, device=dev)
+        Xa = torch.as_tensor(self._in(self._raw[active]), dtype=torch.float32, device=dev)
         picked = np.zeros(0, dtype=np.int64)
         select_peak_mb = None
         if len(held):
             if dev.type == "cuda":
                 torch.cuda.reset_peak_memory_stats()
-            Xh = torch.as_tensor(self._raw[held], dtype=torch.float32, device=dev)
+            Xh = torch.as_tensor(self._in(self._raw[held]), dtype=torch.float32, device=dev)
             kk = int(min(knn, len(held)))
             cap_near = int(max(0, max_landmarks - random_landmarks))
             near = _near_held(Xa, Xh, kk, cap_near)
@@ -448,7 +483,7 @@ class ParametricUMAP:
             picked = held[np.concatenate([near, rand]).astype(np.int64)]
         ms_select = (time.perf_counter() - t) * 1000
         S = np.concatenate([active, picked])
-        Xs = self._raw[S]
+        Xs = self._in(self._raw[S])
         t = time.perf_counter()
         head, tail, w = self._graph(Xs)
         ms_graph = (time.perf_counter() - t) * 1000
