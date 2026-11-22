@@ -64,6 +64,7 @@ import { COCKPIT_PATH, Cockpit } from "./cockpit";
 import { PLANE_FOLDER, PlaneDesk } from "./planepanels";
 import { EditorCalls } from "./editorcalls";
 import { DataflowRun, noteTextOf } from "./dataflowrun";
+import { CodeRows } from "./coderows";
 import { BrowserPanel } from "./browserpanel";
 import { PlaneHalo } from "./planehalo";
 import { slateFolds } from "./slatefold";
@@ -408,6 +409,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // probe note through these, never through a workspace tab.
     (window as any).__domvecPlane = this.desk;
     this.registerInterval(window.setInterval(() => this.desk.ensureTools(), 1000));
+    this.registerInterval(window.setInterval(() => { void this.codeRows.sweep(); }, 1000));
     // G-326: each panel sized to the fields it shows, folded to its node at its root.
     this.registerInterval(window.setInterval(() => this.desk.fitAll(), 400));
     this.registerDomEvent(document, "mouseup", () => {
@@ -1153,6 +1155,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   editor: EditorCalls = new EditorCalls(this as any);
   /** Marimo-style re-runs: a cell's readers run after it (G-380). */
   dataflow: DataflowRun = new DataflowRun(this as any, (p: string) => noteTextOf(this.app, p, () => this.markdownLeaves().map((l) => l.view)));
+  /** A code card's typed rows as fields on its plane card (G-378). */
+  codeRows: CodeRows = new CodeRows(this as any);
   /** A cell's asks of the app, carried out (G-288). */
   askStats: { web: number; go?: number; last: string } = { web: 0, last: "" };
   /** Planted (G-279): the kernel's `WebBrowser.go` asks are not carried out. */

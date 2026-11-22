@@ -11554,6 +11554,55 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-378",
+      asks: "a code card's typed rows are fields on its plane card (PLUGIN_GOAL 167 c; mortegon M.2-M.5): a card whose cell holds a commented typed binding, a plain one and a function shows a rows strip -- name : type = value, the function's parameters beneath it -- and typing 7 into depth's value field writes depth = 7 back into the cell with the comment and every other line kept; renaming depth to levels follows its read in the function's default; planted (plantNoWrite) the cell is unchanged",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const path = "domvec/graph/g378 " + (${planted} ? "p" : "c") + " " + Date.now().toString(36) + ".md";
+          const body = ["url: str = 'https://duckduckgo.com'   # where it looks", "depth = 3", "", "def scan(q: str, k: int = depth) -> list:", "    return [q, k]"].join(NL);
+          const now = () => { const v = d.viewOf(path); return v && v.editor ? v.editor.getValue() : ""; };
+          const out = { planted: ${planted} };
+          plugin.codeRows.plantNoWrite = ${planted};
+          try {
+            await d.create("notebook", { path, text: F + "python" + NL + body + NL + F + NL });
+            const card = () => d.panelOf(path) && d.panelOf(path).card;
+            out.strip = await until(() => !!(card() && card().querySelector(".domvec-rows input")), 15000);
+            const fields = () => [...card().querySelectorAll(".domvec-rows input")].map((i) => i.dataset.op + ":" + i.dataset.row + "=" + i.value);
+            out.fields = out.strip ? fields() : [];
+            const field = (op, row) => card().querySelector('.domvec-rows input[data-op="' + op + '"][data-row="' + row + '"]');
+            if (out.strip) {
+              const f = field("value", "depth");
+              f.focus(); f.value = "7"; f.dispatchEvent(new Event("change")); f.blur();
+              await until(() => now().includes("depth = 7"), 5000);
+              out.after_value = now();
+              await sleep(1500);                              // the strip redraws from the new source
+              const r = field("rename", "depth");
+              if (r) { r.value = "levels"; r.dispatchEvent(new Event("change")); }
+              await until(() => now().includes("levels = 7"), 5000);
+              out.after_rename = now();
+            }
+            out.stats = { ...plugin.codeRows.stats };
+            return out;
+          } finally {
+            plugin.codeRows.plantNoWrite = false;
+            try { await d.trash(path); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const kept = (t) => t.includes("url: str = 'https://duckduckgo.com'   # where it looks") && t.includes("    return [q, k]");
+        const ok = !!clean && clean.strip && clean.fields.includes("value:depth=3") && clean.fields.includes("type:q=str")
+          && clean.after_value.includes("depth = 7") && kept(clean.after_value)
+          && clean.after_rename.includes("levels = 7") && clean.after_rename.includes("k: int = levels") && kept(clean.after_rename);
+        const plantedOk = !!planted && planted.strip && planted.after_value.includes("depth = 3") && !planted.after_value.includes("depth = 7");
+        return { pass: ok && plantedOk, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-368",
       asks: "a page's fit sent by the projector is where the page is drawn, even if an earlier parting pass had moved it aside (G-94 run 130: an online update moved Radix_tree's fit ~34 units, its chunks followed, the page went back to the old fit); planted (plantStaleHomeFit): the parting pass's old home restored over the new fit",
       async run() {
