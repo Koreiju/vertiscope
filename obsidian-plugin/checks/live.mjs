@@ -5547,6 +5547,14 @@ export function makeChecks(env) {
           const sample = ns.slice(0, 1200);
           const C = v.collider || { safety: 1.25, margin: 0 };
           let pairs = 0, worst = 0, panels = 0, inBand = 0;
+          // Each overlap NAMED with the state that could explain it: a
+          // picture whose drawn size changed after it was placed (drawnHalf
+          // is the size its place was relaxed at), a glide or a halo in
+          // flight. Run 2026-11-22: 1 pair, a picture, 0.55 -- unexplained.
+          const why = [];
+          const state = (n, r) => ({ id: String(n.id).slice(-48), level: n.level || "chunk", picture: !!(n.image && n.image.src),
+                                     r: Math.round(r * 100) / 100, placed_at_r: Number.isFinite(n.drawnHalf) ? Math.round(n.drawnHalf * 100) / 100 : null,
+                                     gliding: !!n.__glide, halo: !!n.__halo, pinned: Number.isFinite(n.fx) });
           for (let i = 0; i < sample.length; i++) {
             for (let j = i + 1; j < sample.length; j++) {
               const a = sample[i], b = sample[j];
@@ -5554,6 +5562,7 @@ export function makeChecks(env) {
               const ra = radius(a), rb = radius(b);
               if (d - ra - rb < 0) {
                 pairs++; worst = Math.max(worst, ra + rb - d);
+                if (why.length < 8) why.push({ by: Math.round((ra + rb - d) * 100) / 100, a: state(a, ra), b: state(b, rb) });
                 if ((a.image&&a.image.src)||(b.image&&b.image.src)) panels++;
               } else if (d - (ra + rb) * C.safety - 2 * C.margin < 0) {
                 // The quarter-distance safety factor the collider actually
@@ -5566,7 +5575,7 @@ export function makeChecks(env) {
           return { sampled: sample.length,
                    checked: sample.length * (sample.length - 1) / 2,
                    overlapping: pairs, worst: Math.round(worst * 100) / 100,
-                   involving_a_panel: panels, inside_clearance_band: inBand,
+                   involving_a_panel: panels, inside_clearance_band: inBand, pairs: why,
                    radius_from: v.drawnRadiusOf ? "pane" : "formula" };
         `);
         if (got.error) return { pass: false, evidence: got };
