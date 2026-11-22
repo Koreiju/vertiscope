@@ -8063,7 +8063,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-389",
-      asks: "rank-dominance collapse on the 2D plane's craft (PLUGIN_GOAL 175 b): the rule folds a node's lower-ranked neighbours whose top neighbour it is, with their own, and not a node another outranking neighbour owns (planted DOMINANCE_PLANT.all takes it); a real right-click on a craft node on screen hides exactly what it dominates, labels it (+k), keeps the fold through a rebuild, and a second right-click restores every node; planted (plantNoFold) the right-click changes nothing",
+      asks: "rank-dominance collapse on the 2D plane's craft (PLUGIN_GOAL 175 b): the rule folds a node's lower-ranked neighbours whose top neighbour it is, with their own, and not a node another outranking neighbour owns (planted DOMINANCE_PLANT.all takes it); in EACH view -- the map, the ego view's third person and its first person (the cockpit) -- a real right-click on a craft node on screen hides exactly what it dominates, labels it (+k), keeps the fold through a rebuild, and a second right-click restores every node; planted (plantNoFold) the right-click changes nothing",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -8086,55 +8086,70 @@ export function makeChecks(env) {
           await window.__domvec.act("open", "graph"); await sleep(800);
           const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, c = window.__domvecCraft;
           if (!g || !c) return { ...out, error: "no graph or craft" };
-          const mode0 = g.agent.mode;
+          const mode0 = g.agent.mode, view0 = g.agent.view;
           try {
-            g.agent.setMode("map"); await sleep(600);
-            c.folds.clear(); await c.fresh(); for (let i = 0; i < 4; i++) await frame();
             const screen = (n) => { const cam = g.graph.camera(), cr = g.canvasEl.getBoundingClientRect(); c.group.updateMatrixWorld(true);
-              const v = n.mesh.position.clone().project(cam); return { x: cr.left + (v.x + 1) / 2 * cr.width, y: cr.top + (1 - v.y) / 2 * cr.height, z: v.z }; };
+              const v = n.mesh.getWorldPosition(n.mesh.position.clone()).project(cam); return { x: cr.left + (v.x + 1) / 2 * cr.width, y: cr.top + (1 - v.y) / 2 * cr.height, z: v.z }; };
             const right = (n) => { const p = screen(n); g.canvasEl.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, button: 2 })); };
-            const cands = c.nodes.filter((n) => n.kind !== "ego" && n.mesh).map((n) => ({ n, d: c.dominatedOf(n.id) }))
-              .filter((x) => x.d.length > 0).sort((a, b) => b.d.length - a.d.length);
-            out.candidates = cands.length;
-            let pick = null;
-            for (const x of cands) { const p = screen(x.n); if (p.z < 1 && c.nodeAt(p.x, p.y) === x.n) { pick = x; break; } }
-            if (!pick) return { ...out, error: "no dominating craft node hittable on screen" };
-            const id = pick.n.id, dom = pick.d, n0 = c.nodes.length, label0 = pick.n.label;
-            out.root = { id: id.slice(-60), kind: pick.n.kind, dominates: dom.length, nodes_before: n0 };
-            right(pick.n); for (let i = 0; i < 3; i++) await frame();
             const now = () => new Set(c.nodes.map((n) => n.id));
-            let ids1 = now();
-            out.nodes_folded = c.nodes.length;
-            out.dominated_still_drawn = dom.filter((d) => ids1.has(d)).length;
-            const r1 = c.nodes.find((n) => n.id === id);
-            out.label = r1 ? r1.label.slice(-30) : null;
-            out.labelled = !!r1 && r1.label.endsWith("(+" + dom.length + ")");
-            await c.fresh(); for (let i = 0; i < 3; i++) await frame();
-            ids1 = now();
-            out.after_rebuild_drawn = dom.filter((d) => ids1.has(d)).length;
-            const r2 = c.nodes.find((n) => n.id === id);
-            if (r2 && r2.mesh) { right(r2); for (let i = 0; i < 3; i++) await frame(); }
-            out.nodes_unfolded = c.nodes.length;
-            out.restored = dom.every((d) => now().has(d)) && !c.folds.size;
-            // 3. Planted: the right-click on the same node changes nothing.
+            // One arm per view. The craft is one graph wherever it is drawn,
+            // so each arm must find a node it can hit IN THAT VIEW.
+            const arm = async (name, mode, view) => {
+              g.agent.setMode(mode); await sleep(500);
+              if (view) { g.agent.setView(view); await sleep(500); }
+              c.folds.clear(); await c.fresh(); for (let i = 0; i < 6; i++) await frame();
+              const r = { view: name, agent: g.agent.mode + "/" + g.agent.view };
+              const cands = c.nodes.filter((n) => n.kind !== "ego" && n.mesh).map((n) => ({ n, d: c.dominatedOf(n.id) }))
+                .filter((x) => x.d.length > 0).sort((a, b) => b.d.length - a.d.length);
+              r.candidates = cands.length;
+              let pick = null;
+              for (const x of cands) { const p = screen(x.n); if (p.z < 1 && c.nodeAt(p.x, p.y) === x.n) { pick = x; break; } }
+              if (!pick) return { ...r, error: "no dominating craft node hittable on screen" };
+              const id = pick.n.id, dom = pick.d;
+              r.root = id.slice(-40); r.dominates = dom.length; r.nodes_before = c.nodes.length;
+              right(pick.n); for (let i = 0; i < 3; i++) await frame();
+              let ids = now();
+              r.nodes_folded = c.nodes.length;
+              r.dominated_still_drawn = dom.filter((d) => ids.has(d)).length;
+              const r1 = c.nodes.find((n) => n.id === id);
+              r.labelled = !!r1 && r1.label.endsWith("(+" + dom.length + ")");
+              await c.fresh(); for (let i = 0; i < 3; i++) await frame();
+              ids = now();
+              r.after_rebuild_drawn = dom.filter((d) => ids.has(d)).length;
+              const r2 = c.nodes.find((n) => n.id === id);
+              if (r2 && r2.mesh) { right(r2); for (let i = 0; i < 3; i++) await frame(); }
+              r.nodes_unfolded = c.nodes.length;
+              r.restored = dom.every((d) => now().has(d)) && !c.folds.size;
+              r.ok = r.dominated_still_drawn === 0 && r.nodes_folded === r.nodes_before - r.dominates && r.labelled
+                && r.after_rebuild_drawn === 0 && r.restored && r.nodes_unfolded === r.nodes_before;
+              if (!r.ok) c.folds.clear();
+              return r;
+            };
+            out.views = [];
+            out.views.push(await arm("map", "map", null));
+            out.views.push(await arm("third person", "ego", "third"));
+            out.views.push(await arm("first person", "ego", "first"));
+            // 3. Planted: the right-click on a dominating node changes nothing.
+            g.agent.setMode("map"); await sleep(500); await c.fresh(); for (let i = 0; i < 4; i++) await frame();
             c.plantNoFold = true;
-            const r3 = c.nodes.find((n) => n.id === id);
+            const hit = c.nodes.filter((n) => n.kind !== "ego" && n.mesh && c.dominatedOf(n.id).length)
+              .find((n) => { const p = screen(n); return p.z < 1 && c.nodeAt(p.x, p.y) === n; });
             const n3 = c.nodes.length;
-            if (r3 && r3.mesh) { right(r3); for (let i = 0; i < 3; i++) await frame(); }
+            if (hit) { right(hit); for (let i = 0; i < 3; i++) await frame(); }
+            out.planted_hit = !!hit;
             out.planted_nodes_hidden = n3 - c.nodes.length;
             out.planted_folds = c.folds.size;
             out.stats = { ...c.foldStats2 };
             return out;
           } finally {
             c.plantNoFold = false; c.folds.clear(); await c.fresh();
-            g.agent.setMode(mode0);
+            g.agent.setMode(mode0); if (g.agent.view !== view0) g.agent.setView(view0);
           }
         })()`, { timeout: 90000 });
         const want = ["c1", "c2", "c3", "c4", "c5", "s1", "s2"].join();
         const ok = !got.error && (got.rule_clean || []).join() === want && (got.rule_planted || []).includes("x")
-          && got.dominated_still_drawn === 0 && got.nodes_folded === got.root.nodes_before - got.root.dominates && got.labelled
-          && got.after_rebuild_drawn === 0 && got.restored && got.nodes_unfolded === got.root.nodes_before
-          && got.planted_nodes_hidden === 0 && got.planted_folds === 0;
+          && (got.views || []).length === 3 && got.views.every((v) => v.ok)
+          && got.planted_hit && got.planted_nodes_hidden === 0 && got.planted_folds === 0;
         return { pass: ok, evidence: got };
       },
     },
