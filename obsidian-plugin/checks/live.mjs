@@ -14802,22 +14802,30 @@ export function makeChecks(env) {
             if (!pg) return { error: "no page" };
             const r = await v.togglePage(pg); if (r && r.action === "expand") opened = pg;
             await sleep(3000);
-            const mine = chunks().filter((n) => String(n.url).split("#")[0] === String(pg.url).split("#")[0]).slice(0, 6);
+            // Six chunks that HAVE a word to wait for: an image-only or
+            // numeric chunk has no first line to time, and counting it null
+            // read as the panel failing (run 2026-11-22 01:33: 5 of 6 null in
+            // BOTH arms). Each null now says why; the wait is 3 s, not ~1.
+            const mine = chunks().filter((n) => String(n.url).split("#")[0] === String(pg.url).split("#")[0]);
+            const why = []; let skipped = 0;
             for (const n of mine) {
+              if (times.length >= 6) break;
               const t0 = performance.now();
               const pay = await v.chunkPayload(String(n.id));
-              const words = ((pay && pay.lines) || []).map((l) => String(l.text || "").replace(/\]\([^)]*\)/g, " ")).join(" ").match(/[A-Za-z]{5,}/g) || [];
+              const words = ((pay && pay.lines) || []).map((l) => String(l.text || "").replace(/\]\([^)]*\)/g, " ")).join(" ").match(/\p{L}{5,}/gu) || [];
               const first = words[0] || "";
-              const tOpen = performance.now();
+              if (!first) { skipped++; continue; }
               await v.openBillboard(n);
               const e = v.billboards.get(String(n.id));
               let ms = null;
-              for (let i = 0; i < 100 && e; i++) { if (first && (e.el.textContent || "").includes(first)) { ms = performance.now() - t0; break; } await sleep(10); }
+              const until = performance.now() + 3000;
+              while (e && performance.now() < until) { if ((e.el.textContent || "").includes(first)) { ms = performance.now() - t0; break; } await sleep(10); }
               times.push(ms === null ? null : Math.round(ms));
+              why.push(ms !== null ? "ok" : !e ? "no panel" : "not shown in 3 s: " + first + " / panel: " + (e.el.textContent || "").slice(0, 60));
               v.closeBillboard(String(n.id));
             }
             const ok = times.filter((x) => x !== null).sort((a, b) => a - b);
-            return { planted: ${planted}, page: String(pg.url).slice(-40), n: ok.length, p50: ok[ok.length >> 1], p90: ok[Math.floor(0.9 * (ok.length - 1))], times };
+            return { planted: ${planted}, page: String(pg.url).slice(-40), n: ok.length, p50: ok[ok.length >> 1], p90: ok[Math.floor(0.9 * (ok.length - 1))], times, why, skipped_no_word: skipped };
           } finally { v.plantShortPayloadCache = false; if (opened) await v.togglePage(opened); }
         `);
         const clean = await arm(false), planted = await arm(true);
