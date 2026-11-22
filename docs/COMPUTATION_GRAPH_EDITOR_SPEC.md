@@ -366,6 +366,10 @@ Sources: [marimo App API](https://docs.marimo.io/api/app/),
 
 1. marimo as a dependency (its `.py` format and runtime), or marimo's rules
    implemented over the slate dialect?
+   *Provisionally the second, because G-379 binds the dialect: `domvec/dataflow.py`
+   (2026-11-21) implements the rules with the standard library. It is one
+   module with its own tests, so choosing marimo replaces it without touching
+   the slate.*
 2. smolagents' `CodeAgent` as the agent loop over the tool surfaces, or the
    loop written in the editor itself, as cells?
 3. A node-editor library for the plane, or keep drawing it ourselves?
