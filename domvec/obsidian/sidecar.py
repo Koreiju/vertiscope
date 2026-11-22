@@ -1698,7 +1698,13 @@ def _embed_forever(workspace, stop: threading.Event) -> None:
                     "yielded_ms": round(stood * 1000, 1),
                     "encode_ms": round(enc_ms, 1),
                     "ms": round((done - got_lock) * 1000, 1),
-                    "embedded": max(0, before - remaining),
+                    # What this batch stored, not queue-before minus
+                    # queue-after: chunks arriving during a slow encode
+                    # cancelled the batch out (2026-11-22: a 619 s encode
+                    # under a game read "embedded 0" with the queue at 56).
+                    "embedded": len(produced or ()),
+                    "taken": len(taken or ()),
+                    "net_drain": before - remaining,
                     "queue_after": remaining,
                 })
             except Exception:                       # noqa: BLE001
