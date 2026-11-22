@@ -870,6 +870,7 @@ _PLANTABLE = {
     "zero-group-dropped": ("domvec.graphstore", "PLANT_ZERO_GROUP_DROPPED"),  # G-270 drawable set
     "no-reconcile": ("domvec.obsidian.projector", "PLANT_NO_RECONCILE"),     # G-270
     "incremental-refit": ("domvec.obsidian.projector", "PLANT_INCREMENTAL_REFIT"),  # 173 b
+    "no-gpu-gate": ("domvec.gpu_gate", "PLANT_NO_GATE"),                  # G-385
     "replace-unchanged": ("domvec.obsidian.projector", "PLANT_REPLACE_UNCHANGED"),  # hover jump
     "purge-keeps-projected": ("domvec.obsidian.sidecar", "PLANT_PURGE_KEEPS_PROJECTED"),  # G-270
     "outputs-everywhere": ("domvec.obsidian.sidecar", "PLANT_OUTPUTS_EVERYWHERE"),  # T-13
@@ -3643,9 +3644,11 @@ class _Handler(BaseHTTPRequestHandler):
                     _chat.IN_FLIGHT["now"] -= 1
             # Where the model ran, the time to its first token, and how long
             # this turn queued behind another (PLUGIN_GOAL 159, "several minutes").
+            from .. import gpu_gate as _gate                # G-385: did GPU work yield to this turn
+            _gate_now = dict(_gate.STATS)
             _profile("chat_stream", {"tokens": n, "context": len(context), "ms": round((time.time() - t0) * 1000),
                                      "first_ms": round((t_first - t0) * 1000) if t_first else None,
-                                     "waited_ms": waited_ms, "in_flight": in_flight, "dry": bool(dry_ms), "unlocked": unlocked,
+                                     "waited_ms": waited_ms, "in_flight": in_flight, "dry": bool(dry_ms), "unlocked": unlocked, "gate": _gate_now,
                                      "engine": engine,
                                      "loaded_on": (getattr(be, "loaded_on", "") if be is not None else "") if engine != "cuda" else __import__("domvec.chat_cuda", fromlist=["x"]).loaded_on(),
                                      "prompt_chars": len(text),

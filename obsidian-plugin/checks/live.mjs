@@ -11743,6 +11743,49 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-385-load",
+      asks: "the chat cell streams on CUDA unblocked while the embedder works (PLUGIN_GOAL 171 c): the standalone browser on a fast-growing page (its captures embedded on the GPU) through a long chat turn -- the GPU gate made the embedder wait during the turn (so the load was real), and the stream kept a median gap under 30 ms; planted (no-gpu-gate) the embedder never waits, the same turn's gaps reported beside",
+      async run() {
+        const fixtures = await serveFixtures();
+        const plant = (on) => fetch(`${SIDECAR}/plant`, { method: "POST", headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
+                                                          body: JSON.stringify({ name: "no-gpu-gate", on }) });
+        const arm = async (planted) => {
+          await plant(planted);
+          try {
+            return await evaluate(`(async () => {
+              const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+              const p = app.plugins.plugins["domvec-bridge"], base = p.settings.sidecar.replace(/\\/+$/, "");
+              const prof = async () => { const j = await (await fetch(base + "/profile")).json(); return (j.chat_stream || []).slice(-1)[0] || {}; };
+              const stats = (st) => { const g = st.slice(1).map((x, i) => x - st[i]).sort((a, b) => a - b);
+                                      return { first_ms: Math.round(st[0] ?? -1), pieces: st.length,
+                                               gap_p50: +(g[Math.floor(g.length / 2)] ?? 0).toFixed(1), gap_p90: +(g[Math.floor(g.length * 0.9)] ?? 0).toFixed(1) }; };
+              const turn = async (q) => { const t0 = performance.now(), st = [];
+                                          await p.sidecar.chatStream(q, [], () => st.push(performance.now() - t0)); return stats(st); };
+              await turn("Say hello.");                          // load and warm
+              const g0 = (await prof()).gate || { waits: 0, waited_s: 0 };
+              const b = p.activeBrowser();
+              let back = ""; try { back = b.webview.getURL(); } catch (e) { /* none */ }
+              b.go(${JSON.stringify(fixtures.origin)} + "/busy_feed.html?words=220&every=150&rounds=200&g385=" + (${planted} ? "p" : "c") + Date.now());
+              await sleep(3000);                                 // captures under way
+              const t = await turn("Write twelve full sentences about how a patricia trie stores web page addresses.");
+              const last = await prof();
+              if (back) b.go(back);
+              const g1 = last.gate || { waits: 0, waited_s: 0 };
+              return { ...t, engine: last.engine, loaded_on: last.loaded_on, tok_s: last.tok_s, tokens: last.tokens,
+                       gate_waits: g1.waits - g0.waits, gate_waited_s: +((g1.waited_s - g0.waited_s) || 0).toFixed(2) };
+            })()`, { timeout: 300000 });
+          } finally { await plant(false); }
+        };
+        try {
+          const clean = await arm(false);
+          const planted = await arm(true);
+          return { pass: !!clean && clean.engine === "cuda" && clean.gate_waits > 0 && clean.gap_p50 < 30
+                         && !!planted && planted.gate_waits === 0,
+                   evidence: { clean, planted, purged: await tidyFixtures(fixtures.origin) } };
+        } finally { await fixtures.close(); }
+      },
+    },
+    {
       id: "G-368",
       asks: "a page's fit sent by the projector is where the page is drawn, even if an earlier parting pass had moved it aside (G-94 run 130: an online update moved Radix_tree's fit ~34 units, its chunks followed, the page went back to the old fit); planted (plantStaleHomeFit): the parting pass's old home restored over the new fit",
       async run() {
