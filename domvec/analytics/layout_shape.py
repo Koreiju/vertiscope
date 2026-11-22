@@ -194,6 +194,93 @@ def run(workspace: str, chunk_sample: int = 2500, seed: int = 0, width: int = 64
     return report
 
 
+def served(url: str, chunk_sample: int = 2500, seed: int = 0) -> Dict:
+    """The layout a running sidecar SERVES (`/layout`), scored by the same
+    `aspect` and `kept10` as the arms above -- before and after a change to
+    the live fit (2026-11-22, PLUGIN_GOAL 175 c: DEBIAS on, effective at the
+    next fresh fit). The arms above fit their own copies; this reads the one
+    the reader is shown. Pages against their chunks' mean vector, chunks
+    against their own, joined by cid / url."""
+    import urllib.request
+    rows = load(url)
+    vec_of = {r[0]: np.asarray(r[2], dtype=np.float32) for r in rows}
+    by: Dict[str, List[np.ndarray]] = {}
+    for r in rows:
+        by.setdefault(r[1], []).append(vec_of[r[0]])
+    out: Dict[str, object] = {"source": url, "planted": planted(seed)}
+    for lv in ("page", "chunk"):
+        with urllib.request.urlopen(url.rstrip("/") + "/layout?level=" + lv, timeout=900) as r:
+            nodes = json.load(r).get("nodes") or []
+        X, Y = [], []
+        for n in nodes:
+            pos = n.get("pos")
+            if not isinstance(pos, list) or len(pos) < 3:
+                continue
+            if lv == "page":
+                vs = by.get(n.get("url") or "")
+                if not vs:
+                    continue
+                X.append(_unit(np.asarray(vs)).mean(axis=0))
+            else:
+                v = vec_of.get(n.get("cid") or n.get("id") or "")
+                if v is None:
+                    continue
+                X.append(v)
+            Y.append(pos[:3])
+        X = np.asarray(X, dtype=np.float32)
+        Y = np.asarray(Y, dtype=np.float32)
+        if lv == "chunk" and len(X) > chunk_sample:
+            take = np.sort(np.random.default_rng(seed).choice(len(X), chunk_sample, replace=False))
+            X, Y = X[take], Y[take]
+        out[lv] = {"n": int(len(X)), "of_served": len(nodes),
+                   **(aspect(Y) if len(Y) >= 4 else {}),
+                   "kept10": kept10(X, Y) if len(X) > 11 else None,
+                   # The null arm: the same points at random 3D positions.
+                   "kept10_null": kept10(X, np.random.default_rng(seed).normal(size=Y.shape)) if len(X) > 11 else None}
+    return out
+
+
+def refit_arms(url: str, chunk_sample: int = 2500, wait_s: float = 900.0) -> Dict:
+    """DEBIAS live, with its arms: a fresh fit asked for (`/layout?refit=1`),
+    awaited by the projector's epoch, then the served layout scored -- clean,
+    planted `no-debias`, and clean again (two clean fits apart say how much
+    any fresh fit moves the numbers, so a difference smaller than that is not
+    the setting's). Each arm records the debias its fit actually ran with."""
+    import time
+    import urllib.request
+
+    def get(path, timeout=900):
+        with urllib.request.urlopen(url.rstrip("/") + path, timeout=timeout) as r:
+            return json.load(r)
+
+    def plant(on: bool):
+        req = urllib.request.Request(url.rstrip("/") + "/plant", method="POST",
+                                     data=json.dumps({"name": "no-debias", "on": on}).encode(),
+                                     headers={"Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin"})
+        urllib.request.urlopen(req, timeout=30).read()
+
+    arms = []
+    for name, planted_arm in (("clean", False), ("planted_no_debias", True), ("clean_again", False)):
+        plant(planted_arm)
+        try:
+            before = get("/projector", 30).get("epoch")
+            get("/layout?level=page&refit=1")
+            t0 = time.time()
+            while time.time() - t0 < wait_s:
+                st = get("/projector", 30)
+                if st.get("epoch") != before and not st.get("fitting"):
+                    break
+                time.sleep(5)
+            st = get("/projector", 30)
+            fit = st.get("last_fit") or {}
+        finally:
+            plant(False)
+        got = served(url, chunk_sample)
+        arms.append({"arm": name, "epoch_moved": st.get("epoch") != before, "debias_ran": fit.get("debias"),
+                     "ms_fit": fit.get("ms_fit"), "page": got["page"], "chunk": got["chunk"]})
+    return {"source": url, "planted": planted(0), "arms": arms}
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="domvec.analytics.layout_shape")
     ap.add_argument("--workspace", required=True, help="a workspace path, or a running sidecar's url")
@@ -201,7 +288,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--width", type=int, default=64)
     ap.add_argument("--parametric", action="store_true", help="also the projector's own model (CUDA): pumap and pumap_debias")
     ap.add_argument("--out", default="build_analytics/layout_shape.json")
+    ap.add_argument("--live", action="store_true", help="score the layout a running sidecar serves (`--workspace` its url)")
+    ap.add_argument("--refit-arms", action="store_true", help="DEBIAS live: refit clean / planted no-debias / clean, scoring each served layout")
     a = ap.parse_args(argv)
+    if a.refit_arms:
+        rep = refit_arms(a.workspace, a.chunks)
+        Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.out).write_text(json.dumps(rep, indent=1))
+        for arm in rep["arms"]:
+            print(json.dumps({k: (v if k not in ("page", "chunk") else {x: v.get(x) for x in ("aspect", "kept10", "kept10_null", "n")})
+                              for k, v in arm.items()}))
+        return 0
+    if a.live:
+        rep = served(a.workspace, a.chunks)
+        Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.out).write_text(json.dumps(rep, indent=1))
+        print(json.dumps({k: v for k, v in rep.items() if k != "source"}))
+        return 0
     rep = run(a.workspace, a.chunks, width=a.width, parametric=a.parametric)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(rep, indent=1))

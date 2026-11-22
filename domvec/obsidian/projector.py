@@ -1382,7 +1382,10 @@ class PageProjector(ChunkProjector):
     #: 1.77:1 but costs 10-NN kept 0.384 -> 0.329 (chunks), 0.604 -> 0.470
     #: (pages). umap-learn kept them (0.410 both); the parametric net does not.
     #: The reader decides; 2 turns it on for the next fresh fit.
-    DEBIAS = None
+    #: 2026-11-22, PLUGIN_GOAL 175 (c): "On" -- two directions removed by
+    #: default, accepting the neighbour cost measured above. Planted
+    #: `PLANT_NO_DEBIAS`: off, as before.
+    DEBIAS = 2
 
     #: A first fit over every chunk of a large corpus would run epochs x
     #: edges/batch steps (60,000 at 15,000 rows); the global scope caps it.
@@ -2284,6 +2287,9 @@ class PageProjector(ChunkProjector):
                 "ms_fit": round(ms_fit, 1), "ms_chunks": round(ms_chunks, 1), "ms_declump": round(ms_declump, 1),
                 "engine": self.engine, "online": online is not None,
                 "scope": decision,
+                # Which input directions this fit removed (PLUGIN_GOAL 175 c):
+                # a layout reading names the setting it was made under.
+                "debias": getattr(self.pumap, "debias", None) if self.pumap is not None else None,
                 "pumap": dict(self.pumap.stats) if self.pumap is not None else None,
                 "global_refit": getattr(self, "_global_refit", None) if scope == "global" and online is not None else None,
                 "chunks_placed": len(pos),

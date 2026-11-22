@@ -984,6 +984,7 @@ _PLANTABLE = {
     "uniform-types": ("domvec.codegraph", "PLANT_UNIFORM_TYPES"),             # G-317
     "no-versions": ("domvec.graphstore", "PLANT_NO_VERSIONS"),                # G-253
     "no-requeue": ("domvec.workspace", "PLANT_NO_REQUEUE"),                   # stuck unembedded rows
+    "no-debias": ("domvec.obsidian.projector", "PLANT_NO_DEBIAS"),            # 175 c: debias off for the next fit
     "encoder-batch-hold": ("domvec.obsidian.sidecar", "PLANT_ENCODER_BATCH_HOLD"),  # D-40
     "retire-in-session": ("domvec.obsidian.sidecar", "_PLANT_RETIRE_IN_SESSION"),  # Q.002 / G-120
     "edge-two-match": ("domvec.graphstore", "PLANT_EDGE_TWO_MATCH"),  # 137 (20)
