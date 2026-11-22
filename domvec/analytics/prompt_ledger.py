@@ -296,7 +296,7 @@ VERDICTS: Dict[int, Tuple[str, str, str]] = {
     162: ("PROCESS", "Gate in-app runs on the reader's use of the APP, not machine-wide idle.", ''),
     163: ("LIVE", 'The pipeline checks must not break down mid-run (a run stuck seeding, fighting the reader).', 'G-75, G-87'),
     164: ("LIVE", 'The streaming force tree stays calm between rapid-fire updates.', 'G-93'),
-    165: ("LIVE", "Diffs reach the store in about one capture's time however fast the page drains.", 'D-42'),
+    165: ("LIVE", "Diffs reach the store in about one capture's time however fast the page drains.", 'D-55'),
     166: ("PROCESS", 'Bring the whole stack back up after a reboot (sidecar, Obsidian with flags, plugin).', ''),
     167: ("LIVE", 'Obsidian must not freeze while scrolling the Julia forum (D-38: renderer OOM).', 'D-38'),
     168: ("LIVE", 'Formal nested requirements/design model over the design history; focused module tests; the rest of the pending requirements built; Merkle-subtree dedup as in the reference serializer; the star layout tracked; GPU update() refits observable; lighter overlays; one full-pipeline harness with time AND memory profiles, rendering included.', 'D-38, D-41, G-98, G-106'),

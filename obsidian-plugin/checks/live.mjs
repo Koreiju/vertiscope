@@ -2156,7 +2156,7 @@ export function makeChecks(env) {
       },
     },
     {
-      id: "D-42",
+      id: "D-55",
       asks: "a diff reaches the store in about one capture's time however fast the page drains: queued drains of one page ride in one capture, and what the store holds is exactly what separate captures would have stored",
       async run() {
         // 2026-09-28: "the database ingests leave out so many diffed chunks
