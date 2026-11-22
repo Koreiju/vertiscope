@@ -1607,6 +1607,9 @@ export class BrowserView extends ItemView {
     // G-99's media arm: media elements detect nothing.
     if (this.plant.has("nomedia")) v.push("nomedia: true");
     if (this.plant.has("mergedlines")) v.push("mergedlines: true");
+    // D-40's fold arm: every member of a noted link family re-classified,
+    // whether or not its neighbourhood changed, as before 2026-11-22.
+    if (this.plant.has("reclass-all")) v.push("reclassall: true");
     return "{" + v.join(", ") + "}";
   }
 

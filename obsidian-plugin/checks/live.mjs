@@ -2072,7 +2072,9 @@ export function makeChecks(env) {
             const part = (k) => ({ p50: qq(rp.map((x) => x[k] || 0), 0.5), p95: qq(rp.map((x) => x[k] || 0), 0.95) });
             const foldParts = rp.length ? { n: rp.length, fold_ms: { p50: qq(armTraces.map((t) => t.stages.fold || 0), 0.5), p95: qq(armTraces.map((t) => t.stages.fold || 0), 0.95) },
               reclassify: part("reclassify"), walk: part("walk"), walk_fold: part("fold"), walk_emit: part("emit"), sweep_roots: part("sweep_roots"), sweep_hosts: part("sweep_hosts"),
-              repairs_per_drain: part("repairs"), chunk_roots: part("chunk_roots"), roots: part("roots") } : null;
+              repairs_per_drain: part("repairs"), chunk_roots: part("chunk_roots"), roots: part("roots"),
+              folded: part("folded"), refolded: part("refolded"), pruned: part("pruned"), emitted: part("emitted"),
+              mark_mut: part("mark_mut"), mark_reclass: part("mark_reclass"), reclass_kept: part("reclass_kept"), reclass_same: part("reclass_same"), mut_recs: part("mut_recs"), mut_attr: part("mut_attr"), mut_text: part("mut_text") } : null;
             return {
               url: wv.getURL(), frame_ms_p50: Math.round(fr[2]),
               fold_wait_ms: { n: foldWait.length, p50: qq(foldWait, 0.5), p95: qq(foldWait, 0.95) },

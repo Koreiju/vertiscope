@@ -92,6 +92,7 @@
   // --- work avoided -------------------------------------------------------
   var USE_SUBTREEGATE = !!V.subtreegate;  // never descend an unmoved subtree
   var USE_SPANS = !!V.spans;              // re-aggregate only the dirty range
+  var PLANT_RECLASS_ALL = !!V.reclassall; // planted (D-40): every family member re-classified
   var USE_VIEWPORT = !!V.viewport;        // emit what is on screen first
 
   // --- chunking policy ----------------------------------------------------
@@ -544,6 +545,12 @@
     // the finished address cannot ask "is this a pager?" any more.
     notePager(node, t[0]);
     rec.tax = [intern(k[0]), intern(t[1] + '/' + k[1]), KIND_RANK[k[0]] || 0];
+    // The one neighbourhood input this verdict read, as it read it: whether
+    // the link is the third-or-later distinct member of a numeric family in
+    // its fourth ancestor's subtree. `reclassify` keeps the verdict while
+    // that answer is unchanged (D-40). Anchors only: numericFamily answers
+    // false for anything without an href.
+    rec.famAt = (tag === 'A') ? numericFamily(node) : undefined;
     return rec.tax;
   }
 
@@ -1340,6 +1347,10 @@
       stats.deepPruned++;
       return rec;
     }
+    // A RE-fold (the node had a record) against a first fold of a node the
+    // page just added (D-40: 4,300 folds per repair for ~23 new topics --
+    // the delta itself, or the page's old nodes folded again?).
+    if (rec) stats.refolds = (stats.refolds || 0) + 1;
 
     var type = node.nodeType;
     if (type === 3) {                       // text
@@ -2386,10 +2397,10 @@
 
   // ---- invalidation (§5 spans) -----------------------------------------
   function markDirty(node) {
-    var n = node;
+    var n = node, marked = 0;
     while (n) {
       var rec = records.get(n);
-      if (rec) { if (rec.dirty) break; rec.dirty = true; }
+      if (rec) { if (rec.dirty) break; rec.dirty = true; marked++; }
       // `assignedSlot` first: a slotted node's parent *in the fold* is the
       // slot that draws it, not the host it is written under. Climbing
       // `parentNode` walked straight past the slot and every shadow ancestor
@@ -2398,6 +2409,7 @@
       n = n.assignedSlot || n.parentNode || (n.host || null) ||
           (n.getRootNode && n.getRootNode().host) || null;
     }
+    return marked;
   }
 
   // Record which children of a parent a mutation touched. The map existed
@@ -2511,17 +2523,49 @@
       var scope = root.nodeType === 9 ? root.documentElement : root;
       if (!scope || !scope.querySelectorAll) return;
       var links = scope.querySelectorAll('a[href]');
+      // A verdict is a function of the link's NEIGHBOURHOOD -- `numericFamily`
+      // queries its fourth ancestor's subtree (CLAUDE.md 5c) -- so it is stale
+      // only where that subtree changed. The page's own mutations have
+      // already marked the dirty chains (this runs before the walk), so a
+      // neighbourhood whose record is clean has not changed and neither has
+      // the verdict. Read BEFORE any link is marked here, or this pass's own
+      // marks would read as change. D-40, 2026-11-22, the Julia forum's
+      // /latest: every same-category badge on the page shares a mask, and a
+      // new row re-classified 1,204 held links per repair (p95 2,227) where
+      // the page's mutations had dirtied 14. No record for the
+      // neighbourhood: unknown, so re-classified. Planted `reclassall`:
+      // every member of a noted family, as before.
+      var stale = [];
       for (var i = 0; i < links.length; i++) {
         var rec = records.get(links[i]);
         // No record, or no verdict yet: nothing cached to be stale.
         if (!rec || !rec.tax) continue;
         var mask = maskOf(links[i].getAttribute('href'));
         if (!mask || !masks[mask]) continue;
+        if (!PLANT_RECLASS_ALL) {
+          var hood = links[i].parentNode;
+          for (var up = 0; up < 3 && hood && hood.parentNode; up++) hood = hood.parentNode;
+          var hrec = hood ? records.get(hood) : null;
+          if (hrec && !hrec.dirty) { stats.reclassKept = (stats.reclassKept || 0) + 1; continue; }
+          // The neighbourhood changed; did the one thing the verdict read
+          // from it? `numericFamily` again, through this repair's family memo
+          // (one anchor scan per distinct neighbourhood -- the O(anchors) of
+          // 5d). Same answer as when the verdict was made: the verdict stands.
+          // Run 48: a dirty-neighbourhood test alone kept 102 of ~977 -- a
+          // forum's category badges share the whole topic list as their
+          // neighbourhood, and the list changes with every new row.
+          if (rec.famAt !== undefined && numericFamily(links[i]) === rec.famAt) {
+            stats.reclassKept = (stats.reclassKept || 0) + 1; stats.reclassSame = (stats.reclassSame || 0) + 1; continue;
+          }
+        }
+        stale.push(links[i]);
+      }
+      for (i = 0; i < stale.length; i++) {
         // Drop the verdict and put the node back in the fold's path. The
         // re-fold recomputes the class; the class is in the digest, so the
         // chunk stops being skipped and the new address is drawn.
-        rec.tax = null;
-        markDirty(links[i]);
+        records.get(stale[i]).tax = null;
+        stats.markReclass = (stats.markReclass || 0) + markDirty(stale[i]);
         stats.reclassified++;
       }
     });
@@ -2547,7 +2591,14 @@
             if (an.nodeType === 1 && an.shadowRoot) observe(an.shadowRoot);
           }
         }
-        markDirty(m.target);
+        // Records already held, marked by the PAGE's own mutations, by kind
+        // (D-40: 1,218 re-folds per repair on /latest -- the page's motion,
+        // or ours?).
+        var mk = markDirty(m.target);
+        stats.markMut = (stats.markMut || 0) + mk;
+        stats.mutRecs = (stats.mutRecs || 0) + 1;
+        if (m.type === 'attributes') stats.mutAttr = (stats.mutAttr || 0) + 1;
+        else if (m.type === 'characterData') stats.mutText = (stats.mutText || 0) + 1;
         var parent = m.target.parentNode;
         if (parent) {
           var span = dirtySpans.get(parent);
@@ -2630,6 +2681,7 @@
     // Before the walk, or the fold reads verdicts this pass has just learned
     // are stale. Inside the timed region, because it is fold work and a phase
     // timing that hides its own cost is not a phase timing.
+    familyMemo = (typeof Map === 'function') ? new Map() : null;
     reclassify();
     // Each phase of this repair on its own clock (D-40, 2026-10-24: a repair
     // of ~23 new topics on discourse cost 30-120 ms, most of page -> host,
@@ -2637,7 +2689,14 @@
     var pclock = (typeof performance !== 'undefined' && performance.now)
       ? function () { return performance.now(); } : Date.now;
     var tw = pclock(), te = tw, ts = tw, roots_n = 0, foldMs = 0;
-    familyMemo = (typeof Map === 'function') ? new Map() : null;
+    // (The family memo was made before `reclassify`; the DOM does not move
+    // within a repair, so the walk reuses its scans.)
+    // How many records this repair recomputed against how many it took from
+    // the cache (D-40, 2026-11-22: one repaired root per drain on the
+    // Julia forum's /latest, and still walk_fold p50 53 ms -- the time alone
+    // cannot say whether the walk re-folds the whole topic list or does
+    // heavy work on a few nodes).
+    var folds0 = stats.folds || 0, pruned0 = stats.deepPruned || 0, refolds0 = stats.refolds || 0, emitted_n = 0;
     try {
       stats.repairs++;
       var out = [];
@@ -2660,6 +2719,7 @@
         out.sort(function (a, b) { return (b.chars || 0) - (a.chars || 0); });
       }
       te = pclock();
+      emitted_n = out.length;
       for (var i = 0; i < out.length; i++) front.push(out[i]);
       // Name what left. Without this the delta could only ever add: a chunk
       // whose node was deleted stayed in the store with an address that no
@@ -2713,6 +2773,21 @@
     lp.fold = r1(lp.fold + foldMs); lp.emit = r1(lp.emit + (te - tw - foldMs));
     lp.sweep_roots = r1(lp.sweep_roots + (ts - te)); lp.sweep_hosts = r1(lp.sweep_hosts + (t1 - ts));
     lp.repairs++; lp.chunk_roots = chunkRoots.length; lp.roots = roots_n;
+    lp.folded = (lp.folded || 0) + ((stats.folds || 0) - folds0);
+    lp.pruned = (lp.pruned || 0) + ((stats.deepPruned || 0) - pruned0);
+    lp.refolded = (lp.refolded || 0) + ((stats.refolds || 0) - refolds0);
+    // Marks since the last repair, by source; reset here so each repair's
+    // parts name what dirtied it.
+    lp.mark_mut = (lp.mark_mut || 0) + (stats.markMut || 0);
+    lp.mark_reclass = (lp.mark_reclass || 0) + (stats.markReclass || 0);
+    lp.reclass_kept = (lp.reclass_kept || 0) + (stats.reclassKept || 0);
+    lp.reclass_same = (lp.reclass_same || 0) + (stats.reclassSame || 0);
+    stats.reclassKept = 0; stats.reclassSame = 0;
+    lp.mut_recs = (lp.mut_recs || 0) + (stats.mutRecs || 0);
+    lp.mut_attr = (lp.mut_attr || 0) + (stats.mutAttr || 0);
+    lp.mut_text = (lp.mut_text || 0) + (stats.mutText || 0);
+    stats.markMut = 0; stats.markReclass = 0; stats.mutRecs = 0; stats.mutAttr = 0; stats.mutText = 0;
+    lp.emitted = (lp.emitted || 0) + emitted_n;
   }
 
   // ---- observation (§3 of the injection doc: one per root) -------------
