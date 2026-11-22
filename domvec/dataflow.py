@@ -288,3 +288,31 @@ def graph(text: str, known: Iterable[str] = ()) -> Graph:
         if c.index not in idx:
             strong(c.index)
     return Graph(cells, edges, problems, outside)
+
+
+#: Planted (G-380): the plan names no readers, so a run leaves them stale.
+PLANT_NO_READERS = [False]
+
+
+def rerun_plan(text: str, open_line: int, known: Iterable[str] = ()) -> dict:
+    """What running the python cell whose fence opens at `open_line` makes stale,
+    as the cells to re-run after it, in run order (marimo's reactive run, 167 f).
+
+    Only python cells are re-run: the note's slate trees are compiled into the
+    kernel before every cell, so a tree is never stale. A cell that is part of
+    a problem (a name defined twice, a cycle) is refused rather than run around
+    -- the problem is returned for the editor to show.
+    """
+    g = graph(text, known)
+    cell = next((c for c in g.cells if c.kind == "python" and c.line == open_line + 1), None)
+    if cell is None:
+        return {"cell": None, "rerun": [], "problems": [], "error": "no python cell opens at line %d" % open_line}
+    mine = [p.to_json() for p in g.problems if cell.index in p.cells]
+    if mine:
+        return {"cell": cell.index, "rerun": [], "problems": mine}
+    after = [] if PLANT_NO_READERS[0] else g.descendants(cell.index)
+    by = {c.index: c for c in g.cells}
+    rerun = [{"index": i, "open_line": by[i].line - 1, "source": by[i].source,
+              "reads": sorted(by[i].refs & cell.defs)}
+             for i in after if by[i].kind == "python" and not any(i in p.cells for p in g.problems)]
+    return {"cell": cell.index, "defs": sorted(cell.defs), "rerun": rerun, "problems": []}

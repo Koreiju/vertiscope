@@ -3450,6 +3450,24 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, out)
             return
 
+        if route == "dataflow":
+            # G-380 (PLUGIN_GOAL 167 f, marimo style): the cells a run makes
+            # stale, from the note's own text -- names defined and read, read
+            # statically (`dataflow.rerun_plan`). Pure analysis: it reads no
+            # store and runs nothing; the plugin re-runs what it names.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                from .. import dataflow as _df
+                t0 = time.time()
+                out = _df.rerun_plan(str(body.get("markdown") or ""), int(body.get("line", -1)))
+                out["ms"] = round((time.time() - t0) * 1000, 2)
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "%s: %s" % (type(exc).__name__, exc)})
+                return
+            self._send(200, out)
+            return
+
         if route == "package":
             # G-375 (PLUGIN_GOAL 166 a, 167 a "Layout and indexer"): this
             # repository and installed packages are no longer indexed or

@@ -63,6 +63,7 @@ import { PANEL_VIEW, PanelView } from "./panelview";
 import { COCKPIT_PATH, Cockpit } from "./cockpit";
 import { PLANE_FOLDER, PlaneDesk } from "./planepanels";
 import { EditorCalls } from "./editorcalls";
+import { DataflowRun, noteTextOf } from "./dataflowrun";
 import { BrowserPanel } from "./browserpanel";
 import { PlaneHalo } from "./planehalo";
 import { slateFolds } from "./slatefold";
@@ -1150,6 +1151,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
   /** The editor's own calls from a cell -- create, link, invoke, commit, review (G-386). */
   editor: EditorCalls = new EditorCalls(this as any);
+  /** Marimo-style re-runs: a cell's readers run after it (G-380). */
+  dataflow: DataflowRun = new DataflowRun(this as any, (p: string) => noteTextOf(this.app, p, () => this.markdownLeaves().map((l) => l.view)));
   /** A cell's asks of the app, carried out (G-288). */
   askStats: { web: number; go?: number; last: string } = { web: 0, last: "" };
   /** Planted (G-279): the kernel's `WebBrowser.go` asks are not carried out. */
@@ -1245,6 +1248,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         else notes.push(`go: no browser cell open for ${a.go}`);
       }
     }
+
+    // Its readers, re-run (G-380): the cells that read the names this one
+    // defines, in run order, each by this same path.
+    const reran = await this.dataflow.after({ ...req, path: note }, reply);
+    if (reran) notes.push(reran);
 
     const last = (reply.error || "").trim().split("\n").pop();
     const shown = reply.ok

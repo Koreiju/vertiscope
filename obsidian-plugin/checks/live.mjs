@@ -11507,6 +11507,53 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-380",
+      asks: "marimo-style reactive runs (PLUGIN_GOAL 167 f): a note of cells x = 21 / y = x * 2 / print('Y', y) / z = 5, all run; x is edited to 5 and ONLY its cell is run -- the cells that read x and y re-run after it in order, so the print cell's output reads Y 10, and the z cell, which reads nothing of x, is not re-run; planted (plantNoRerun) the print cell still reads Y 42",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const path = "domvec/graph/g380 " + (${planted} ? "p" : "c") + " " + Date.now().toString(36) + ".md";
+          const cells = ["x = 21", "y = x * 2", "print('Y', y)", "z = 5"];
+          const text = cells.map((c) => F + "python" + NL + c + NL + F).join(NL + NL) + NL;
+          const now = () => { const v = d.viewOf(path); return v && v.editor ? v.editor.getValue() : ""; };
+          const lineOf = (code) => now().split(NL).findIndex((l, i, a) => l.startsWith(F + "python") && a[i + 1] === code);
+          const run = (code) => plugin.onRunFence({ lang: "python", code, line: lineOf(code), path });
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path, text });
+            for (let i = 0; i < 40 && !d.viewOf(path); i++) await sleep(100);
+            plugin.dataflow.plantNoRerun = true;          // the first pass: each cell by hand
+            for (const c of cells) await run(c);
+            out.first = (now().match(/Y \\d+/) || [""])[0];
+            const zCount = () => Number((now().split("z = 5")[1] || "").match(/count=(\\d+)/)?.[1] || -1);
+            const z0 = zCount();
+            plugin.dataflow.plantNoRerun = ${planted};
+            const ed = d.viewOf(path).editor;
+            ed.setValue(ed.getValue().replace(NL + "x = 21" + NL, NL + "x = 5" + NL));
+            const before = { ...plugin.dataflow.stats };
+            const t0 = performance.now();
+            await run("x = 5");
+            out.ms = Math.round(performance.now() - t0);
+            out.after = (now().match(/Y \\d+/) || [""])[0];
+            out.reran = plugin.dataflow.stats.reran - before.reran;
+            out.z_rerun = zCount() !== z0;
+            out.last = plugin.dataflow.stats.last;
+            return out;
+          } finally {
+            plugin.dataflow.plantNoRerun = false;
+            try { await d.trash(path); } catch (e) { /* gone */ }
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        return { pass: !!clean && clean.first === "Y 42" && clean.after === "Y 10" && clean.reran === 2 && !clean.z_rerun
+                       && !!planted && planted.first === "Y 42" && planted.after === "Y 42" && planted.reran === 0,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-368",
       asks: "a page's fit sent by the projector is where the page is drawn, even if an earlier parting pass had moved it aside (G-94 run 130: an online update moved Radix_tree's fit ~34 units, its chunks followed, the page went back to the old fit); planted (plantStaleHomeFit): the parting pass's old home restored over the new fit",
       async run() {
