@@ -222,3 +222,70 @@ end.
 - Then: the complete, self-consistent 2D interface design for
   notebook-kernel workflows with ~25-line tools -- stated against the
   numbered rows it will add to `PLUGIN_PRD.md`.
+
+## 8. Draft tool surfaces -- one per README pane (G-376, G-377), for the reader to correct
+
+The substrate already exists: `domvec/obsidian/kernel_objects.py` boots
+read-only objects into every note's kernel -- `search`, `Database`,
+`WebBrowser`, `Agent`, `Vault` -- each calling the sidecar's own routes, so a
+cell "sees exactly what the app sees and cannot write the store behind the
+lifecycle's back". Those are already "implicit calls into the world itself"
+(167 c). Below, each pane as calls only, a comment at each line's end.
+**`# exists`** marks a call that runs in a kernel today; **`# new`** marks a
+call the surface needs and the kernel does not have yet (the route behind it
+named where one exists). Nothing below is decided.
+
+```python
+# search -- the store's retrieval
+search("radix trie", k=8)                 # exists: ranked chunks, lexical x pagerank x semantic
+search("radix trie", where="ego")         # exists: only the ego's artifacts and tagged chunks
+search("radix trie", duckduckgo=True)     # exists: asks the browser cell; results arrive as captures
+similar(cid, k=8)                          # new: /search?ref= (G-372 step 2) -- a chunk's neighbours
+Database.cypher("MATCH (p:Page) RETURN count(p)")  # exists: read-only, writes refused
+```
+
+```python
+# browser cell -- the live page
+WebBrowser.url                             # exists: what the cell shows now
+WebBrowser.go("https://en.wikipedia.org/wiki/Trie")  # exists: carried out when the cell ends
+WebBrowser.chunks()                        # exists: the stored chunks of the page shown
+WebBrowser.pin(xpath)                      # new: the right-click pin -> a stuck plane panel (133 b)
+WebBrowser.controls()                      # new: the page's interactive fields, by address (affordances)
+WebBrowser.act(address, value)             # new: act on a field in place through its trie address
+```
+
+```python
+# panels -- a chunk's two forms
+chunk(cid)                                 # new: /chunk -- the markdown, each line with its address
+page_form(cid)                             # new: /snapshot/<cid> -- the saved page form, or None
+resolve(url, xpath)                        # new: /resolve -- the chunk that draws an address
+```
+
+```python
+# 3D graph -- the world
+focus(cid)                                 # new: fly to a node (the plugin, not the sidecar)
+unfold(url)                                # new: /unfold -- a page into its chunks
+pages(contains="wiki")                     # new: /pages -- stored page urls
+```
+
+```python
+# the ego -- the tool space as one graph
+ego()                                      # new: /ego -- its nodes and links
+attach(cid)                                # new: tag a chunk into the ego
+view("third")                              # new: first / third person (G-333's camera field)
+```
+
+```python
+# notebook / slates -- the computation graph itself
+Vault.read("notes/Lattice.md")             # exists: the vault's files
+Vault.write("notes/out.md", text)          # exists: inside the vault only, never .obsidian/.git
+Agent.ask("summarise", context=hits)       # exists: the sidecar's local model, one session per kernel
+check(slate)                               # new: /slate_check -- the dialect's own errors (2026-11-01 62)
+```
+
+Counted: **13 calls exist, 17 are new** -- and every new one sits on a route
+or plugin action that already exists, so the surfaces are wrappers, not new
+machinery. Two rows decide their shape: `G-378` (a tool panel is read-only
+and cannot open the code behind it) and `G-380` (marimo-style: a call that
+changes the world in place -- `go`, `pin`, `act`, `attach` -- is invisible to
+name dataflow, so each returns a value that names what changed).
