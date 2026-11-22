@@ -131,6 +131,53 @@ The reading this suggests (not a decision): the slate's def/use names give
 marimo-style dependency edges for free, and the kernel already runs the
 cells -- the graph is derived from the notebook, not drawn separately.
 
+### 5a. Checked against the projects' own pages (2026-11-21)
+
+**marimo -- confirmed, and more precise than the summary.** Dependencies are
+found STATICALLY, without running the code: each cell is parsed for the
+global names it defines and the names it reads without defining; an edge
+runs from a cell to every cell that reads one of its definitions, and the
+cells form a DAG. Running a cell runs the cells that read its definitions;
+order comes from the variables, not the page. Rules that matter for this
+design:
+- every global is defined by exactly ONE cell (the slate already raises "the
+  same name bound twice in one namespace", `(2026-11-01) 62`);
+- names prefixed `_` are local to a cell;
+- mutations and attribute assignments are NOT tracked -- an in-place change
+  in another cell does not re-run dependents;
+- type annotations count as references unless written as strings;
+- a setup cell runs first and may read nothing from other cells;
+- `marimo check` lints for double definitions and cycles.
+Sources: [Running cells](https://docs.marimo.io/guides/reactivity/),
+[Understanding dataflow](https://docs.marimo.io/guides/editor_features/dataflow/),
+[Key concepts](https://docs.marimo.io/getting_started/key_concepts/).
+
+**jupyterlab-myst -- confirmed, with a limit.** The `{eval}` role puts a
+kernel value inline in a markdown cell; a `jupyterlab-myst:executor` plugin
+sends the expressions to the active kernel when the markdown cell is
+"executed"; a markdown cell holding expression output is untrusted until the
+notebook is run. Only single inline expressions -- a multi-line `{eval}`
+block was still an open request in Dec 2025 (issue #286). Sources:
+[jupyterlab-myst](https://github.com/jupyter-book/jupyterlab-myst),
+[issue #286](https://github.com/jupyter-book/jupyterlab-myst/issues/286),
+[MyST quickstart](https://mystmd.org/guide/quickstart-jupyter-lab-myst).
+
+**Licences -- confirmed:** Nodezator, The Unlicense (public domain); Ryven,
+MIT, over ryvencore, LGPL-2.1. **Not confirmed:** that Ryven is archived,
+and that Nodezator or Ryven export a graph as Python code -- the search
+found neither; read the repositories before relying on it. Sources:
+[Nodezator](https://github.com/IndieSmiths/nodezator),
+[Ryven](https://github.com/leon-thomm/Ryven),
+[ryvencore](https://github.com/leon-thomm/ryvencore).
+
+**What this means for §6 Q5** (a consequence, not a choice): marimo's model
+fits the slate almost exactly -- the slate already has unique names per
+namespace and `{ref}`s resolved by scoping, so the dependency edges can be
+READ from the slate rather than drawn. Its one sharp edge for agent tools is
+the untracked mutation: a tool that changes the store in place (capture,
+purge, pin) re-runs nothing downstream, so such tools would have to return a
+new value, or name a version, to be visible as dataflow.
+
 ## 6. Open -- the reader's to settle
 
 1. **How far does the codebase go?** Out of the 3D layout only (the store
