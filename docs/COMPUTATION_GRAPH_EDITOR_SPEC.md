@@ -661,6 +661,9 @@ review("DuckDuckGo", "is this the right source?")  # new: ask the reader before 
 
 ### 11e. For the reader -- three questions the record does not settle
 
+*Answered 2026-11-21 (PLUGIN_GOAL 170): 1 yes -> G-382; 2 undirected -> G-383;
+3 smolagents' step -> G-384.*
+
 1. **Are tool panels and subgraphs embedded and searchable?** O.22 put
    panels, functional objects and whole subgraphs in the same retrieval space
    as chunks, so a task finds the subgraph that does it. 166 removed the

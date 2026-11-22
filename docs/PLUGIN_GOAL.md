@@ -5941,3 +5941,23 @@ reading state the vision; (4) install smolagents and llama-cpp-python:*
 > 3. double-check and explain to me in my own terms 
 > 4. yss
 
+### 170. (2026-11-21) Answers to the three questions of COMPUTATION_GRAPH_EDITOR_SPEC §11e
+
+*2026-11-21 (verbatim), numbered as the questions were: (1) do tool panels
+and user subgraphs get vectors and a place in 3D, as mortegon O.22 had it;
+(2) is dataflow direction computed but drawn undirected, as O.16 says;
+(3) does smolagents' step replace mortegon's perceive -> transform -> emit
+tick, or run inside it:*
+
+> 1. yes 2. undirected 3. smolagents 'step' if only architectural ambiguity
+
+*Read as (170) -- a reading, to be confirmed:*
+*(a) [1] tool panels and user subgraphs are embedded and searchable in the
+same space as chunks, and placed in 3D (mortegon O.22) -- they are not the
+repository code that G-375 removed;*
+*(b) [2] graph-form links are drawn undirected (mortegon O.16); the
+dataflow's direction is computed, not drawn;*
+*(c) [3] smolagents' step is the agent loop, replacing mortegon's tick --
+"if only architectural ambiguity" read as: unless a concrete reason to keep
+the tick appears, the tick was kept only for want of a decision.*
+
