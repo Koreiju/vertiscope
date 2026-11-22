@@ -362,14 +362,162 @@ Sources: [marimo App API](https://docs.marimo.io/api/app/),
   loading the weights -- enough for its panel (`G-381`) to say what it is
   before anything runs it; `llama-cpp-python` would run it.
 
-### 9b. For the reader to decide
+### 9b. Withdrawn (2026-11-21, PLUGIN_GOAL 168)
 
-1. marimo as a dependency (its `.py` format and runtime), or marimo's rules
-   implemented over the slate dialect?
-   *Provisionally the second, because G-379 binds the dialect: `domvec/dataflow.py`
-   (2026-11-21) implements the rules with the standard library. It is one
-   module with its own tests, so choosing marimo replaces it without touching
-   the slate.*
-2. smolagents' `CodeAgent` as the agent loop over the tool surfaces, or the
-   loop written in the editor itself, as cells?
-3. A node-editor library for the plane, or keep drawing it ourselves?
+Three library-by-library choices were posed here. The reader answered that
+posing them shows the design vision had not been weighed against the whole
+verbatim (168 a), and that the libraries are to be INTEGRATED so that the
+realisation is complete, not picked between (168 c). §10 takes the design
+first. The provisional note that stood under the first choice records only
+what was built before 168 (`domvec/dataflow.py`); §10a places it.
+
+## 10. The design first, then the libraries that complete it (2026-11-21, PLUGIN_GOAL 168)
+
+### 10a. What the verbatim converges on -- a reading, to be confirmed
+
+168 a names the convergence: "to graphically design python programs and
+modules with a dual interface on kernel cells". Gathered from the record,
+the parts it converges from:
+
+| The record says | Where |
+|---|---|
+| a slate is a Python module written as a markdown tree; the markdown panels are extended to Python's syntax and stay markdown cells | 2026-11-01 62, 63' |
+| node / panel / kernel cell / tree are one thing | 2026-11-01 65 |
+| the computation graph editor is a general Python and markdown notebook cell interface, for quantized agentic workflows, lightweight module composition of Python programs | 166 (d, e) |
+| tool panels: read-only code artifacts, "implicit calls into the world itself"; regular code artifacts are called the same way AND graph-editable | 167 (c) |
+| the dialect of graph and cells is kept with great care | 167 (d) |
+| marimo-style dataflow | 167 (f) |
+| a ported GGUF is its own panel / cell type | 167 (g) |
+| the ego as a computational reservoir; the 2D plane editor integrated with the 3D layout, which moves in first and third person, always centred | the standing goal |
+
+Read together -- my reading: **one object with two faces.** A note is a
+module; its cells (python fences, slate trees, tool panels, model cells) are
+its nodes, each addressed `vault://<note>#cell <n>` (2026-11-11 159). The
+**code face** is the note read top to bottom; the **graph face** is the same
+cells drawn as nodes on the plane, with an edge wherever one cell reads a name
+another defines. Neither face is stored separately: both are projections of
+the note's text through the trie, so an edit in either is an edit to the same
+text, and the other face redraws from it. A module composes into another by
+being called: its free names are its inputs, its definitions its outputs.
+
+Under that reading, each library is a part of one machine, not an option:
+
+| Part of the machine | What fills it | Status |
+|---|---|---|
+| edges of the graph face (who reads whose names) | marimo's rules | built as `domvec/dataflow.py` (G-380); marimo's own analysis is internal, not a public API -- whether to call into it instead is open |
+| a graph-face edit written back into the code face, comments and layout kept | LibCST (MIT, **installed**, 1.9.0) | not started -- the write-back half of G-378 |
+| a module called as a node from another note | marimo's `app.embed(defs=...)` shape: free names in, definitions out | not started |
+| the plane on which the graph face is drawn and edited, inside the 3D layout | litegraph.js (MIT, Canvas2D, no framework) or the plane's own drawing (`planepanels.ts`) | open -- the plane already exists in 3D |
+| the agent that writes cells | smolagents `CodeAgent` (§10b) | not installed |
+| the model behind each agent task | GGUFs through llama.cpp: GPT4All today (**installed**, 2.8.2), llama-cpp-python for constrained output | §10c |
+| what a ported model is, before it runs | `domvec/gguf_meta.py` (G-381) | built |
+
+### 10b. smolagents in depth, against that machine
+
+What the library is, from its own documentation (Context7
+`/huggingface/smolagents`, read 2026-11-21):
+
+* **The agent writes code as its action.** `CodeAgent(tools, model,
+  additional_authorized_imports, planning_interval, executor_type,
+  executor_kwargs, use_structured_outputs_internally, code_block_tags, ...)`.
+  `ToolCallingAgent` is the JSON-call alternative.
+* **A tool is a typed Python function.** `@tool` on a function with type
+  hints and an `Args:` docstring, or a `Tool` subclass with `name`,
+  `description`, `inputs`, `output_type`, `forward`. All of it is "baked into
+  the agent's system prompt" -- the tool's documentation IS what the model
+  reads. `ToolCollection.from_mcp(...)` turns an MCP server's tools into
+  smolagents tools.
+* **Any model can be plugged in.** Subclass `Model` and implement
+  `generate(messages, stop_sequences, ...)`, returning an object with
+  `.content`; the method may take a `grammar` for constrained generation.
+  Built-in: `TransformersModel`, `LiteLLMModel` (Ollama: raise `num_ctx` to
+  8,192), `VLLMModel`, `MLXModel`, OpenAI-compatible servers.
+* **Execution.** `executor_type` is `local`, `blaxel`, `e2b`, `modal` or
+  `docker`. The local executor interprets the AST operation by operation:
+  imports refused unless authorised, submodules refused unless authorised
+  (`random._os` is caught), loops capped at 1,000,000 iterations. And yet,
+  per its SECURITY.md, the local executor is not a security boundary.
+  Managed agents are not supported on the remote executors.
+* **Memory is a list of steps.** `agent.memory.steps` holds `TaskStep` and
+  `ActionStep`; an agent can be run one step at a time (`agent.step(...)`),
+  and the memory edited between steps. `step_callbacks` run after each step;
+  `final_answer_checks` can refuse an answer and make the agent continue.
+* **Multi-agent.** `managed_agents=[...]` lets a manager agent call others
+  as if they were tools.
+
+How each fits the machine -- readings, not decisions:
+
+1. **An agent's run is a notebook.** Each `ActionStep` is one code cell and
+   its observation is that cell's output. Run one step at a time, each step
+   can be written into the note as a cell -- so an agent's work appears in
+   BOTH faces: the code face as cells, the graph face as nodes whose edges
+   come from the same dataflow (`dataflow.py`). The reader can edit a step's
+   cell and the dataflow marks what is now stale. This is the "quantized
+   agentic workflows" of 166 d given the dialect of 167 d.
+2. **The tool surface is the tool listing.** smolagents puts each tool's
+   signature and docstring into the model's prompt. A §8 tool surface --
+   calls only, one comment per line -- is that same information in its most
+   compact form, so the surface can be the text a small model is given
+   (G-377), and `tool_surface.py` already checks every line against the
+   kernel. A tool panel (read-only, 167 c) maps to a smolagents `Tool` whose
+   `forward` calls a sidecar route -- the kernel objects
+   (`kernel_objects.py`) already make exactly these calls.
+3. **The executor is the note's own kernel.** Rather than smolagents' local
+   interpreter, the agent's code could run in the Jupyter kernel the note
+   already has, through a custom `PythonExecutor`. Then an agent's cell and
+   the reader's cell share one namespace and one dataflow. Trust: the kernel
+   objects are read-only on the store and `Vault.write` stays inside the
+   vault, but a kernel is not a sandbox either -- the same caveat smolagents
+   states about its own executor. Where untrusted model code must be
+   contained, `docker` is the only listed executor that runs on this machine
+   without an outside service.
+4. **Constrained output for small models.** `generate` accepts a grammar.
+   llama.cpp's server takes a GBNF `grammar` or a `response_format` JSON
+   schema per request (only a subset of JSON Schema converts to a grammar,
+   per its GBNF guide). For a 7B Q4 model, a grammar that only allows a
+   fenced Python block calling the listed tools would remove a whole class of
+   malformed steps. Unverified here: how llama-cpp-python's
+   `create_chat_completion` maps `response_format` -- its own docs were not
+   found in this search.
+
+### 10c. Quantized models by task -- what is on this machine
+
+Every row below is a file already on disk, described by `domvec/gguf_meta.py`
+from its header (G-381); nothing was downloaded. "In use" means the code loads
+it today.
+
+| Task | Input -> output | Model on disk (quant, context) | Status |
+|---|---|---|---|
+| embedding chunks (the projector's vectors) | text -> 768-d vector | `nomic-embed-text-v1.5` / `v1`, f16 GGUF via GPT4All `Embed4All` | **in use** (`core/embedding_service.py`) |
+| chat about chunks (`Agent.ask`, `/chat`) | prompt + chunk context -> reply | Nous-Hermes-2-Mistral-7B-DPO, Q4_0, 32,768 | **in use** (`chat.py`) |
+| writing cells -- a code agent | tool surface + note -> Python cell | Qwen2.5-Coder-7B-Instruct, Q4_0, 131,072 | on disk, unused |
+| JSON tool calls (`ToolCallingAgent`) | tool schemas -> one JSON call | Hermes-2-Pro-Mistral-7B, Q4_K_M, 32,768 | on disk (HF cache), unused |
+| planning between steps (`planning_interval`) | task + memory -> plan | DeepSeek-R1-Distill-Qwen-7B / 14B, Q4_0, 131,072 | on disk, unused |
+| long-context reading (a whole note or page) | many chunks -> summary | Meta-Llama-3.1-8B-Instruct, Q4_0, 131,072 | on disk, unused |
+
+The task column is my reading of which file suits which task, from each
+header's architecture, context length and chat template. No model has been
+run against any task here; a measured row needs a harness probe with a
+planted arm (a malformed-step rate with the grammar on and off, say).
+
+Two things the table shows that the design has to answer. First, GPT4All is
+already the llama.cpp runtime in this process, so a smolagents `Model` over
+GPT4All's `generate` adds no new engine -- but GPT4All exposes no grammar, so
+constrained output needs llama-cpp-python or llama-server beside it. Second, a
+GGUF ported from the browser (G-381) can be offered for a task by the same
+header fields this table was built from.
+
+### 10d. Open, for the reader
+
+* Does the reading in 10a -- one object, two faces, through the trie -- state
+  the vision, or does it miss something the verbatim holds?
+* Installing `smolagents` (Apache-2.0) and `llama-cpp-python` (MIT) are
+  downloads, and wait for a yes.
+
+Sources: [smolagents](https://github.com/huggingface/smolagents) (read through Context7 `/huggingface/smolagents`),
+[secure code execution](https://github.com/huggingface/smolagents/blob/main/docs/source/en/tutorials/secure_code_execution.md),
+[SECURITY.md](https://github.com/huggingface/smolagents/blob/main/SECURITY.md),
+[models reference](https://github.com/huggingface/smolagents/blob/main/docs/source/en/reference/models.md),
+[memory tutorial](https://github.com/huggingface/smolagents/blob/main/docs/source/en/tutorials/memory.md),
+[llama.cpp GBNF guide](https://raw.githubusercontent.com/ggml-org/llama.cpp/HEAD/grammars/README.md),
+[llama-server structured output](https://dominguesm.github.io/llama-crab/en/server/structured/).

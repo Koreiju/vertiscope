@@ -5904,3 +5904,26 @@ browsing can be ported in: a clicked download link shows its progress and,
 once complete, the file enters the workspace as a specialised artifact -- its
 own panel / cell type.*
 
+### 168. (2026-11-21) On the three decisions of COMPUTATION_GRAPH_EDITOR_SPEC §9b
+
+*2026-11-21 (verbatim), numbered as the spec's decisions were:*
+
+> on the three decisions: 
+>
+> 1. decisions on something at this level of immaturity shows that no consideration of the overall design vision was not properly or substantially made on the full context of the verbatim and the convergence of feature requirements to graphically design python programs and modules with a dual interface on kernel cells etc. 
+> 2. let's explore smolagents more in depth and quantized agentic integrations for different quantized model tasks (i/o and interfaces for tooling etc). Perhaps the verbatim and your understanding of the design vision would help direct this conversation. 
+> 3. the overall design vision means we're integrating on existing libraries to help the realization become absolutely complete to the vision.
+
+*Read as (168) -- a reading, to be confirmed:*
+*(a) [1] the §9b choices were posed too early: no choice is made library by
+library before a design that weighs the whole verbatim, and the requirements
+converge on ONE aim -- to design Python programs and modules GRAPHICALLY,
+with a dual interface (the graph and the code) over kernel cells;*
+*(b) [2] smolagents is to be explored in depth, together with quantized agent
+integrations: which quantized model serves which task, and the inputs,
+outputs and tool interfaces each needs -- directed by the verbatim and the
+design vision;*
+*(c) [3] the libraries are not alternatives to building: the vision is
+realised by INTEGRATING existing libraries, chosen and composed so that the
+result is complete to the vision.*
+
