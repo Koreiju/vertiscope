@@ -8059,7 +8059,8 @@ export function makeChecks(env) {
               let cids = [];
               for (let i = 0; i < 40 && !cids.length; i++) { await sleep(1000); cids = await plugin.sidecar.pageCids(PAGE); }
               out.stored_chunks = cids.length;
-              const size = async () => { try { return await wv.executeJavaScript("[innerWidth, innerHeight]"); } catch (e) { return null; } };
+              // DRAWN size: the page lays out at desktop width scaled to the cell (fitDesktopWidth, 11-07), so its CSS innerWidth no longer follows the pane; css px x zoom does.
+              const size = async () => { try { const z = wv.getZoomFactor(); const [w, h] = await wv.executeJavaScript("[innerWidth, innerHeight]"); return [Math.round(w * z), Math.round(h * z)]; } catch (e) { return null; } };
               const frame = cell.containerEl;
               frame.style.height = "300px"; await sleep(900); const small = await size();
               frame.style.height = "620px"; await sleep(900); const tall = await size();
@@ -11600,6 +11601,57 @@ export function makeChecks(env) {
           && clean.after_rename.includes("levels = 7") && clean.after_rename.includes("k: int = levels") && kept(clean.after_rename);
         const plantedOk = !!planted && planted.strip && planted.after_value.includes("depth = 3") && !planted.after_value.includes("depth = 7");
         return { pass: ok && plantedOk, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "D-54",
+      asks: "a notebook browser cell scans new chunks as the standalone browser does, and is a regular Obsidian tab (PLUGIN_GOAL 167 e): the same growing page (busy_feed, a paragraph every 1.5 s) in the standalone pane and in a ```browser cell -- the store's chunk count for it grows in both, the cell's growth at least 80% of the pane's; and the cell's view is reachable as a workspace leaf; null arm: a static page in the cell does not grow",
+      async run() {
+        const fixtures = await serveFixtures();
+        try {
+          const got = await evaluate(`(async () => {
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+            const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 250) await sleep(250); return !!(await ok()); };
+            const plugin = app.plugins.getPlugin("domvec-bridge");
+            const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+            const O = ${JSON.stringify(fixtures.origin)};
+            const feed = (tag) => O + "/busy_feed.html?words=60&every=1500&rounds=14&d54=" + tag + Date.now();
+            const count = async (u) => (await plugin.sidecar.pageCids(u)).length;
+            const grow = async (u) => { let a = 0, t = 0; for (; t < 12000 && !(a = await count(u)); t += 250) await sleep(250); await sleep(14000); const b = await count(u); return { first_ms: t, early: a, late: b, grew: b - a }; };
+            const out = {};
+            // the standalone pane
+            const b = plugin.activeBrowser();
+            let back = ""; try { back = b.webview.getURL(); } catch (e) { /* none */ }
+            const U1 = feed("pane");
+            b.go(U1);
+            out.pane = await grow(U1);
+            if (back) b.go(back);
+            // the notebook cell, and the static null arm
+            const cellArm = async (U) => {
+              const folder = "domvec-checks";
+              if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder);
+              const file = await app.vault.create(folder + "/d54 " + Date.now() + ".md", "# d54" + NL + NL + F + "browser" + NL + U + NL + F + NL);
+              const leaf = window.__domvecPlane.leaf();
+              try {
+                await leaf.openFile(file, { state: { mode: "preview" } });
+                const cell = () => [...window.__domvecNotebookBrowsers].find((c) => c.sourcePath === file.path && c.containerEl.offsetWidth > 0 && c.view && c.view.webview);
+                await until(() => !!cell(), 10000);
+                const c = cell();
+                const r = await grow(U);
+                r.tab = { in_workspace: !!c && app.workspace.getLeavesOfType("domvec-browser-view").includes(c.leaf),
+                          iterate: (() => { let hit = false; app.workspace.iterateAllLeaves((l) => { if (c && l === c.leaf) hit = true; }); return hit; })() };
+                return r;
+              } finally { try { leaf.detach(); } catch (e) { /* gone */ } try { await window.__domvecPlane.trash(file); } catch (e) { /* gone */ } }
+            };
+            out.cell = await cellArm(feed("cell"));
+            out.static = await cellArm(O + "/media_kinds.html?d54s=" + Date.now());
+            return out;
+          })()`, { timeout: 240000 });
+          const scans = got.pane && got.cell && got.pane.grew > 0 && got.cell.grew >= 0.8 * got.pane.grew;
+          const tab = got.cell && got.cell.tab && got.cell.tab.in_workspace;
+          const nullOk = got.static && got.static.grew === 0;
+          return { pass: !!(scans && tab && nullOk), evidence: { ...got, verdict: { scans: !!scans, tab: !!tab, null_static: !!nullOk }, purged: await tidyFixtures(fixtures.origin) } };
+        } finally { await fixtures.close(); }
       },
     },
     {
