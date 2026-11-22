@@ -11419,7 +11419,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-382",
-      asks: "the kernel's tool panels are pages, searchable and placed in 3D (PLUGIN_GOAL 170 a, 172 [2]; mortegon UR O.22): after POST /tool_panels the five tool://kernel/ pages are drawn as graph nodes, and the store's search finds the Database panel by what it does; planted: a nonsense query does not rank a tool panel first",
+      asks: "the kernel's tool panels are pages, searchable and placed in 3D (PLUGIN_GOAL 170 a, 172 [2]; mortegon UR O.22): after POST /tool_panels the six tool://kernel/ pages (the five objects and the editor) are drawn as graph nodes, and the store's search finds the Database panel by what it does; planted: a nonsense query does not rank a tool panel first",
       async run() {
         const got = await evaluate(`(async () => {
           ${PREP}
@@ -11429,15 +11429,72 @@ export function makeChecks(env) {
           const before = drawn().length;
           const r = await (await fetch(base + "/tool_panels", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
           let after = [];
-          for (let i = 0; i < 90; i++) { after = drawn(); if (new Set(after).size >= 5) break; await sleep(1000); }
+          for (let i = 0; i < 90; i++) { after = drawn(); if (new Set(after).size >= 6) break; await sleep(1000); }
           const top = async (q) => { const j = await (await fetch(base + "/search?q=" + encodeURIComponent(q) + "&k=5")).json();
                                      return (j.hits || []).map((h) => h.url); };
           const found = await top("read-only Cypher query over the store");
           const nonsense = await top("zebra marmalade quarterback");
           return { before, stored: (r.panels || []).length, drawn: [...new Set(after)].sort(), found: found.slice(0, 3), nonsense_top: nonsense[0] || null, ms: r.ms };
         })()`);
-        return { pass: got.stored === 5 && got.drawn.length === 5 && got.found.includes("tool://kernel/Database")
+        return { pass: got.stored === 6 && got.drawn.length === 6 && got.found.includes("tool://kernel/Database")
                        && !String(got.nonsense_top || "").startsWith("tool://"), evidence: got };
+      },
+    },
+    {
+      id: "G-386",
+      asks: "the editor's own calls from a kernel cell (PLUGIN_GOAL 172 [3]; mortegon 3A.7, the cards are the API): one cell calls create, link, invoke, commit and review, and the plane holds two new cards linked, the invoked card's output written into it, a subgraph card linking both, and a review question on the first; a link to a card that does not exist is refused, not invented; planted (plantNoCarry) no card appears",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const tag = (${planted} ? "p" : "c") + Date.now().toString(36);
+          const A = "g386a " + tag, B = "g386b " + tag, S = "g386s " + tag;
+          const P = (n) => "domvec/graph/" + n + ".md";
+          const driver = P("g386 driver " + tag);
+          const code = [
+            "create(" + JSON.stringify(A) + ", 'x = 21', 'notebook')",
+            "create(" + JSON.stringify(B) + ", \"print('INVOKED', 2 * 21)\", 'notebook')",
+            "link(" + JSON.stringify(A) + ", " + JSON.stringify(B) + ")",
+            "invoke(" + JSON.stringify(B) + ")",
+            "commit(" + JSON.stringify(S) + ", " + JSON.stringify(A) + ", " + JSON.stringify(B) + ")",
+            "review(" + JSON.stringify(A) + ", 'is 21 the right input?')",
+            "link(" + JSON.stringify(A) + ", 'g386 nowhere " + tag + "')",
+          ].join(NL);
+          plugin.editor.plantNoCarry = ${planted};
+          const before = { ...plugin.editor.stats };
+          const has = (path) => !!app.vault.getAbstractFileByPath(path);
+          const text = async (path) => { const f = app.vault.getAbstractFileByPath(path); return f ? await app.vault.read(f) : ""; };
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path: driver, text: F + "python" + NL + code + NL + F + NL });
+            const t0 = performance.now();
+            await plugin.onRunFence({ lang: "python", code, line: 0, path: driver });
+            out.ms = Math.round(performance.now() - t0);
+            out.cards = [A, B, S].map((n) => has(P(n)));
+            await until(() => d.linkedTo(P(A)).has(P(B)), 4000);
+            out.a_b_linked = d.linkedTo(P(A)).has(P(B));
+            await until(() => d.linkedTo(P(S)).has(P(A)) && d.linkedTo(P(S)).has(P(B)), 4000);
+            out.subgraph = [P(A), P(B)].map((q) => d.linkedTo(P(S)).has(q));
+            out.invoked = /INVOKED 42/.test(await text(P(B)));
+            out.review = /\[!question\] review/.test(await text(P(A)));
+            const st = plugin.editor.stats;
+            out.counts = ["create", "link", "invoke", "commit", "review", "refused"].map((k) => st[k] - before[k]);
+            out.refused = st.last && st.last.refused || null;
+            out.on_plane = [A, B, S].map((n) => !!d.panelOf(P(n)));
+            return out;
+          } finally {
+            plugin.editor.plantNoCarry = false;
+            for (const q of [driver, P(A), P(B), P(S)]) { try { await d.trash(q); } catch (e) { /* gone */ } }
+          }
+        })()`, { timeout: 180000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = !!clean && clean.cards.every(Boolean) && clean.a_b_linked && clean.subgraph.every(Boolean) && clean.invoked && clean.review
+          && JSON.stringify(clean.counts) === JSON.stringify([2, 1, 1, 1, 1, 1]) && /no card/.test(String(clean.refused || ""));
+        const plantedOk = !!planted && planted.cards.every((x) => !x);
+        return { pass: ok && plantedOk, evidence: { clean, planted } };
       },
     },
     {

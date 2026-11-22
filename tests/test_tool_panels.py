@@ -18,7 +18,7 @@ from domvec.obsidian import sidecar as sc
 
 def test_every_panel_line_is_a_call_the_kernel_has():
     panels = tp.render()
-    assert set(panels) == {"search", "Database", "WebBrowser", "Agent", "Vault"}
+    assert set(panels) == {"search", "Database", "WebBrowser", "Agent", "Vault", "editor"}
     names = ts.kernel_names()
     for name, text in panels.items():
         block = text.split("```python\n", 1)[1].split("```", 1)[0]
@@ -55,11 +55,11 @@ def test_the_route_stores_them_and_the_purge_removes_them(server):
     with urllib.request.urlopen(req, timeout=120) as r:
         got = json.load(r)
     urls = {p["url"] for p in got["panels"]}
-    assert urls == {tp.url_of(n) for n in ("search", "Database", "WebBrowser", "Agent", "Vault")}
+    assert urls == {tp.url_of(n) for n in ("search", "Database", "WebBrowser", "Agent", "Vault", "editor")}
     assert all(p["chunks"] >= 1 for p in got["panels"])
     assert urls <= set(pp._get(base, "/pages")["urls"])
     # a search finds a tool panel by what it does -- the point of O.22
     hits = ws.search("read-only Cypher query over the store", k=10)
     assert any(str(getattr(h, "url", "")).startswith("tool://") for h in hits)
     out = pp.purge(base, ["tool://"])
-    assert out["purged"] == 5 and out["left_under_prefixes"] == 0
+    assert out["purged"] == 6 and out["left_under_prefixes"] == 0

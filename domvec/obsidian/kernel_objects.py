@@ -90,6 +90,37 @@ if "search" not in globals():
         _domvec_asks.clear()
         return _json.dumps(got)
 
+if "create" not in globals():
+    # The editor's own calls (G-386; PLUGIN_GOAL 172 [3]; mortegon §3A.7: the
+    # agent authors with the user's primitives, "the cards are the API"). Each
+    # records an ASK; the plugin carries it out on the plane when the cell ends,
+    # by the same methods the gestures use -- the kernel never writes a card.
+
+    def create(name, body="", kind="slate"):
+        """Add a card to the plane: a slate (one typed row) or a notebook (a python cell)."""
+        _domvec_asks.append({"create": {"name": str(name), "body": str(body), "kind": str(kind)}})
+        return {"asked": "create", "name": str(name), "pending": True}
+
+    def link(a, b):
+        """Join two cards by an undirected link, as dragging one onto the other does."""
+        _domvec_asks.append({"link": [str(a), str(b)]})
+        return {"asked": "link", "cards": [str(a), str(b)], "pending": True}
+
+    def invoke(name):
+        """Run a card's cells in order, each lit as the run reaches it."""
+        _domvec_asks.append({"invoke": str(name)})
+        return {"asked": "invoke", "name": str(name), "pending": True}
+
+    def commit(name, *members):
+        """Keep a subgraph as one card that links each of its members."""
+        _domvec_asks.append({"commit": {"name": str(name), "members": [str(m) for m in members]}})
+        return {"asked": "commit", "name": str(name), "members": len(members), "pending": True}
+
+    def review(name, question):
+        """Ask the reader about a card before going on: the question is written onto it."""
+        _domvec_asks.append({"review": [str(name), str(question)]})
+        return {"asked": "review", "name": str(name), "pending": True}
+
 if "WebBrowser" not in globals():
     class _WebBrowser:
         """WebBrowser: the browser cell, from a kernel. `url` -- what it shows now; `go(url)` -- asked of

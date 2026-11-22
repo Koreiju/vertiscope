@@ -652,11 +652,11 @@ syntax carried over.
 
 ```python
 # the editor -- the graph itself, by the same calls the gestures make (mortegon §3A.7, S.1)
-create("scan for duckduckgo url", "{scan}")  # new: a node, panel and graph at once (N.2)
-link("DuckDuckGo", "scanner")              # new: left-click-drag in graph form (N.4)
-invoke("DuckDuckGo")                       # new: run the walk; nodes reveal as reached (O.9)
-commit("research agent")                   # new: keep a subgraph as one node (3A.7)
-review("DuckDuckGo", "is this the right source?")  # new: ask the reader before going on (3A.7)
+create("scan for duckduckgo url", "{scan}")  # exists: a node, panel and graph at once (N.2)
+link("DuckDuckGo", "scanner")              # exists: left-click-drag in graph form (N.4)
+invoke("DuckDuckGo")                       # exists: run the walk; nodes reveal as reached (O.9)
+commit("research agent")                   # exists: keep a subgraph as one node (3A.7)
+review("DuckDuckGo", "is this the right source?")  # exists: ask the reader before going on (3A.7)
 ```
 
 ### 11e. For the reader -- three questions the record does not settle

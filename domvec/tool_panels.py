@@ -5,7 +5,7 @@ UR O.22 had it ("search over data space seamlessly blends with search over the
 space of computational tasks"); and "yes" to their own address, `tool://`.
 
 One panel per kernel object (`search`, `Database`, `WebBrowser`, `Agent`,
-`Vault`), rendered from the kernel's own bootstrap (`kernel_objects`): each
+`Vault`, and `editor` for the plane's own calls, G-386), rendered from the kernel's own bootstrap (`kernel_objects`): each
 line one call, a comment at its end -- the call's purpose, from the first line
 of its docstring. The body behind a call is never shown (mortegon F.6; 167 c:
 "no way of exploring the underlying codebase"). Every line is checked against
@@ -25,6 +25,8 @@ from typing import Dict, List, Tuple
 
 ROOT = "tool://kernel/"
 PLANT_UNCHECKED = [False]
+#: The editor's own calls (G-386), one panel: the plane, by the gestures' methods.
+EDITOR = ("create", "link", "invoke", "commit", "review")
 
 
 def _first_line(doc: str) -> str:
@@ -51,6 +53,9 @@ def _calls() -> Dict[str, List[Tuple[str, str]]]:
         if isinstance(node, ast.FunctionDef) and node.name == "search" and node.col_offset <= 4:
             out["search"] = [("search(%s)" % _sig(node, False),
                               "the store's ranking, the web's (through the browser cell), or both")]
+        if isinstance(node, ast.FunctionDef) and node.name in EDITOR and node.col_offset <= 4:
+            out.setdefault("editor", []).append(("%s(%s)" % (node.name, _sig(node, False)),
+                                                 _first_line(ast.get_docstring(node) or "")))
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) \
                 and isinstance(node.value.func, ast.Name) and node.value.func.id in classes:
             name = node.targets[0].id

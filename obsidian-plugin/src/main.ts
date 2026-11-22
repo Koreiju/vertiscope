@@ -62,6 +62,7 @@ import { VaultLinks } from "./vaultlinks";
 import { PANEL_VIEW, PanelView } from "./panelview";
 import { COCKPIT_PATH, Cockpit } from "./cockpit";
 import { PLANE_FOLDER, PlaneDesk } from "./planepanels";
+import { EditorCalls } from "./editorcalls";
 import { BrowserPanel } from "./browserpanel";
 import { PlaneHalo } from "./planehalo";
 import { slateFolds } from "./slatefold";
@@ -1147,6 +1148,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }
   }
 
+  /** The editor's own calls from a cell -- create, link, invoke, commit, review (G-386). */
+  editor: EditorCalls = new EditorCalls(this as any);
   /** A cell's asks of the app, carried out (G-288). */
   askStats: { web: number; go?: number; last: string } = { web: 0, last: "" };
   /** Planted (G-279): the kernel's `WebBrowser.go` asks are not carried out. */
@@ -1221,6 +1224,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // asks the BROWSER CELL's web search, the same path as the 3D search
     // button's -- the kernel never fetches the web itself.
     for (const a of (reply.asks || []) as any[]) {
+      // The editor's own calls (G-386): carried out on the plane by the
+      // gestures' own methods, in the order the cell made them.
+      const said = await this.editor.carry(a);
+      if (said) { notes.push(said); continue; }
       if (a && typeof a.web === "string" && a.web.trim()) {
         this.askStats.web++;
         this.askStats.last = a.web;
