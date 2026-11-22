@@ -3468,6 +3468,34 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, out)
             return
 
+        if route == "code_rows":
+            # G-378 (PLUGIN_GOAL 167 c; mortegon M.2-M.5): a python cell as typed
+            # rows, and an edit to one row written back losslessly (LibCST).
+            # Pure: reads no store and writes no file -- the plugin writes the
+            # returned source into the note through its editor.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                from .. import code_rows as _cr
+                src = str(body.get("source") or "")
+                edit = body.get("edit") or None
+                if edit:
+                    op, name = str(edit.get("op") or ""), str(edit.get("name") or "")
+                    if op == "value":
+                        src = _cr.set_value(src, name, str(edit.get("value") or ""))
+                    elif op == "type":
+                        src = _cr.set_type(src, name, str(edit.get("type") or ""))
+                    elif op == "rename":
+                        src = _cr.rename(src, name, str(edit.get("to") or ""))
+                    else:
+                        raise ValueError("an edit is value, type or rename")
+                out = {"source": src, "rows": [r.to_json() for r in _cr.rows(src)], "edited": bool(edit)}
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "%s: %s" % (type(exc).__name__, exc)})
+                return
+            self._send(200, out)
+            return
+
         if route == "package":
             # G-375 (PLUGIN_GOAL 166 a, 167 a "Layout and indexer"): this
             # repository and installed packages are no longer indexed or
