@@ -12,8 +12,8 @@ mechanical: a parser returns the role's type, or a `TypedResult` whose
   chat      prompt -> markdown with code: a HYBRID -- its code blocks go to
             the compact code KG (`code_kg`), its prose may go to triplex
   jev       typed decisions (choice / score / yes-no) read from per-option
-            scores -- needs logits, not text: not runnable through gpt4all
-            (see the design, §4)
+            scores -- needs logits, not text: runs through llama-cpp-python,
+            never gpt4all (see the design, §4; `run_jev`)
 
 Models load from `MODEL_DIR` (where the sidecar's downloads install them).
 """
@@ -75,7 +75,9 @@ ROLES: Dict[str, Dict[str, Any]] = {
     "jev": {"file": "OpenJev-Flash-9B-Q4_K_M.gguf", "alt": "OpenJev-Q4_K_M.gguf",
             "inputs": {"state": "str", "questions": "dict[str, {type: choice|score|noul, instructions, criteria}]"},
             "outputs": {"answers": "dict[str, {option: probability}]"},
-            "runnable": False, "why": "reads per-option scores at the first output position; gpt4all exposes no logits"},
+            # Runs through llama-cpp-python, NOT gpt4all: the answer is the
+            # first output position's logits, which gpt4all does not expose.
+            "runtime": "llama_cpp"},
 }
 
 TRIPLEX_INSTRUCTION = (
@@ -233,6 +235,151 @@ def run_chat(prompt: str, device: Optional[str] = None, max_tokens: int = 800, r
     res = parse_chat(raw)
     res.role = role                                 # the role RUN, not the parser's name
     return res
+
+
+# --- jev: typed decisions read from first-position logits (G-237) ----------
+#
+# The request and readout follow the publisher's helper (openjev/openjev
+# `helper/shim.py`, `serve/SERVE.md`): one user turn, thinking off; options
+# lettered A-Z then a-z; ONE forward pass; each option's score is the
+# log-probability of its letter at the first output position; calibrated with
+# the constants SERVE.md reports its measurements under (T 0.85; yes/no slope
+# 1.829074, bias 0). Those were fitted on the vLLM path -- that they carry to
+# this GGUF is an assumption, stated in every answer's notes.
+
+JEV_LETTERS = [chr(65 + i) for i in range(26)] + [chr(97 + i) for i in range(26)]
+JEV_T = 0.85
+JEV_NOUL_T = 1.829074
+JEV_NOUL_BIAS = 0.0
+JEV_TEMPLATE = "<|im_start|>user\n{msg}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+#: Planted (G-237): option i is scored by letter i+1's logit -- the readout
+#: is shifted one place, so an obvious question's answer moves.
+PLANT_JEV_LETTER_SHIFT = [False]
+
+
+def jev_options(q: Dict[str, Any]):
+    """A question -> (kind, instructions text, [(key, description)]), or
+    raises ValueError naming what is malformed. Never guesses a type."""
+    kind = str(q.get("type") or "")
+    instr = q.get("instructions") or ""
+    instr = instr if isinstance(instr, str) else str(instr)   # pyrepr: the wording it was trained on
+    crit = q.get("criteria")
+    if kind == "choice":
+        if not isinstance(crit, dict) or not crit:
+            raise ValueError("a choice needs criteria: {option: description}")
+        opts = [(str(k), "" if v is None else str(v)) for k, v in crit.items()]
+    elif kind == "score":
+        if not isinstance(crit, list) or len(crit) < 2:
+            raise ValueError("a score needs criteria: at least two levels, lowest first")
+        opts = [(str(i), str(v)) for i, v in enumerate(crit)]
+        instr = (instr + " Rate along the ordered levels below (lowest first).").strip()
+    elif kind == "noul":
+        crit = crit if isinstance(crit, dict) else {}
+        opts = [("yes", str(crit.get("true") or "The statement is true.")),
+                ("no", str(crit.get("false") or "The statement is false."))]
+    else:
+        raise ValueError("type is one of choice, score, noul -- not %r" % kind)
+    if len(opts) > len(JEV_LETTERS):
+        raise ValueError("%d options; one pass reads at most %d" % (len(opts), len(JEV_LETTERS)))
+    return kind, instr, opts
+
+
+def jev_prompt(state: Any, instr: str, opts) -> str:
+    st = state if isinstance(state, str) else json.dumps(state, ensure_ascii=False)
+    lines = "\n".join("[%s] %s: %s" % (JEV_LETTERS[i], k, d) for i, (k, d) in enumerate(opts))
+    msg = "State:\n%s\n\nQuestion: %s\nOptions:\n%s\n\nAnswer with the letter of the best option only." % (st, instr, lines)
+    return JEV_TEMPLATE.format(msg=msg)
+
+
+def jev_readout(kind: str, opts, logprobs: List[float]) -> Dict[str, Any]:
+    """Per-option letter log-probabilities -> the typed, calibrated answer."""
+    import math
+    if kind == "noul":
+        a, b = logprobs[0], logprobs[1]
+        m = max(a, b)
+        py = math.exp(a - m) / (math.exp(a - m) + math.exp(b - m))
+        py = min(max(py, 1e-4), 1 - 1e-4)
+        z = math.log(py / (1 - py)) / JEV_NOUL_T + JEV_NOUL_BIAS
+        return {"type": "noul", "noul": round(1 / (1 + math.exp(-z)), 4)}
+    z = [lp / JEV_T for lp in logprobs]
+    m = max(z)
+    e = [math.exp(v - m) for v in z]
+    tot = sum(e)
+    p = [v / tot for v in e]
+    n = len(p)
+    probs = {k: round(p[i], 4) for i, (k, _) in enumerate(opts)}
+    best = max(range(n), key=lambda i: p[i])
+    if kind == "choice":
+        return {"type": "choice", "choice": opts[best][0], "probabilities": probs,
+                "confidence": round((p[best] - 1.0 / n) / (1 - 1.0 / n), 4)}
+    mid = (n - 1) / 2.0
+    umad = sum(abs(i - mid) for i in range(n)) / n or 1.0
+    dist = sum(p[i] * abs(i - best) for i in range(n))
+    return {"type": "score", "score": round(sum(i * p[i] for i in range(n)), 4),
+            "legend": {k: d for k, d in opts}, "probabilities": probs,
+            "confidence": round(max(0.0, 1 - dist / umad), 4)}
+
+
+_JEV: List[Any] = [None]
+
+
+def _jev_llm():
+    """OpenJev through llama-cpp-python. CPU by default: the 5.6 GB file does
+    not fit beside what this 8 GB GPU already holds; `DOMVEC_JEV_GPU_LAYERS`
+    offloads layers where it does."""
+    if _JEV[0] is None:
+        from llama_cpp import Llama
+        path = find(ROLES["jev"]["file"]) or find(ROLES["jev"].get("alt") or "")
+        if path is None:
+            raise FileNotFoundError("%s is not installed in %s" % (ROLES["jev"]["file"], " or ".join(map(str, MODEL_DIRS))))
+        _JEV[0] = Llama(str(path), n_ctx=4096, n_gpu_layers=int(os.environ.get("DOMVEC_JEV_GPU_LAYERS") or 0),
+                        logits_all=False, verbose=False)
+    return _JEV[0]
+
+
+def _first_logprobs(llm, prompt: str, letter_ids: List[int]) -> List[float]:
+    import numpy as np
+    toks = llm.tokenize(prompt.encode("utf-8"), add_bos=False, special=True)
+    llm.reset()
+    llm.eval(toks)
+    # The LAST position's logits, from the context's own buffer. NOT
+    # `llm.scores`: without `logits_all` llama-cpp-python 0.3 never writes
+    # them there, and the row read as all zeros -- every option 1/3, which
+    # the planted shift could not move (run 94). `logits_all` would hold
+    # n_ctx x 248k floats (~4 GB) to read one row.
+    ptr = llm._ctx.get_logits()
+    n = llm.n_vocab()
+    row = np.array(ptr[:n] if isinstance(ptr, (list, np.ndarray)) else np.ctypeslib.as_array(ptr, shape=(n,)),
+                   dtype=np.float64)
+    if not row.any():
+        raise RuntimeError("the first output position's logits are all zero -- nothing was read")
+    m = row.max()
+    lse = m + np.log(np.exp(row - m).sum())
+    return [float(row[i] - lse) for i in letter_ids]
+
+
+def run_jev(state: Any, questions: Dict[str, Dict[str, Any]], llm=None) -> TypedResult:
+    """jev: {state, questions} -> {answers}: each question's calibrated
+    distribution over ITS options, read from one forward pass. A malformed
+    question is refused by name; nothing is coerced."""
+    if not isinstance(questions, dict) or not questions:
+        return TypedResult("jev", error="questions: {name: {type, instructions, criteria}}")
+    parsed = {}
+    for name, q in questions.items():
+        try:
+            parsed[name] = jev_options(q if isinstance(q, dict) else {})
+        except ValueError as exc:
+            return TypedResult("jev", error="%s: %s" % (name, exc))
+    llm = llm or _jev_llm()
+    ids = [llm.tokenize(L.encode("utf-8"), add_bos=False, special=False)[0] for L in JEV_LETTERS]
+    notes = ["calibration: SERVE.md's vLLM constants (T %.2f, yes/no slope %.3f), assumed to carry to this GGUF"
+             % (JEV_T, JEV_NOUL_T)]
+    answers = {}
+    for name, (kind, instr, opts) in parsed.items():
+        n = len(opts)
+        use = ids[1:n + 1] if PLANT_JEV_LETTER_SHIFT[0] else ids[:n]
+        answers[name] = jev_readout(kind, opts, _first_logprobs(llm, jev_prompt(state, instr, opts), use))
+    return TypedResult("jev", value={"answers": answers}, notes=notes)
 
 
 def installed() -> Dict[str, Dict[str, Any]]:

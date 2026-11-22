@@ -12069,8 +12069,54 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-237",
+      asks: "the typed-decision role, jev, from a kernel cell (PLUGIN_GOAL 166, 179 'Per role', 181): run_role('jev', state=..., questions=...) reads OpenJev's first-position logits through llama-cpp-python and returns each question's calibrated distribution over ITS options -- a checkout page's 'which completes the purchase' picks Place order, 'is there a coupon field' is yes, and the job is a run of model://jev; planted jev-letter-shift: the readout scores the next letter and the choice moves off Place order",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge"), base = plugin.settings.sidecar.replace(/[/]+$/, "");
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const post = (path, body) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+          const tok = Date.now().toString(36), driver = "domvec/graph/g237 driver " + tok + ".md";
+          const code = ["import json",
+            "state = 'A checkout page shows: Subtotal $40, Shipping $5, a Place order button, and a Coupon field.'",
+            "qs = {'route': {'type': 'choice', 'instructions': 'Which action completes the purchase?', 'criteria': {'click_coupon': 'type a coupon', 'click_place_order': 'click Place order', 'go_back': 'return to cart'}},",
+            "      'coupon': {'type': 'noul', 'instructions': 'Does the page have a coupon field?'},",
+            "      'cost': {'type': 'score', 'instructions': 'How expensive is the order?', 'criteria': ['under $10', 'between $10 and $100', 'over $100']}}",
+            "r = run_role('jev', state=state, questions=qs)",
+            "a = (r['value'] or {}).get('answers') or {}",
+            "print('G237' + json.dumps({'ok': r['ok'], 'error': r['error'], 'answers': a}) + 'G237END')"].join(NL);
+          const before = ((await (await fetch(base + "/runs?note=" + encodeURIComponent("model://jev"))).json()).runs || []).length;
+          let out = {};
+          if (${planted}) await post("/plant", { name: "jev-letter-shift", on: true });
+          try {
+            await d.create("notebook", { path: driver, text: F + "python" + NL + code + NL + F + NL });
+            const reply = await plugin.onRunFence({ lang: "python", code, line: 0, path: driver });
+            const so = String((reply && reply.stdout) || ""), i = so.indexOf("G237"), j = so.indexOf("G237END");
+            out = i >= 0 && j > i ? JSON.parse(so.slice(i + 4, j)) : { error: String((reply && reply.error) || so).slice(-400) };
+          } finally {
+            if (${planted}) await post("/plant", { name: "jev-letter-shift", on: false });
+            try { d.panelOf(driver)?.leaf.detach(); } catch (e) {}
+            for (let k = 0; k < 3; k++) { await sleep(2500); const f = app.vault.getAbstractFileByPath(driver); if (!f) break; await app.vault.trash(f, true); }
+          }
+          const runs = ((await (await fetch(base + "/runs?note=" + encodeURIComponent("model://jev"))).json()).runs || []);
+          out.runs_added = runs.length - before;
+          out.planted = ${planted};
+          return out;
+        })()`, { timeout: 600000 });
+        const clean = await arm(false), planted = await arm(true);
+        const a = clean.answers || {}, route = a.route || {}, pr = (planted.answers || {}).route || {};
+        return { pass: !clean.error && clean.ok === true && route.choice === "click_place_order"
+                       && (route.probabilities || {}).click_place_order > 0.5
+                       && (a.coupon || {}).noul > 0.5 && (a.cost || {}).type === "score"
+                       && clean.runs_added === 1
+                       && planted.ok === true && pr.choice && pr.choice !== "click_place_order",
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-393",
-      asks: "a TYPED model role from a kernel cell over the one model table (THROUGH_STACK_SYNTHESIS 1a-b, PLUGIN_GOAL 181): run_role('triplex', cid=...) returns the role's type -- entities and triples -- for a stored chunk, and the job is a run of model://triplex reading that chunk (G-391); run_role('jev') is refused with its reason, never coerced",
+      asks: "a TYPED model role from a kernel cell over the one model table (THROUGH_STACK_SYNTHESIS 1a-b, PLUGIN_GOAL 181): run_role('triplex', cid=...) returns the role's type -- entities and triples -- for a stored chunk, and the job is a run of model://triplex reading that chunk (G-391); a role the table does not hold is refused with the roles it does, never coerced (jev became runnable, G-237)",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -12082,7 +12128,7 @@ export function makeChecks(env) {
           const code = ["import json",
             "r = run_role('triplex', cid=" + JSON.stringify(hit.cid) + ")",
             "v = r['value'] or {}",
-            "try:", "    run_role('jev', prompt='x'); jev = None", "except ValueError as e:", "    jev = str(e)",
+            "try:", "    run_role('nonesuch', prompt='x'); jev = None", "except ValueError as e:", "    jev = str(e)",
             "print('G393' + json.dumps({'ok': r['ok'], 'error': r['error'], 'entities': len(v.get('entities') or {}), 'triples': len(v.get('triples') or []), 'jev': jev}) + 'G393END')"].join(NL);
           const before = ((await (await fetch(base + "/runs?note=" + encodeURIComponent("model://triplex"))).json()).runs || []).length;
           let out = {};
@@ -12102,7 +12148,7 @@ export function makeChecks(env) {
           return out;
         })()`, { timeout: 240000 });
         return { pass: !got.error && got.ok === true && got.entities > 0 && got.triples > 0 && got.runs_added === 1 && got.run_reads_chunk
-                       && typeof got.jev === "string" && got.jev.includes("logits"), evidence: got };
+                       && typeof got.jev === "string" && got.jev.includes("role one of") && got.jev.includes("jev"), evidence: got };
       },
     },
     {

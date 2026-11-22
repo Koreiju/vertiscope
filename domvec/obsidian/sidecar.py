@@ -546,6 +546,8 @@ def _model_job(workspace, jid: str, body: Dict) -> None:
             res = models.run_triplex(text[:4000], list(body.get("entity_types") or ["PERSON", "ORGANIZATION", "LOCATION", "DATE", "CONCEPT", "PRODUCT"]),
                                      list(body.get("predicates") or ["IS_A", "PART_OF", "LOCATED_IN", "CREATED_BY", "USED_FOR", "RELATED_TO"]))
             job["source"] = {"cid": cid, "url": rows[0][1] if rows else ""}
+        elif job["role"] == "jev":
+            res = models.run_jev(body.get("state") or "", body.get("questions") or {})
         else:
             res = models.run_chat(str(body.get("prompt") or ""), role=job["role"])
         job.update(state="done" if res.ok else "error", result=res.to_json(), error=res.error,
@@ -951,6 +953,7 @@ _PLANTABLE = {
     "no-shape": ("domvec.typegen", "PLANT_NO_SHAPE"),                         # G-388: every repeat is a type
     "browse-host-only": ("domvec.browse", "PLANT_DOMAIN_HOST_ONLY"),          # G-205: the domain scope one level only
     "no-call-runs": ("domvec.obsidian.sidecar", "PLANT_NO_CALL_RUNS"),       # synthesis 1c: tool calls leave no run
+    "jev-letter-shift": ("domvec.models", "PLANT_JEV_LETTER_SHIFT"),        # G-237: the readout scores the next letter
     "placeholder-target": ("domvec.markdown", "PLANT_PLACEHOLDER_TARGET"),   # G-197
     "no-edge-memo": ("domvec.obsidian.layout", "PLANT_NO_EDGE_MEMO"),
     "no-declump": ("domvec.obsidian.layout", "PLANT_NO_DECLUMP"),            # 137(6)
