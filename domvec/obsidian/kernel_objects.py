@@ -197,6 +197,16 @@ if "similar" not in globals():
         _domvec_asks.append({"attach": str(cid)})
         return {"asked": "attach", "cid": str(cid), "pending": True}
 
+    def view(v):
+        """The ego view in first or third person ("first" / "third")."""
+        if str(v) not in ("first", "third"):
+            raise ValueError("view is 'first' or 'third'")
+        _domvec_asks.append({"view": str(v)})
+        return {"asked": "view", "view": str(v), "pending": True}
+
+# Its own guard: a kernel already holding the calls above (`similar` defined)
+# would otherwise never receive `browse` without a restart.
+if "browse" not in globals():
     def browse(query=None, scope="web", of="", down=None, up=False, act=None, k=10):
         """The browser centroid's ONE tool (G-205): every move is this call.
         `query`+`scope` ("web" | "domain" | "page", `of` a page url) makes the
@@ -215,13 +225,6 @@ if "similar" not in globals():
             raise ValueError((_json.loads(e.read() or b"{}") or {}).get("error") or str(e))
         _domvec_asks.extend(got.get("asks") or [])
         return got.get("artifact")
-
-    def view(v):
-        """The ego view in first or third person ("first" / "third")."""
-        if str(v) not in ("first", "third"):
-            raise ValueError("view is 'first' or 'third'")
-        _domvec_asks.append({"view": str(v)})
-        return {"asked": "view", "view": str(v), "pending": True}
 
 if "WebBrowser" not in globals():
     class _WebBrowser:

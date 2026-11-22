@@ -12069,6 +12069,65 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-205d",
+      asks: "browse from a KERNEL CELL (G-205: one surface for the agent and the cell): a cell's browse(query, scope='domain', of) returns the artifact with its levels, browse(down=cid) moves the reader's own browser cell to that result's page when the cell ends, and two moves in one call are refused; planted plantNoToolAsks: the same cell makes the artifact but the browser cell does not move",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge");
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const b = plugin.activeBrowser();
+          if (!b) return { error: "no browser cell" };
+          const shown = () => String(b.shownUrl ? b.shownUrl() : b.webview.getURL()).split("#")[0];
+          const HOME = "https://en.wikipedia.org/wiki/Radix_tree";
+          if (shown() !== HOME) { b.go(HOME); for (let i = 0; i < 40 && shown() !== HOME; i++) await sleep(300); }
+          const driver = "domvec/graph/g205d driver " + (${planted} ? "p" : "c") + Date.now().toString(36) + ".md";
+          const code = [
+            "import json",
+            "a = browse(query='90s aesthetic fashion', scope='domain', of='https://aesthetics.fandom.com/wiki/Hipster', k=4)",
+            "levels = sorted({h['level'] for h in a['results']})",
+            "top = a['results'][0]",
+            "after = browse(down=top['cid'])",
+            "try:",
+            "    browse(query='x', up=True); refused = False",
+            "except ValueError:",
+            "    refused = True",
+            "print('G205D' + json.dumps({'levels': levels, 'n': len(a['results']), 'url': top['url'], 'cursor': after['cursor'], 'refused': refused}) + 'G205END')",
+          ].join(NL);
+          plugin.plantNoToolAsks = ${planted};
+          const out = { planted: ${planted}, before: shown() };
+          try {
+            await d.create("notebook", { path: driver, text: F + "python" + NL + code + NL + F + NL });
+            const reply = await plugin.onRunFence({ lang: "python", code, line: 0, path: driver });
+            const so = String((reply && reply.stdout) || "");
+            const i = so.indexOf("G205D"), j = so.indexOf("G205END");
+            out.cell = i >= 0 && j > i ? JSON.parse(so.slice(i + 5, j)) : { error: String((reply && reply.error) || "").slice(-300), stdout: so.slice(-200) };
+            const want = out.cell && out.cell.url ? String(out.cell.url).split("#")[0] : "";
+            for (let k = 0; k < 30 && shown() !== want; k++) await sleep(300);
+            out.after = shown();
+            out.said = (plugin.toolAskLog || []).slice(-2);
+            return out;
+          } finally {
+            plugin.plantNoToolAsks = false;
+            try { d.panelOf(driver)?.leaf.detach(); } catch (e) {}
+            for (let k = 0; k < 3; k++) {
+              await sleep(2500);
+              const f = app.vault.getAbstractFileByPath(driver);
+              if (!f) break;
+              await app.vault.trash(f, true);
+            }
+          }
+        })()`, { timeout: 180000 });
+        const planted = await arm(true), clean = await arm(false);
+        const c = clean.cell || {}, p = planted.cell || {};
+        const same = (a, b) => String(a || "").split("#")[0] === String(b || "").split("#")[0];
+        return { pass: !clean.error && Array.isArray(c.levels) && c.levels.includes("host") && c.levels.length >= 2 && c.refused === true
+                       && c.cursor && c.cursor.at === "trace" && same(clean.after, c.url)
+                       && !planted.error && p.url && !same(planted.after, p.url),
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-205c",
       asks: "the browser centroid NODE in 3D (G-205, BROWSER_CENTROID_DESIGN §4.3): an artifact made outside the card (as an agent's call) puts a node in the world at the centroid of its results as drawn -- a chunk's node, else its page's -- with one ray per placed result; a click on it opens the artifact's card on the plane; planted plantAtOrigin: the node is not at its results' centroid",
       async run() {
