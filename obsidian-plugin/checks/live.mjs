@@ -20471,6 +20471,7 @@ export function makeChecks(env) {
           if (!pb.map.size) return { error: "the overlay's map never loaded" };
           let oracle = await fetch(base + "/page_map?url=" + encodeURIComponent(wv.getURL())).then((r) => r.json());
           pb.latencies.length = 0;
+          if (pb.pushedHandleMs) pb.pushedHandleMs.length = 0;
           const count = await wv.executeJavaScript(
             "document.querySelectorAll('#mw-content-text h2, #mw-content-text h3').length");
           const UNION = "(function(xs){var l=1e9,t=1e9,r=-1e9,b=-1e9,any=false;" +
@@ -20507,18 +20508,23 @@ export function makeChecks(env) {
               if (h && h.at > moved + 90) break;
               if (!h && performance.now() - moved > 250) break;
             }
+            // The STORED unit the hover resolved to. On the pushed path (D-40)
+            // \`cid\` is the page's own provisional id by design and the store's
+            // chunk is \`stored\`; reading \`cid\` alone scored every pushed hover
+            // as unresolved (2026-11-22, runs 24-27).
+            const unit = h ? (h.stored || (String(h.cid || "").startsWith("f:") ? null : h.cid)) : null;
             const o = view.containerEl.querySelector(".domvec-chunk-outline");
             const r = o && o.style.display !== "none" ? o.getBoundingClientRect() : null;
             const outline = r ? [r.left, r.top, r.width, r.height] : null;
             let off = null;
-            if (h && outline) {
+            if (unit && outline) {
               // The truth for THIS chunk: landing re-captures and re-partitions
               // the page for a few seconds, so a hover can resolve to a chunk
               // newer than the snapshot taken at the start -- read again then.
-              if (!(oracle.chunks || {})[h.cid]) {
+              if (!(oracle.chunks || {})[unit]) {
                 oracle = await fetch(base + "/page_map?url=" + encodeURIComponent(wv.getURL())).then((r) => r.json());
               }
-              const xs = (oracle.chunks || {})[h.cid] || [];
+              const xs = (oracle.chunks || {})[unit] || [];
               const box0 = await wv.executeJavaScript(UNION + "(" + JSON.stringify(xs.slice(0, 400)) + ")");
               const box = box0 ? box0.map((v) => v * Z) : box0;
               if (box) {
@@ -20530,7 +20536,7 @@ export function makeChecks(env) {
               }
             }
             const under = await wv.executeJavaScript("(function(x,y){var e=document.elementFromPoint(x,y);return e?e.tagName+(e.className?'.'+String(e.className).split(' ')[0]:''):null;})(" + x + "," + y + ")");
-            return { cid: h && h.cid, outline, off, under, has_outline: !!outline };
+            return { cid: unit, page_cid: h && h.cid, outline, off, under, has_outline: !!outline };
           }
           const pairs = [];
           for (let j = 0; j < count && pairs.length < 6; j++) {
@@ -20563,7 +20569,8 @@ export function makeChecks(env) {
             const b = await hoverAt(t.p[0], t.p[1]);
             pairs.push({ heading: a, paragraph: b });
           }
-          const lat = pb.latencies.slice().sort((x, y) => x - y);
+          // The poll path records latencies; the pushed path (D-40), the one in use, pushedHandleMs.
+          const lat = (pb.latencies.length ? pb.latencies : (pb.pushedHandleMs || [])).slice().sort((x, y) => x - y);
           const g = app.workspace.getLeavesOfType("domvec-graph-view")[0];
           const last = pairs.length ? pairs[pairs.length - 1].paragraph : null;
           const node = g && g.view && g.view.graph && last && last.cid
