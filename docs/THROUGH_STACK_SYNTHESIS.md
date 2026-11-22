@@ -90,6 +90,14 @@ life, and the bootstrap never restores it. That is the opposite of "may only
 tighten": nothing checks that a replacement keeps the core's signature or
 type.
 
+**Tested 2026-11-22** (`tests/test_kernel_slots.py`): confirmed -- a cell's
+`def search(...)`, and even a plain `view = [...]`, replaces the core call
+for the kernel's life. Enforcing "may only tighten" by re-installing the core
+would clobber readers' ordinary variables (`view`, `check`, `types`, `pages`,
+`chunk`, `focus` are core names). Options, for the reader: leave it; keep the
+core calls also under one reserved name (`domvec.search`, never shadowed);
+or warn when a cell shadows a core name.
+
 ## 2. Routes no document names (undocumented APIs)
 
 Read from `sidecar.py`'s dispatch against every `docs/*.md`:
@@ -123,3 +131,10 @@ the graph editor" (held as a reading), would then be a NOTE built only from
 these: `browse`/`search` -> `run_role` (typed) -> a check cell ->
 `cpg_mutate` -> `create` + `review` for anything new, every step a recorded
 run drawn in the signal flow. No new subsystem.
+
+## 4. Done since (2026-11-22)
+
+* **Item 1 -- every call a run:** G-391, live run 88 (`50e79b4`).
+* **Item 3 -- review's answer path:** G-392, live run 90 (`caded6c`).
+* **Item 4 -- slots:** tested, held for the reader (1g above).
+* **Item 2 -- one model table:** waits on which file is "chat".
