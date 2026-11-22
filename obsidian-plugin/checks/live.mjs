@@ -2947,10 +2947,11 @@ export function makeChecks(env) {
             // Every drain SINCE THE VISIT BEGAN, whatever url it was for: a
             // page that routes itself mid-visit (YouTube -> a Shorts page) left
             // its drains filed under the url it started on (2026-09-27).
-            const tr = (P.listAll ? P.listAll() : P.list()).filter((t) => t.kind === "live" && t.t0 >= t0 && t.url && !t.url.startsWith("about:"));
-            const ov = tr.map((t) => t.stages.drain_to_overlay).filter((x) => typeof x === "number").sort((a, c) => a - c);
-            // The overlay's OWN cost -- placing the boxes, no frame waited for.
-            const placed = tr.map((t) => t.stages.overlay_placed).filter((x) => typeof x === "number").sort((a, c) => a - c);
+            // Read AFTER the idle watch below, so the page's late drains count
+            // too: run 50 read YouTube's 20 drains in the first 16 s -- none
+            // with chunks -- and failed it on null timings while 28 drains
+            // with chunks arrived in the idle watch that followed.
+            const visit = () => (P.listAll ? P.listAll() : P.list()).filter((t) => t.kind === "live" && t.t0 >= t0 && t.url && !t.url.startsWith("about:"));
             // And the frame rate here: Chromium throttles a covered window to
             // ONE frame a second (measured 2026-09-27: 984-1027 ms per frame,
             // visible and focused), so a paint time taken then is the
@@ -2962,9 +2963,7 @@ export function makeChecks(env) {
               fr.push(performance.now() - f0);
             }
             fr.sort((a, c) => a - c);
-            const d3 = tr.map((t) => t.stages.drain_to_3d).filter((x) => typeof x === "number").sort((a, c) => a - c);
             const pct = (xs, q) => xs.length ? Math.round(xs[Math.min(xs.length - 1, Math.floor(xs.length * q))] * 10) / 10 : null;
-            const errs = tr.filter((t) => /error|failed/i.test(String(t.facts.why || ""))).length;
             let page = null;
             try {
               page = await b.webview.executeJavaScript("(function(){var vis=function(e){var r=e.getBoundingClientRect();return r.width>8&&r.height>8};" +
@@ -2978,8 +2977,21 @@ export function makeChecks(env) {
             const before = (P.listAll ? P.listAll() : P.list()).filter((t) => t.kind === "live" && t.url === here && t.facts.chunks_in_drain).length;
             await sleep(5000);
             const idle = (P.listAll ? P.listAll() : P.list()).filter((t) => t.kind === "live" && t.url === here && t.facts.chunks_in_drain).length - before;
+            const tr = visit();
+            const ov = tr.map((t) => t.stages.drain_to_overlay).filter((x) => typeof x === "number").sort((a, c) => a - c);
+            // The overlay's OWN cost -- placing the boxes, no frame waited for.
+            const placed = tr.map((t) => t.stages.overlay_placed).filter((x) => typeof x === "number").sort((a, c) => a - c);
+            const d3 = tr.map((t) => t.stages.drain_to_3d).filter((x) => typeof x === "number").sort((a, c) => a - c);
+            const errs = tr.filter((t) => /error|failed/i.test(String(t.facts.why || ""))).length;
+            // Why each drained chunk was or was not outlined (browser.ts's
+            // "flash" fact): only a FLASHED chunk is something the overlay is
+            // asked to draw. A revisit's chunks are covered -- stored and
+            // unchanged -- and draw nothing, correctly (run 51: archive.org
+            // 43 chunks drained, Instagram 6, 0 overlay samples each).
+            const flash = { flashed: 0, covered: 0, unstored: 0, offscreen: 0, nobox: 0 };
+            for (const t of tr) { const f = t.facts.flash; if (f) for (const k in flash) flash[k] += f[k] || 0; }
             return { url: ${JSON.stringify(url)}, landed: here, planted: ${planted},
-                     drains: tr.length, drains_with_chunks: tr.filter((t) => t.facts.chunks_in_drain).length,
+                     drains: tr.length, overlay_samples: ov.length, flash, drains_with_chunks: tr.filter((t) => t.facts.chunks_in_drain).length,
                      chunks_drained: tr.reduce((s, t) => s + (t.facts.chunks_in_drain || 0), 0),
                      overlay_p50: pct(ov, 0.5), overlay_p95: pct(ov, 0.95), to3d_p50: pct(d3, 0.5),
                      overlay_placed_p95: pct(placed, 0.95), frame_ms_p50: Math.round(fr[2]),
@@ -3003,9 +3015,15 @@ export function makeChecks(env) {
           const why = [];
           if (r.error) why.push("error");
           if (!(r.stored && r.stored.chunks > 0)) why.push("nothing stored");
-          // The overlay's own work, always; the paint only when frames flow.
-          if (!(r.overlay_placed_p95 !== null && r.overlay_placed_p95 !== undefined && r.overlay_placed_p95 < 50)) why.push("overlay placement p95 >= 50 ms");
-          if (r.frame_ms_p50 < 50 && !(r.overlay_p95 !== null && r.overlay_p95 < 100)) why.push("overlay paint p95 >= 100 ms at full frame rate");
+          // The overlay's own work, always; the paint only when frames flow --
+          // and only where a chunk was flashed: a page whose drained chunks
+          // were all covered asked the overlay nothing (reported, not judged).
+          r.overlay_asked = !!(r.flash && r.flash.flashed > 0) || (r.overlay_samples || 0) > 0;
+          if (r.overlay_asked && !(r.overlay_placed_p95 !== null && r.overlay_placed_p95 !== undefined && r.overlay_placed_p95 < 50)) why.push("overlay placement p95 >= 50 ms");
+          if (r.overlay_asked && r.frame_ms_p50 < 50 && !(r.overlay_p95 !== null && r.overlay_p95 < 100)) why.push("overlay paint p95 >= 100 ms at full frame rate");
+          // A flashed chunk the overlay never timed is a dead overlay, not a
+          // quiet page.
+          if (r.flash && r.flash.flashed > 0 && !(r.overlay_samples > 0)) why.push("flashed chunks, no overlay paint");
           if (!(r.first_3d_ms >= 0 && r.first_3d_ms < 8000)) why.push("no 3D node within 8 s");
           if (r.page && r.page.images > 2 && !(r.stored && r.stored.kinds && r.stored.kinds.images > 0)) why.push("shows pictures, stores none");
           if (r.capture_errors) why.push("capture errors");
@@ -3019,8 +3037,11 @@ export function makeChecks(env) {
         plantedRow.stored = await ask("/page_status?url=" + encodeURIComponent(plantedRow.landed)).then((s) => ({ chunks: s.chunks, kinds: s.kinds })).catch(() => ({}));
         plantedRow.failed = judge(plantedRow);
         const passing = rows.filter((r) => !r.failed.length).length;
-        return { pass: passing === rows.length && plantedRow.failed.length > 0,
-                 evidence: { passing, of: rows.length, rows, planted: plantedRow } };
+        // And the overlay was asked SOMETHING: at least half the pages had a
+        // flashed chunk, or "not asked" could pass a dead overlay everywhere.
+        const asked = rows.filter((r) => r.overlay_asked).length;
+        return { pass: passing === rows.length && asked * 2 >= rows.length && plantedRow.failed.length > 0,
+                 evidence: { passing, of: rows.length, overlay_asked: asked, rows, planted: plantedRow } };
       },
     },
     {
