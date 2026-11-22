@@ -6511,17 +6511,29 @@ export function makeChecks(env) {
               if (r >= 1) clear++; else touching++;
             });
             ratio.sort((a, b) => a - b);
-            return { level: v.level || "pages", nodes: ns.length, clear, touching, coincident,
+            return { level: v.level || "pages", drawn: drawn(), nodes: ns.length, clear, touching, coincident,
                      share: Math.round(clear / ns.length * 1000) / 1000,
                      gap_over_radii_p50: ratio.length ? Math.round(ratio[Math.floor(ratio.length / 2)] * 100) / 100 : null };
           };
           const toggle = () => [...v.contentEl.querySelectorAll("button")].find((x) => x.textContent === (v.level === "chunk" ? "chunks" : "pages"))?.click();
+          // Wait on what is DRAWN, not on a delay: the toggle flips v.level at
+          // once, but the graph keeps the old level's nodes until the load
+          // lands. Run 2026-11-22 01:36 (GPU saturated) read the chunk
+          // picture twice more -- "pages_rebuilt" 6475 nodes, and the planted
+          // arm identical to clean, the plants never drawn.
+          const drawn = () => { const ns = (v.graph ? v.graph.graphData().nodes : []).filter((n) => !n.force);
+                                const pg = ns.filter((n) => n.level === "page").length;
+                                return { nodes: ns.length, pages: pg, chunks: ns.length - pg }; };
           const toChunk = async () => {
             if (v.level !== "chunk") toggle();
-            for (let i = 0; i < 120; i++) { await sleep(500); if (v.level === "chunk" && v.graph && v.graph.graphData().nodes.length > 50) break; }
+            for (let i = 0; i < 240; i++) { await sleep(500); const d = drawn(); if (v.level === "chunk" && d.chunks > 50 && d.pages === 0) break; }
             await sleep(9000);
           };
-          const toPages = async () => { if (v.level === "chunk") toggle(); await sleep(6000); };
+          const toPages = async () => {
+            if (v.level === "chunk") toggle();
+            for (let i = 0; i < 240; i++) { await sleep(500); const d = drawn(); if (v.level !== "chunk" && d.pages > 0 && d.chunks === 0) break; }
+            await sleep(2000);
+          };
           // The SETTLED picture: a rebuilt view glides its nodes to their
           // places for ~8 s, and overlaps come and go while they travel
           // (2026-10-30: 229 -> 712 -> 0 touching at 1.5, 6, 10 s). How long
@@ -6569,10 +6581,14 @@ export function makeChecks(env) {
               && String(ns[i].title || "") !== String(ns[j].title || "")) differentText++;
         }
         got.fit_coincident_different_text = differentText;
-        const ok = (c) => c && c.nodes > 0 && c.share >= 0.95;
+        // Each census of the level it names (a stale picture scored twice is
+        // not a measurement).
+        const ok = (c) => c && c.nodes > 0 && c.share >= 0.95
+                       && (c.level === "chunk" ? c.drawn.pages === 0 : c.drawn.chunks === 0);
         return {
           pass: ok(got.pages) && ok(got.chunk) && ok(got.pages_rebuilt) && differentText === 0
-             && !!got.planted && got.planted.share < got.chunk.share - 0.05,
+             && !!got.planted && got.planted.level === "chunk" && got.planted.drawn.pages === 0
+             && got.planted.share < got.chunk.share - 0.05,
           evidence: got,
         };
       },
