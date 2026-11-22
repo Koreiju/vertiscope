@@ -5961,3 +5961,17 @@ dataflow's direction is computed, not drawn;*
 "if only architectural ambiguity" read as: unless a concrete reason to keep
 the tick appears, the tick was kept only for want of a decision.*
 
+### 171. (2026-11-21) Real-time streaming on CUDA, unblocked
+
+*2026-11-21 (verbatim), while the local GGUF model for the agent step
+(G-384) was being written:*
+
+> make sure we maintain real-time output latency and live-streaming token outputs with minimal most lag, and ensure the models can stream continuously on CUDA unblocked by other GPU processes.
+
+*Read as (171) -- a reading, to be confirmed:*
+*(a) the agent's tokens stream live as they are made, with the least lag
+between a token being generated and being shown;*
+*(b) the models run on CUDA;*
+*(c) a model streams continuously -- other work on the GPU (the embedder, a
+second model) does not block or stall it.*
+
