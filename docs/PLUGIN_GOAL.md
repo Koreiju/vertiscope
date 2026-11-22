@@ -5870,3 +5870,37 @@ interface design for notebook-kernel-style workflows with bite-sized ~25-line
 tools for quantized models.*
 *Open questions this reading cannot settle are listed in the spec's §Open.*
 
+### 167. (2026-11-21) Answers to the six open questions of COMPUTATION_GRAPH_EDITOR_SPEC §6
+
+*2026-11-21 (verbatim), numbered as the spec's questions were:*
+
+> 1. Layout and indexer
+> 2. we have a table at the very beginning of our readme on what would become the 25-line tool surfaces as python calls only with comments at the end, or something equally minimal 
+> 3. see above
+> 4. tool panels are simple python code artifacts, but with special read-only and no way of exploring the underlying codebase linked to the artifacts. they are implicit calls into the world itself. However, regular code artifacts share the same capabilities of being 'called' in a terminal or similar for kernel cells. they would have, though, the full capabilities of exploring and graph editing. don't forget, though, that we must maintain our dialect on representation styles of a computation graph and notebook cells very carefully. to that end, I don't think browsers in notebook cell form are either able to scan new chunks at all, and also not able to be interoperable with regular obsidian tabs as our regular web browser, but these abilities must be there as well.  
+> 5. marimo style
+> 6. no. but functionality for generally porting in quantized GGUFs as specialized artifacts straight from web browser scans would be necessary, where clicked download links would then show and enter the workspace once complete as specialized panel/cell types in themselves.
+
+*Read as (167) -- a reading, to be confirmed:*
+*(a) [Q1] the repository's code leaves BOTH the 3D layout and the indexer
+(code-sync and the `code://` ingest) -- not only the projector;*
+*(b) [Q2, Q3] the README's opening table of panes (3D graph, the ego, browser
+cell, panels, notebook / slates, search) is the list of toolspaces; each
+becomes a tool surface of ~25 lines written as Python CALLS ONLY, a comment at
+the end of each line, "or something equally minimal";*
+*(c) [Q4] a TOOL PANEL is a simple Python code artifact, READ-ONLY, with no
+way to explore the codebase behind it -- its calls are "implicit calls into
+the world itself"; a REGULAR code artifact can be called the same way (from a
+terminal, or as a kernel cell) and ALSO has full exploring and graph editing;*
+*(d) [Q4] the dialect -- how a computation graph and notebook cells are
+represented -- is to be kept with great care;*
+*(e) [Q4] a DEFECT reported: a browser in notebook-cell form (i) does not scan
+new chunks and (ii) does not interoperate with regular Obsidian tabs as the
+regular web browser does; both abilities must be there;*
+*(f) [Q5] dataflow is marimo style: a cell's dependencies are read from the
+names it defines and reads, and dependents re-run;*
+*(g) [Q6] no model downloads now; but a GGUF quantized model found while
+browsing can be ported in: a clicked download link shows its progress and,
+once complete, the file enters the workspace as a specialised artifact -- its
+own panel / cell type.*
+

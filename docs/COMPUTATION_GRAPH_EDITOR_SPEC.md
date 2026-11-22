@@ -178,7 +178,23 @@ the untracked mutation: a tool that changes the store in place (capture,
 purge, pin) re-runs nothing downstream, so such tools would have to return a
 new value, or name a version, to be visible as dataflow.
 
-## 6. Open -- the reader's to settle
+## 6. Answered (2026-11-21, PLUGIN_GOAL 167) -- rows G-375..G-381, D-54
+
+| Q | Answer (verbatim) | Row |
+|---|---|---|
+| 1 codebase | "Layout and indexer" | `G-375` |
+| 2 the 25-line bound | "we have a table at the very beginning of our readme on what would become the 25-line tool surfaces as python calls only with comments at the end, or something equally minimal" | `G-377` |
+| 3 which toolspaces | "see above" -- the README's pane table | `G-376` |
+| 4 who writes tools | tool panels read-only, "implicit calls into the world itself"; regular code artifacts callable the same way plus full exploring and graph editing; the dialect kept "very carefully"; the notebook browser cell must scan and act as a regular tab | `G-378`, `G-379`, `D-54` |
+| 5 dataflow | "marimo style" | `G-380` |
+| 6 models | "no", but GGUFs ported in from browser download links as their own artifact type | `G-381` |
+
+So §4's grouping by sidecar route is withdrawn: the toolspaces are the
+README's six panes (3D graph, the ego, browser cell, panels, notebook /
+slates, search), and a tool surface is calls only, a comment at each line's
+end.
+
+## 6b. The questions as they were asked
 
 1. **How far does the codebase go?** Out of the 3D layout only (the store
    and the code knowledge graph kept, e.g. for agents to search), or out of
