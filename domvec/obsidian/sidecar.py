@@ -1246,6 +1246,8 @@ PLANT_CODE_SYNC_PREPARE_LOCKED = [False]
 #: Planted: the plugin's TypeScript is not walked (`code://repo/` only), as
 #: before 2026-11-15.
 PLANT_NO_PLUGIN_SOURCE = [False]
+#: Planted: the repository's code-sync thread runs again (G-375 retired it).
+PLANT_CODE_SYNC = [False]
 
 
 def _sync_code(workspace, *, limit: Optional[int] = None, forget=()) -> Dict:
@@ -6141,8 +6143,12 @@ def serve(workspace, port: int = 8787, *, block: bool = True,
                          name="domvec-poison-watch", daemon=True).start()
         threading.Thread(target=_warm_containment, args=(workspace, stop),
                          name="domvec-warm-containment", daemon=True).start()
-        threading.Thread(target=_code_sync_forever, args=(workspace, stop),
-                         name="domvec-code-sync", daemon=True).start()
+        # G-375 (PLUGIN_GOAL 166 a, 167 a "Layout and indexer"): the
+        # repository is no longer synced into the store -- only code scanned
+        # in the browser is indexed. Planted `PLANT_CODE_SYNC`: synced again.
+        if PLANT_CODE_SYNC[0]:
+            threading.Thread(target=_code_sync_forever, args=(workspace, stop),
+                             name="domvec-code-sync", daemon=True).start()
     if workspace is not None:
         threading.Thread(target=_build_codegraph, args=(workspace,),
                          name="domvec-codegraph", daemon=True).start()

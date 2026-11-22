@@ -56,6 +56,8 @@ from typing import Callable, Deque, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
+from ..graphstore import projectable as _projectable
+
 #: The largest sample a fit is made from. Every row beyond it is placed by
 #: `transform`, which is how the stream places everything anyway.
 SAMPLE_CAP = 4000
@@ -621,7 +623,7 @@ class ChunkProjector:
         keep, gone, waiting = [], [], []
         for cid, chunk, vector in read:
             if chunk is None or chunk.redundant or (
-                    chunk.group_of and chunk.group_of != cid) or cid in self.not_drawable:
+                    chunk.group_of and chunk.group_of != cid) or cid in self.not_drawable or not _projectable(chunk.url):
                 gone.append((cid, chunk.url if chunk is not None else None))
             elif not vector or not any(vector):
                 waiting.append(cid)
@@ -2297,6 +2299,7 @@ class PageProjector(ChunkProjector):
             for cid, chunk, vector in read:
                 drawable = (chunk is not None and not chunk.redundant
                             and not (chunk.group_of and chunk.group_of != cid)
+                            and _projectable(chunk.url)
                             and vector and any(vector))
                 was = self.url_of.get(cid)
                 if drawable:
@@ -2322,7 +2325,8 @@ class PageProjector(ChunkProjector):
                         self.by_url.get(was, set()).discard(cid)
                         pages.add(was)
                 elif was is not None and (chunk is None or chunk.redundant or
-                                          (chunk.group_of and chunk.group_of != cid)):
+                                          (chunk.group_of and chunk.group_of != cid)
+                                          or not _projectable(chunk.url)):
                     self.vec.pop(cid, None)
                     self.url_of.pop(cid, None)
                     self.by_url.get(was, set()).discard(cid)

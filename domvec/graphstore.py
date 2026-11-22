@@ -63,6 +63,22 @@ def open_kuzu(path, pool_bytes: int):
     return db, kuzu.Connection(db)
 
 
+
+#: **Only code scanned in the browser is projected** (G-375; PLUGIN_GOAL 166 a:
+#: "only code obtained from scans to their artifacts from the browser are
+#: embedded in the projector. The codebase itself is removed entirely from our
+#: 3D layout"; 167 a: "Layout and indexer"). This repository, the plugin's
+#: source and installed packages keep their pages in the store -- the code
+#: view, `save`, the code graph still read them -- but no vector of theirs
+#: reaches the projector. Planted `PLANT_PROJECT_REPO_CODE`: projected again.
+UNPROJECTED = ("code://repo/", "code://plugin/", "code://pypi/")
+PLANT_PROJECT_REPO_CODE = [False]
+
+
+def projectable(url) -> bool:
+    """May this page's chunks be drawn in the 3D layout?"""
+    return bool(PLANT_PROJECT_REPO_CODE[0]) or not str(url or "").startswith(UNPROJECTED)
+
 class StorePoisoned(RuntimeError):
     """The connection must not be used again (see `GraphStore.poisoned`)."""
 
@@ -2301,6 +2317,12 @@ class GraphStore:
         return _nearest_enclosing(nodes, [c for c, _ in rows])
 
     def page_vectors(self):
+        """`_page_vectors_all` without the repository's own code (G-375)."""
+        by_page, counts = self._page_vectors_all()
+        return ({u: v for u, v in by_page.items() if projectable(u)},
+                {u: n for u, n in counts.items() if projectable(u)} if isinstance(counts, dict) else counts)
+
+    def _page_vectors_all(self):
         """Everything the page-level fit needs, in ONE query.
 
         Assembling it from `chunks()` plus `embeddings_for()` per page plus
@@ -2342,6 +2364,10 @@ class GraphStore:
         return by_page, counts
 
     def lead_vectors(self):
+        """`_lead_vectors_all` without the repository's own code (G-375)."""
+        return [r for r in self._lead_vectors_all() if projectable(r[1])]
+
+    def _lead_vectors_all(self):
         """Every DRAWABLE chunk with the vector that speaks for it, in one query.
 
         ``[(cid, url, vector)]``: the rows the chunk projector is fitted on
