@@ -283,7 +283,7 @@ Agent.ask("summarise", context=hits)       # exists: the sidecar's local model, 
 check(slate)                               # new: /slate_check -- the dialect's own errors (2026-11-01 62)
 ```
 
-Counted: **10 calls exist, 14 are new** -- and every new one sits on a route
+Counted: **10 calls exist, 14 are new** (computed: `python -m domvec.tool_surface` reads these blocks and resolves each call against the kernel bootstrap; `tests/test_tool_surface.py`) -- and every new one sits on a route
 or plugin action that already exists, so the surfaces are wrappers, not new
 machinery. Two rows decide their shape: `G-378` (a tool panel is read-only
 and cannot open the code behind it) and `G-380` (marimo-style: a call that
