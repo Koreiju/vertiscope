@@ -118,7 +118,13 @@ def _unit(v: np.ndarray) -> np.ndarray:
 #: (rank_noise, Spearman +0.77) -- or ``hier`` over page, host, domain and
 #: dual-similarity levels (`domvec.hierank`). ``none`` drops the rank term:
 #: the counterfactual every comparison is scored against.
-RANK_MODE = ["flat"]
+#:
+#: ``none`` by default since 2026-11-22 (PLUGIN_GOAL 178, the reader's call
+#: on G-390's measurement): over 672 known items flat netted +0.003 MRR
+#: [-0.009, +0.015], helping 44 and hurting 45; hier -0.016, as bad as a
+#: random rank. The code graph's own percentile (PLUGIN_GOAL 93) still
+#: applies, exactly as in the measured ``none`` arm.
+RANK_MODE = ["none"]
 
 #: Planted: tied values take percentiles by ROW ORDER, as before 177e. Tied
 #: leaves (most of the corpus shares a handful of rank values) were spread

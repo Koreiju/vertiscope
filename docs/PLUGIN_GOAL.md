@@ -6153,3 +6153,22 @@ noise that impedes the dual embedding similarity; and the dual embedding
 similarity must not be mistaken for a layout cluster's spatial distance --
 the two come from different places (the embeddings from the encoder and the
 frequency vectors; the layout from the UMAP fit over them).*
+
+### 178. (2026-11-22) The rank default, after 177e was measured
+
+*Asked in the question dialog (2026-11-22), on G-390's measurement: "on 672
+known-item queries, today's rank term nets zero (+0.003 MRR; it helps 44 and
+hurts 45), and the new hierarchical rank (host / domain / dual-similarity
+levels) does as badly as a random rank (-0.016). The store has only 31
+hyperlinks among 110 pages, so there's no link evidence to carry. Which rank
+should search read by default?"* -- the reader chose:
+
+- **"None: drop the rank term"**: "Ranking is the dual embedding (+ content
+  share) alone. No measured cost on this corpus; removes the reshuffle that
+  helps as often as it hurts."
+
+*Read as (178) -- a reading, to be confirmed: search ranks by default with no
+link-graph rank term (`rank=none`); the flat and hierarchical ranks stay
+reachable through `rank=` so the question can be re-measured as the link
+graph grows. The code graph's own rank (PLUGIN_GOAL 93) is a different rank
+and is not what was asked about; it stays as it was in the measured `none` arm.*

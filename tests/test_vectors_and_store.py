@@ -259,11 +259,14 @@ def test_search_aligns_rows_across_all_three_factors(built):
     index = ThreeFormIndex(store, freq).build()
     assert index.ranks.shape[0] == len(freq.rows)
 
-    hits = index.search("books", k=5)
+    # The flat rank by name: since PLUGIN_GOAL 178 the default reads none.
+    hits = index.search("books", k=5, rank="flat")
     for hit in hits:
         row = freq.row_of(hit.cid)
         assert row is not None
         assert hit.rank == pytest.approx(float(index.ranks[row]), rel=1e-5)
+    # ...and the default reports the rank it READ: none, a constant.
+    assert {h.rank for h in index.search("books", k=5)} == {1.0}
 
 
 def test_semantic_absence_is_reported_not_faked(built):

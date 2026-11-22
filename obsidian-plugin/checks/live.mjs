@@ -11959,6 +11959,24 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-390",
+      asks: "search reads no link-graph rank by default (PLUGIN_GOAL 178, on G-390's measurement): the plugin's sidecar ranks every query exactly as rank=none does; non-vacuity: rank=flat, the old default, orders at least one of the same queries differently -- otherwise this check could not tell the two defaults apart",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const p = app.plugins.plugins["domvec-bridge"], base = p.settings.sidecar.replace(/\\/+$/, "");
+          const top = async (q, rank) => { const j = await (await fetch(base + "/search?q=" + encodeURIComponent(q) + "&k=10" + (rank ? "&rank=" + rank : ""))).json();
+                                           return (j.hits || []).map((h) => h.cid).join(","); };
+          const rows = [];
+          for (const q of ["privacy policy", "patricia trie", "sign in", "navigation menu", "museum collection"]) {
+            const d = await top(q, ""), n = await top(q, "none"), f = await top(q, "flat");
+            rows.push({ q, default_is_none: d === n, flat_differs: f !== d, hits: d ? d.split(",").length : 0 });
+          }
+          return rows;
+        })()`);
+        return { pass: got.every((r) => r.default_is_none && r.hits > 0) && got.some((r) => r.flat_differs), evidence: got };
+      },
+    },
+    {
       id: "G-386",
       asks: "the editor's own calls from a kernel cell (PLUGIN_GOAL 172 [3]; mortegon 3A.7, the cards are the API): one cell calls create, link, invoke, commit and review, and the plane holds two new cards linked, the invoked card's output written into it, a subgraph card linking both, and a review question on the first, the subgraph and the invoked card stored as vault:// pages (G-382); a link to a card that does not exist is refused, not invented; planted (plantNoCarry) no card appears",
       async run() {
