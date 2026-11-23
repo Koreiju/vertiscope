@@ -736,7 +736,7 @@ The first three are mortegon's three brace states (UR O.1a; RESERVOIR §3.1):
 inline, braces dropped); resolved-external (a solid line to a node already on
 screen)". **A brace's state is fold state, not text.** The note keeps
 `{outline_note}` whichever way it is drawn, so no gesture rewrites the line
-(this replaces 183's `![[...]]` / `[[...]]` encoding, 12f).
+(this replaces 183's `![[...]]` / `[[...]]` encoding, 12g).
 
 "One record, one place drawn open" (184 a). A record revealed inline AND open
 as a panel would be two placements in 2D at once. Opening it as a panel
@@ -809,7 +809,9 @@ joins them to the panel.
   terminal call, two records attached to one chunk object. They are drawn
   undirected (170.2, O.16); the direction is computed, not drawn. They are
   solid when active, translucent when toggled off with a right-click (135d).
-- **Magnetism is placement and order, never a link** (136, 142, T-11). It
+- **Magnetism is placement and order, never a hard link** (136, 142, T-11).
+  142 calls it "a temporary link for compilation serialization": it lasts
+  while the nodes touch, is never drawn, and is never written. It
   serialises compilation, rows top to bottom then left to right, and gives a
   chat cell its context (T-2).
 - **A plain `[text](url)` or wiki link is a plain link** (T-4), not a
@@ -834,7 +836,9 @@ joins them to the panel.
   on those classes and globals (§13m).
 - **Black boxes all the way down** (80, 112, RESERVOIR §12.4): a `{code://...}`
   field reveals its module's rank-1 definitions, each again a field, down to
-  the compiled base. The reveal is the one in 12a, nothing separate.
+  the compiled base. The reveal is the one in 12a, nothing separate. It
+  unfolds workspace code and installed libraries only; an app tool shows its
+  rows and stops (§13n, boundary 2).
 - **The agent** (170.3, §10b-§11d) runs as smolagents steps. Each step is one
   code cell appended to a note, its observation that cell's output. Its
   context is the canvas read in compile order, each field as deep as it is
@@ -910,7 +914,8 @@ rulings (4b, 4c); `SEARCH_GRAPH_DESIGN.md`; `NOTEBOOK_PANEL_DESIGN.md`;
 `THROUGH_STACK_SYNTHESIS.md`; `EGO_CANVAS_DESIGN.md`; the head of
 `CALLABLE_INTERFACE.md`; PLUGIN_GOAL's verbatim from 2026-10-29 through 187;
 mortegon's UR §E, §F, §M-§T; the PRD rows G-277..G-400. External pages read
-are listed at the end. Where the text below says "reading" it is mine.
+are listed at the end. The cross-check (§14) has since read on through 191
+and every prompt of the session (§14a). Where the text below says "reading" it is mine.
 
 **How items are cited in §12-§14.** PLUGIN_GOAL's item numbers restart in
 each series (the rule at the head of this spec). A bare number cites the
@@ -932,7 +937,7 @@ them except where it says so, and recency decides any conflict (item 124).
 |---|---|---|
 | B1 | ONE record, many placements -- never copies kept in sync | 37, R.1, O.19, RESERVOIR §5 |
 | B2 | the two sides COMMUTE: an edit in either round-trips losslessly (R.1). Since 182 the two sides are the CODE and the GRAPH editor; the old panel/graph-form flip is retired (B12) | R.1, O.1, 135b, 182 |
-| B3 | hard links come ONLY from compilation (a name defined and read, a `{ref}`, a terminal call, one chunk object); magnetism is order, never a link | 136, 142, T-4, T-11 |
+| B3 | hard links come ONLY from compilation (a name defined and read, a `{ref}`, a terminal call, one chunk object); magnetism is a TEMPORARY link (142's word) for compile order: never a hard link, never drawn or written | 136, 142, T-4, T-11 |
 | B4 | links are drawn UNDIRECTED, no arrowheads; the direction is computed | O.16, 170.2, G-383 |
 | B5 | dataflow is marimo-style: dependencies read statically from definitions and reads; running re-runs the readers | 167 f, G-380 |
 | B6 | cells run in the note's real Jupyter kernel; outputs live IN the markdown (trie content, one source of truth) | 49, NOTEBOOK §1, §4b |
@@ -1014,6 +1019,18 @@ graph editor's own JSON (`graph.serialize()`) is **never stored as authority**.
 It is rebuilt from the note, and a gesture on it is written back into the note
 as text.
 
+**Rebuilt in O(delta), and timed.** The binding goal asks for O(delta) and
+for each phase timed on its own (CLAUDE.md: the goal paragraph, and constraint 4). Today
+`dataflow.graph(text)` re-parses every cell of the note on each call, which
+is O(cells), not O(delta). For the editor, an edit re-parses only the cells
+whose `exact_hash` changed (constraint 5b: a projection keys on the exact
+hash). It re-joins edges only over the names those cells define or read,
+and redraws only those nodes and links. One input lies outside the cell
+(constraint 5c): a slate tree's refs depend on which names the rest of the
+note defines. So a change to the note's set of defined names invalidates
+every slate tree that reads one of those names. The editor's rebuild is
+its own timed phase, beside the fold and the projections.
+
 | projection | built from | written back by |
 |---|---|---|
 | **code**: the cells and the terminal | the note's text, run in its kernel (B6) | the reader typing |
@@ -1048,7 +1065,7 @@ and fold. It is kept the way the plane already keeps its panels' places,
 keyed by the cell's address. Edges, ports and values are never kept, because
 they are read from the note. Placement still matters: magnetised nodes are
 read row-major for compile order and for a chat's context (T-2, T-11). That
-is order, not a link (B3).
+is order, a temporary link in 142's word, never a hard link (B3).
 
 **The note is the boundary of def/use.** Each note has its own kernel
 (`kernel.py` keys kernels by note) and its own dataflow (`dataflow.py` reads
@@ -1215,7 +1232,7 @@ plugin.
 | search box on double-click | new nodes from the retrieval bar over typed nodes (133 d) | the searchbox fed by the retrieval bar's typed nodes |
 | a click selects | a click on a node's TITLE opens its halo (T-8, 81); a click in its BODY edits in place (M.8) | title click -> the halo; a double-click on the title opens or folds the node (T-8), the same fold as the right-click on the title (M.6, 110), two ways to one action; body clicks reach the body |
 | groups (a framed region holding nodes) | the containment gesture: Alt+click gathers the folded nodes linked to a node (111, G-327) | containment IS a group, made only by that gesture |
-| no edge snapping | magnetism: nodes snap on bare edges, setting compile order row-major and a chat's context, never a link (134 c, 136, T-2, T-11) | snapping added, as ONE settle when a node is released (below); order read from it; no line drawn |
+| no edge snapping | magnetism: nodes snap on bare edges, setting compile order row-major and a chat's context, a temporary link, never a hard link (134 c, 136, 142, T-2, T-11) | snapping added, as ONE settle when a node is released (below); order read from it; no line drawn |
 | node size by its content | Ctrl+= / Ctrl+- resize a notebook (133 h); a panel sizes to what it shows (110) | sized to content; the keys scale the selected node |
 
 **DOM in a node.** A litegraph widget is drawn on the canvas. An Obsidian
@@ -1325,7 +1342,7 @@ Every row above is a download, so each waits for a yes.
 | G-408 | the comm bridge: an iopub reader per kernel; a comm log with a sequence number, long-polled; `comm_msg` back on the shell channel | a comm opened by a cell is read in the plugin; a `comm_msg` sent from the plugin changes a value read back in the kernel | the reader off: the comm is never seen |
 | G-409 | node definitions from the live namespace (§13d'): signatures, hints, traits | a function defined in a cell appears in the definitions with its ports; a default primitive is a widget, an object type a socket | hints ignored: every input a socket |
 | G-410 | the AFM host in a plane panel (a node body once G-411 lands), per the nine MUSTs | an anywidget made in a cell renders; set from a terminal, the view updates; set in the view, the kernel reads it; two views, one model | `save_changes` dropped: the kernel never sees the view's set |
-| G-411 | litegraph on the plane: nodes from G-409, links from def/use, gestures per §13g, no arrowheads, one shape | the graph's links equal `dataflow`'s edges; a drawn link within a note writes one line (across notes, one fence-line `{ref}`, §13d), a deleted one removes it, a cycle is refused | a link drawn without the write-back: the code and the graph disagree |
+| G-411 | litegraph on the plane: nodes from G-409, links from def/use, gestures per §13g, no arrowheads, one shape | the graph's links equal `dataflow`'s edges; an edit to one cell re-parses that cell only (rebuild timed as its own phase); a drawn link within a note writes one line (across notes, one fence-line `{ref}`, §13d), a deleted one removes it, a cycle is refused | a link drawn without the write-back: the code and the graph disagree |
 | G-412 | `Chat` as a live object (§13h) | tokens stream into the view, gap p50 under 30 ms at the view (G-385-load's bar); a code block runs as a cell; a tool defined in a cell is called by the agent | deltas accumulated in Python: the view gets whole messages |
 | G-413 | the base tools as live objects: Search, Browser, Terminal, Kernel, from their governing classes | each tool panel lists its class read-only; an instance's trait changes re-run its readers | the dataflow event off: readers stay stale |
 
@@ -1338,7 +1355,12 @@ script, and not an agent. The reader's words: "I still think you could work
 more to integrate the MCPs with improved perception over the full space of
 things we are tracking" (2026-09-21 01:05), and "from here on out, run
 all harnesses yourself, never use agents, this is a rule. Always test with
-the MCP-first" (2026-11-15 21:48).
+the MCP-first" (2026-11-15 21:48). The check reads the editor's state as data
+through the harness (nodes, ports, links, the note's text). "Screenshots
+must be sparing ... capture the interface at the data structure level"
+(2026-09-20 20:28). A screenshot is taken only when the question is what
+a person sees. G-394's two defects that passed the DOM check were found
+that way.
 
 ### 13l. Readings that are mine
 
@@ -1381,7 +1403,7 @@ where it comes from. A term not listed is used in its plain sense.
 | **tool panel** | the canvas form of an APP tool: a tool surface or a governing class shown as a READ-ONLY code artifact, calls visible, bodies never | a regular code artifact (explorable, graph-editable) | 167 c, G-378, F.6 |
 | **app tool** | a capability shipped with the app, shown as calls only, its dependencies never visible (§13n) | workspace code | 167 c, 189, G-378, G-382 |
 | **workspace code** | code made in the project workspace, fully explorable, editable and unfoldable down to base modules (§13n) | an app tool | 167 c, 189, 112 |
-| **hard link** | an edge that exists because code defines a name another cell reads, or a `{ref}` resolves, or two records share one chunk object; drawn undirected | magnetism (placement order, never a link); a plain or wiki link; a retrieval link `[query](results)` | 136, 142, T-4 |
+| **hard link** | an edge that exists because code defines a name another cell reads, or a `{ref}` resolves, or two records share one chunk object; drawn undirected | a **temporary link**: magnetism, placement order while nodes touch (142), never drawn or written; a plain or wiki link; a retrieval link `[query](results)` | 136, 142, T-4 |
 | **readout** | a cell's stored output; on the perimeter, a terminal node's rendering placed in 3D | a view | RESERVOIR §4, §5 |
 
 ### 13n. Code tools on canvases -- app tools and workspace code (189)
@@ -1538,6 +1560,11 @@ with the app, **U** an unclear term or step.
 | F-66 | U | B14 vs §13g | "right-click on the base" (B14) and "on the title" (§13g) for one gesture | B14 names it the title, mortegon's "base node" (RESERVOIR §10.2) |
 | F-67 | U | spec §13f | "(B's)" read as a B-commitment of §13a | "node B's below" |
 | F-68 | U | spec §13d, §13f vs `kernel.py`, `dataflow.py`, `planepanels.ts` | def/use links and their write-back were stated without the note boundary: kernels and dataflow are per note, and the plane makes each new panel its own note | the boundary stated; across notes a drawn link is a fence-line `{ref}` (G-279); a value between notes is open, O-5 |
+| F-69 | U | spec §13k vs 2026-09-20 20:28 | how a live check reads the editor | as data through the harness; a screenshot only when what a person sees is the question |
+| F-70 | I | spec §13d vs the binding goal (O(delta), phases timed; CLAUDE.md goal, constraints 4, 5b, 5c) | "rebuilt from the note" with no cost; `dataflow.graph` re-parses every cell per call | re-parse cells whose `exact_hash` changed, re-join their names, a slate tree's neighbourhood invalidation stated; the rebuild a timed phase; G-411's proof carries it |
+| F-71 | M | spec §12a | "`![[...]]` / `[[...]]` encoding, 12f" -- that table is §12g | corrected |
+| F-72 | I | spec §12e vs §13n | the `{code://...}` unfold "down to the compiled base" without the app-tool stop | stated: workspace code and libraries unfold; an app tool stops at its rows |
+| F-73 | I | spec B3, §12d, §13d, §13g, §13m vs 142 | the spec said magnetism is "never a link"; the reader's own word (142) is "a temporary link for compilation serialization" | the reader's term kept: a TEMPORARY link, never a hard link, never drawn or written |
 
 **Still open** -- O-1 to O-4 are work the design names; O-5 is a question for the reader:
 
@@ -1563,3 +1590,97 @@ with the app, **U** an unclear term or step.
   namespace. Per-note state is NOTEBOOK §4's design ("a note is the unit a
   reader thinks in"), mine and written before the plane held nodes, not a
   ruling.
+
+### 14a. The recovered prompts, one by one (F-59)
+
+Each of the 85 prompts in PLUGIN_GOAL's 2026-11-22 inventory, read whole
+against §12-§13, with what it bears on the editor. Quoted up to 70
+characters; the full text is in the inventory. Counts: 10 bear on the editor (two of them only confirming what stands), 10 on how it is verified, 1 on the process of deciding, 64 on neither.
+
+| UTC | prompt | bearing |
+|---|---|---|
+| 2026-09-12 22:14 | What project are we in? | none for 2D: operational (session, build, git, process) |
+| 2026-09-12 22:15 | please switch to domvec, or whichever folder holds our running obsi... | none for 2D: operational (session, build, git, process) |
+| 2026-09-12 22:16 | Are the PRD and goal docs you're referencing the verbatim requireme... | none for 2D: about the record or the process |
+| 2026-09-12 22:22 | Now, please check on the running and open obsidian, connect the var... | none for 2D: operational (session, build, git, process) |
+| 2026-09-12 22:59 | A switch to a kernel run and then a command terminal when switching... | editor: the kernel/terminal switch; stands as NOTEBOOK §4a and B11's run / terminal |
+| 2026-09-12 23:22 | reload obsidian so it sees the notes | none for 2D: operational (session, build, git, process) |
+| 2026-09-12 23:29 | wire the build to write straight into the vault plugin dir | none for 2D: operational (session, build, git, process) |
+| 2026-09-12 23:32 | start on vault-note addressing into the trie | editor: stands -- a node is one `vault://<note>#cell n` address (§13d) |
+| 2026-09-12 23:47 | commit it once the suite is green | none for 2D: operational (session, build, git, process) |
+| 2026-09-12 23:48 | just kill it and run the targeted tests instead | none for 2D: operational (session, build, git, process) |
+| 2026-09-12 23:59 | keep going with step 2 | none for 2D: operational (session, build, git, process) |
+| 2026-09-13 00:07 | put the kernel in the sidecar | editor: stands -- the kernels, and so the comm bridge, live in the sidecar's kernel pool (§13e) |
+| 2026-09-13 00:20 | keep going with step 4 | none for 2D: operational (session, build, git, process) |
+| 2026-09-13 00:47 | Are you fully seeing the obsidian interface with mcp tools to the e... | verification: F-63 |
+| 2026-09-13 00:55 | Are you able to interact at least with our existing panels? Perhaps... | verification: F-63 ("see and touch exactly what I can") |
+| 2026-09-13 01:00 | Look around github until all perception gaps are filled, ideally wi... | verification: F-69 ("ideally without images") |
+| 2026-09-13 03:31 | I hit my usage limit while you were working, but it has reset now.... | none for 2D: operational (session, build, git, process) |
+| 2026-09-13 03:45 | Reopen everything. Assess your unknowns with self awareness of ever... | verification: F-63 |
+| 2026-09-13 03:54 | keep going with step 6 | none for 2D: operational (session, build, git, process) |
+| 2026-09-13 04:11 | keep going with step 7 | none for 2D: operational (session, build, git, process) |
+| 2026-09-13 04:31 | fix D-8 first | none for 2D: operational (session, build, git, process) |
+| 2026-09-13 15:03 | Let's continue on our new design. Please bring everything up again | none for 2D: operational (session, build, git, process) |
+| 2026-09-13 15:16 | Let's continue building, making sure you're always interfacing with... | verification: F-63 |
+| 2026-09-13 21:46 | Collapse capture and place into one round trip | none for 2D: operational (session, build, git, process) |
+| 2026-09-13 23:38 | Let's continue | none for 2D: operational (session, build, git, process) |
+| 2026-09-14 04:08 | What's next on the PRD? | none for 2D: operational (session, build, git, process) |
+| 2026-09-14 04:31 | Both lease | none for 2D: operational (session, build, git, process) |
+| 2026-09-19 22:50 | Where are the files for our set of design verbatim prompts located? | none for 2D: about the record or the process |
+| 2026-09-19 22:51 | Where's our PRD? | none for 2D: about the record or the process |
+| 2026-09-19 23:01 | write Addendum IV | none for 2D: about the record or the process |
+| 2026-09-19 23:10 | Now re-derive the PRD rows against Addendum IV | none for 2D: about the record or the process |
+| 2026-09-20 01:57 | I find that opening a few pages re-sets all the UMAP embeddings for... | none for 2D: 3D UMAP |
+| 2026-09-20 19:59 | There are significant degradations in the quality of the features d... | verification: F-63, F-69 |
+| 2026-09-20 20:28 | Again, I will repeat our main focus for you to consider the next st... | verification: F-69 |
+| 2026-09-20 20:30 | Restarted our session. you should be able to see all the new tools.... | verification: F-63 |
+| 2026-09-20 22:55 | The two layer UMAP and force directed unfold on the patricia trie h... | none for 2D: 3D layout |
+| 2026-09-21 01:05 | I still think you could work more to integrate the MCPs with improv... | verification: F-63 |
+| 2026-09-22 05:08 | Nodes in the 3D viewer are still way too clumped together. Remember... | none for 2D: 3D layout |
+| 2026-09-22 05:24 | Fix the LinksTo query and the live capture, then verify | none for 2D: 3D |
+| 2026-09-22 05:48 | Fix the _local_positions shell scaling | none for 2D: 3D |
+| 2026-09-23 01:46 | I'm seeing nodes way too jumbled together and tries that aren't DAG... | none for 2D: 3D trie layout |
+| 2026-09-23 22:41 | Are claude web fetches from the local network? | none for 2D: operational (session, build, git, process) |
+| 2026-09-23 22:56 | fix the missing images on the fan-out nodes. you will have to bring... | editor in part: highlight on hover and timing every phase (F-70); the rest is the 3D pipeline |
+| 2026-09-23 23:16 | go ahead with the pipeline trace and time profile | none for 2D: 3D pipeline |
+| 2026-09-23 23:31 | yes, prove the placement hypothesis and fix it | none for 2D: 3D placement |
+| 2026-09-24 00:19 | What are the next steps? Assess from the global perspective. | none for 2D: operational (session, build, git, process) |
+| 2026-09-24 00:20 | How about the time-profiled pipeline and integrating all that with... | editor in part: the timed pipeline (F-70) |
+| 2026-09-24 00:40 | The profile technically exists, but much more detached from the bro... | none for 2D: the 3D pipeline readout |
+| 2026-09-24 05:04 | The logs on the panel in the 3D graph now cover the actual UI view.... | editor: F-61 |
+| 2026-09-26 19:11 | Go ahead with the fresh-workspace test runner | none for 2D: operational (session, build, git, process) |
+| 2026-09-26 21:03 | Is the cron loop still running? | none for 2D: operational (session, build, git, process) |
+| 2026-10-07 01:26 | Let's pick up where we left off | none for 2D: operational (session, build, git, process) |
+| 2026-10-07 02:05 | Never mind, you fixed the dual issue | none for 2D: operational (session, build, git, process) |
+| 2026-10-07 08:46 | The app was quit while you were working. Please continue from where... | none for 2D: operational (session, build, git, process) |
+| 2026-10-12 03:37 | are tests currently running? | none for 2D: operational (session, build, git, process) |
+| 2026-10-19 02:01 | wouldnt be this repo but nearby folders that the repo is in likely | none for 2D: model files (§10c, F-9) |
+| 2026-10-19 02:04 | perhaps explore faster models of jev that also use deepseek, it thi... | none for 2D: models (§10c, F-9) |
+| 2026-10-21 00:01 | can you please remove all secrets and push to a brand new remote (p... | none for 2D: operational (session, build, git, process) |
+| 2026-10-21 00:19 | logged into github. please push like i asked | none for 2D: operational (session, build, git, process) |
+| 2026-10-21 00:26 | please very quickly start the sidecar again | none for 2D: operational (session, build, git, process) |
+| 2026-10-29 23:53 | Let's bring the mortegon back up | none for 2D: operational (session, build, git, process) |
+| 2026-10-29 23:54 | please close this thing | none for 2D: operational (session, build, git, process) |
+| 2026-10-29 23:58 | Thank you. Let's bring our full obsidian plugin sidecar etc back up | none for 2D: operational (session, build, git, process) |
+| 2026-10-30 12:00 | take the older PRD rows next in order | none for 2D: operational (session, build, git, process) |
+| 2026-11-01 21:49 | please continue, bringing the app back up | none for 2D: operational (session, build, git, process) |
+| 2026-11-04 23:23 | We have about 17% of our weekly token limit, so we need to make it... | none for 2D: about the record or the process |
+| 2026-11-07 00:22 | conductor we have a problem | none for 2D: operational (session, build, git, process) |
+| 2026-11-07 16:45 | Please continue on all open glitches I had noted to you. There were... | none for 2D: about the record or the process |
+| 2026-11-07 16:50 | Including what you found in transcripts | none for 2D: about the record or the process |
+| 2026-11-08 17:41 | Please clearly and legibly state all decisions needed from me | the process: the one decision for the reader is O-5, stated in §14 |
+| 2026-11-08 17:43 | Continuous motion currently in our 3D graph, causing significant an... | editor: F-60, F-64 |
+| 2026-11-08 18:33 | There is still significant jostling when there wasn't before. I thi... | editor: F-60 |
+| 2026-11-08 19:16 | I need something like this to work with our whole plugin without de... | editor: "without degrading the plugin's functions" -- every slice keeps the plugin's checks green (§13k) |
+| 2026-11-08 20:17 | If you haven't noticed, things are broken | none for 2D: operational (session, build, git, process) |
+| 2026-11-09 01:37 | Please also commit and push to our remote branch whenever the next... | none for 2D: the recenter is a 3D camera action; the plane is fixed to the camera |
+| 2026-11-09 06:49 | please also screen for and remove all secrets and personal data thr... | none for 2D: operational (session, build, git, process) |
+| 2026-11-09 07:00 | Alright. lets continue, we have tons of ego interface completion le... | none for 2D: operational (session, build, git, process) |
+| 2026-11-14 18:33 | I got some transcripts from 3-5 days ago with antigravity locally w... | none for 2D: older defects from another tool's transcripts |
+| 2026-11-15 01:43 | I reset the GPU driver, check if it cleared | none for 2D: operational (session, build, git, process) |
+| 2026-11-15 02:01 | keep going on the open list while it warms up | none for 2D: operational (session, build, git, process) |
+| 2026-11-15 21:10 | You're wrong. look at the original suggestion for things like impec... | none found for 2D: a design-skill suggestion, its object unrecorded |
+| 2026-11-15 21:48 | from here on out, run all harnesses yourself, never use agents, thi... | verification: F-63 |
+| 2026-11-22 00:11 | why does the vault need reindexing each time? this seems inefficient | none for 2D: vault indexing |
+| 2026-11-22 01:19 | wire the token stream into the app's chat panel | editor: F-62 |
+| 2026-11-22 10:04 | done gaming, go ahead with the restart and re-runs | none for 2D: operational (session, build, git, process) |

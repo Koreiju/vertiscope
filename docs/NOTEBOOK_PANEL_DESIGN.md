@@ -11,6 +11,10 @@
 >   block's `format=text`: 187 makes live interactive objects a standard
 >   output. A live object's state reaches the note as its cell's output (spec
 >   §13e).
+> - §4's "state is per note" is my design, not a ruling. On the plane it
+>   sets the boundary of def/use links: across notes only a fence-line
+>   `{ref}`, which binds a record, not a value (spec §13d, F-68). Whether
+>   that stands is the open question O-5.
 
 Addendum II puts this before the hovering SLM bar and asks that it be nailed
 down *first*: *"we move onward to the notebook kernel panel design first to nail

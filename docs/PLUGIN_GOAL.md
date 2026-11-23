@@ -6632,7 +6632,7 @@ the work stays on 188's goal.*
 
 *Read as (191): the cross-check of 188 takes in every prompt the reader
 sent in this session, not only the records written from them. Done as the
-inventory below (85 recovered: 84 unrecorded, one in part) and spec §14 F-59 to F-64.*
+inventory below (85 recovered: 84 unrecorded, one in part) and spec §14 F-59 onward, with each prompt's bearing in §14a.*
 
 ### Recovered verbatim (2026-11-22 inventory)
 
