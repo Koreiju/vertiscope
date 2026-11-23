@@ -1,5 +1,10 @@
 # The search as a computation graph on the 2D plane
 
+> **Cross-check, 2026-11-22** (COMPUTATION_GRAPH_EDITOR_SPEC §13). Under 187
+> the one retrieval node of 164 is a CALL CELL in the node editor: its query,
+> toggles and `k` are widgets, the results its output socket, and "similar"
+> re-enters it with a result as its query (spec §13d, §13d').
+
 Design before code, for PLUGIN_GOAL items 163 and 164 (2026-11-15).
 
 ## Revision (item 164, the same day) -- this section supersedes §2-§4's drawing

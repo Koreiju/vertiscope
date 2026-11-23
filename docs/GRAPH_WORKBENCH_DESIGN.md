@@ -1,5 +1,13 @@
 # The graph workbench: code, models and workflows as graph nodes
 
+> **Cross-check, 2026-11-22** (COMPUTATION_GRAPH_EDITOR_SPEC §14).
+> - §6's "the 2D editor's host" is answered: a plane inside the 3D view (50).
+> - §4's four model files ARE on disk in `~/.cache/gpt4all` and are rows of
+>   `models.ROLES` (G-393), although 165 and 179 speak of them as not
+>   downloaded. See spec §10c.
+> - §1's card (UR S.4, T) is mortegon's. Here the slate keeps that class,
+>   and code objects follow spec §13.
+
 *Design for PLUGIN_GOAL items 186a-186n (2026-10-18), with what was
 recovered from the mothership project. Your words are in `PLUGIN_GOAL.md`
 (Addendum XI, the answers of 2026-10-18); the mothership's are quoted by

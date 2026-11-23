@@ -1,5 +1,17 @@
 # The notebook kernel panel — design
 
+> **Cross-check, 2026-11-22** (COMPUTATION_GRAPH_EDITOR_SPEC §14).
+> - §1's "kernels are subprocesses first": superseded by 49. Cells run in real
+>   Jupyter kernels, and the subprocess remains the fallback.
+> - §2's bottom `[+ code] [+ terminal] [+ browser cell]` buttons: replaced by
+>   a retrieval bar over typed nodes (133 d).
+> - §4a's "a terminal is a separate pane with no address" stands for the
+>   terminal PANE. 142 adds terminals as cells that magnetise like any cell.
+> - §7's "no interactive components inside browser cells", and the output
+>   block's `format=text`: 187 makes live interactive objects a standard
+>   output. A live object's state reaches the note as its cell's output (spec
+>   §13e).
+
 Addendum II puts this before the hovering SLM bar and asks that it be nailed
 down *first*: *"we move onward to the notebook kernel panel design first to nail
 it down correctly. This is where we bring in our electron sensor when ready,

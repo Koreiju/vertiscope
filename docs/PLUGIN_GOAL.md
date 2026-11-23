@@ -6526,3 +6526,99 @@ the base toolset stays (browser, retrieval, kernels, terminals, chat), each
 exposed as such objects; chat models are the first case that forces it; (d)
 the bar is complex quantized-model workflows with custom tools written on the
 fly, in the same editor.*
+
+### 188. (2026-11-22) A cross-check goal; never agents; design language for design docs
+
+*Set as the session goal (verbatim):*
+
+> keep cross-checking all transcripts, docs, specs, and designs on our 2D
+> editor until you have completely found no more mistakes, inconsistencies,
+> or unclear terms on how everything fits together nicely. When you go to
+> re-review, look over the entire set of findings and facts
+
+*And, during it (verbatim, in order):*
+
+> For the love of god never run any fucking agents ever again. save this as
+> a rule and memory.
+
+> i have very low confidence in the integrity of your work ethic. i implore
+> you to thoroughly review all design specs and docs on the 2D graph editor
+> component
+
+> design-level language only. no actual code.
+
+> code fragments and skeletons are okay for design docs, just no full code
+> artifacts
+
+*Read as (188), mine: (a) the 2D editor's documents are cross-checked to a
+fixed point, against one ledger of findings re-read whole at every pass
+(COMPUTATION_GRAPH_EDITOR_SPEC §14); (b) no agent of any kind, ever; (c)
+design documents may carry code fragments and skeletons, never full code
+artifacts, and the review changes no source.*
+
+### 189. (2026-11-22) Code tools on canvases: app tools with no dependencies visible, and the workspace's own code
+
+*The reader, verbatim:*
+
+> make sure that code tools on canvas interfaces are also clearly defined and
+> scoped for app-based tools without their dependencies visible, and the code
+> that is made in the project workspace itself.
+
+*Read as (189), mine: two kinds of code tool appear on canvases, and each
+needs a clear definition and scope. An APP tool is one of the app's own
+capabilities, shown without its dependencies (167 c: "no way of exploring the
+underlying codebase"). WORKSPACE code is code made in the project workspace
+itself, fully explorable and graph-editable (167 c's regular code artifact).
+Decomposed in COMPUTATION_GRAPH_EDITOR_SPEC §13n.*
+
+### 190. (backfilled 2026-11-22) Messages that reached designs without being transcribed
+
+*Found by the cross-check of 188 (COMPUTATION_GRAPH_EDITOR_SPEC §14 F-41).
+Each was acted on and some are quoted in designs, but none was written here
+when it arrived, against 101 ("make sure you track all verbatims too"). The
+two 2026-11-21 messages are recovered from this session's own summaries,
+which quote them. Verbatim, in order:*
+
+*2026-11-21, before 168 (it asked for spec §9):*
+
+> let's keep researching on marimo and other permissive libraries that would
+> help with our true design verbatim
+
+*2026-11-21, before 169 (it asked for spec §11):*
+
+> also for our computation graph spec, methodically go through all parts of
+> the mortegon docs that touch on similar things, and allow that to inform
+> further architecture consolidation and design research
+
+*2026-11-22, between 186 and 187:*
+
+> Like, we did some research on how we handle graphical python program
+> interface design interlaced with the rest of our computation graph
+> architecture. This is where we considered a few different research
+> findings. you likely found the spec.
+
+> I'm going to force you to understand the full context. Your useless and
+> meaningless questions infuriate me. No excuses for your own incapacity to
+> comprehend the full vision.
+
+> Perhaps spend careful time reviewing and understanding the full design
+> vision for yourself.
+
+*2026-11-22, after 187 (the first twice):*
+
+> remember to do thorough research to integrate the new ideas with your
+> current research on the docs and the design for our 2D graph editor
+
+> no context7
+
+> actually context7 might help, please do use if useful, but I doubt it's
+> updated
+
+*2026-11-22, during 188:*
+
+> remember to keep to the goal
+
+*Read as (190), mine: (a) the 2D editor's design rests on research already
+done -- spec §5, §9-§11 -- and integrates with it; (b) questions the record
+answers are not asked; (c) Context7 may be used, its freshness doubted; (d)
+the work stays on 188's goal.*

@@ -1,5 +1,19 @@
 # The whole design vision, read from the verbatim (2026-11-08)
 
+> **Cross-check, 2026-11-22** (COMPUTATION_GRAPH_EDITOR_SPEC §14).
+> - 1.4's "one gesture flips between the panel form and the undirected graph
+>   form": retired by 182 ("completely do away with the 'graph view' form").
+>   The 2D node is the artifact's own interface (spec §13c).
+> - T-12's ruling (drift off by default): overridden by 150 ("rotation
+>   debounce no longer works", read there as drift wanted ON).
+> - 4c's "open" means unbuilt on 2026-11-08. T-15 and T-16 have since been
+>   built (G-388, G-389, both Confirm), as ruled by 175.
+> - 1.5's terminal cells (142) supersede NOTEBOOK_PANEL §4a's "a terminal is
+>   a separate pane with no address" for terminals placed as cells.
+> - 187 (2026-11-22): code objects are established live objects and the
+>   graphical side is an existing node editor (spec §13). 1.6's one markdown
+>   panel stands for prose.
+
 Asked for by PLUGIN_GOAL (142): every verbatim on the ego, the computation
 graph, panels, cells, gestures, rendering, syntax, assumptions, constraints and
 extensions, **not filtered by built vs unbuilt**, read as the parts of one

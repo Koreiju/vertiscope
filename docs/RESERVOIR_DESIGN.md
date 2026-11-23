@@ -1,5 +1,24 @@
 # The 3D/2D computation-graph reservoir — design
 
+> **Cross-check, 2026-11-22** (COMPUTATION_GRAPH_EDITOR_SPEC §12-§14). Read
+> with the spec. Parts the later record overrides:
+> - §3.3's double left-click "panel <-> graph form", §8 step 5 and §8b's
+>   G-281 row: the graph-view FORM is retired (182, G-399). The 2D node is
+>   now the artifact's own interface in the node editor (spec §13c).
+> - §5a's craft circles and dashed edges: retired (182, 183). The ego in 3D
+>   is drawn as the world is (G-400), hidden meanwhile (G-405).
+> - §5b's "minimize / restore" to a header circle: a panel folds to its
+>   title instead (110, spec §13c).
+> - §3.1's black-slate visual (UR S.4): it stays the SLATE class only
+>   (G-278); panels are Obsidian's own (56, 184). S.4's "no x, no
+>   minimizer" yields to 133 f (minimize and exit on panels), by recency.
+> - §9: every question is answered. q1 and q5 by 50 and 52; q2 by T-4; q3 by
+>   T-5; q4 by 133 d (a retrieval bar replaces the `+` strip); q6 by T-9;
+>   q7 by T-6; q8 by T-7 (amended by 134 g); q9 by T-8; q10 by 102.
+> - §12.1's strict-scale rule: withdrawn as the default by 127, restated by
+>   141 and ruled by DESIGN_VISION T-1. 158 separates the craft's drawn
+>   layout from it.
+
 *Design before code, for PLUGIN_GOAL 2026-10-29 items 1–29 ("we need to focus on the full
 scope of the design of our 3D/2D computation graph reservoir. The mortegon docs are
 substantial on all these factors, but we can now meld with our jupyter kernel design at
@@ -74,7 +93,7 @@ halo". The existing `[]()` retrieval gesture (R-1..R-4) is this halo already (UR
 user types … retrieval radiates candidates"); its infill writes a link. In the slate class the
 infill writes `{name}` instead — see question 2.
 
-### 3.3 Gestures (UR §7.3.4 table, BS §5), in the native editor
+### 3.3 Gestures (DM §7.3.4 table, BS §5), in the native editor
 
 | gesture | on | effect | mounts on |
 |---|---|---|---|
