@@ -369,6 +369,7 @@ export class PlaneDesk {
       // beneath it (the browser under its cockpit) arrives after -- a browser
       // booting for seconds once hid the panel itself (G-300).
       this.panels.push(p);
+      this.linksOn();                              // links between panels (G-398) whenever there are panels
       this.hook(p);
       const mount = opts.mount || (this.isTerminal(file) ? (c: HTMLElement) => this.terminalMount(c, Leaf)
                                    : this.isChatNote(file) ? (c: HTMLElement) => this.chatMount(c, file)
@@ -762,6 +763,7 @@ export class PlaneDesk {
     closePanel: (path) => { const q = this.panelOf(path); if (q) { try { q.leaf.detach(); } catch { /* gone */ } } },
   });
   async openCanvas(): Promise<any> {
+    this.linksOn();
     const f = await this.canvas.ensure();
     const p = this.panelOf(f.path);
     if (p) { this.canvas.centre(p.card); await this.canvas.sync(); return p; }
@@ -1113,6 +1115,64 @@ export class PlaneDesk {
     this.flipped = { members, svg, timer };
     this.flipStats.flips++; this.flipStats.last = { at: [Math.round(x), Math.round(y)], members, edges: pairs.length };
     return members;
+  }
+
+  /**
+   * LINKS BETWEEN PANELS (183, G-398): every pair of open cards whose notes
+   * link to each other (either way -- a wiki link, an embed, the ego canvas's
+   * own `[[...]]` lines) is joined by a line on the plane, border to border,
+   * kept in step as cards move. A graph of panels, not of circles: the line
+   * is the only graph mark on the plane. Planted `plantNoPlaneLinks`: none.
+   */
+  plantNoPlaneLinks = false;
+  linkStats = { edges: 0, pairs: [] as string[][] };
+  private linkSvg: SVGSVGElement | null = null;
+  private linkTimer = 0;
+  linksOn(): void {
+    if (this.linkTimer) return;
+    this.linkTimer = window.setInterval(() => this.drawLinks(), 250);
+  }
+  linksOff(): void { window.clearInterval(this.linkTimer); this.linkTimer = 0; this.linkSvg?.remove(); this.linkSvg = null; }
+  drawLinks(): void {
+    const plane = this.host.plane();
+    if (!plane) return;
+    const NS = "http://www.w3.org/2000/svg";
+    if (!this.linkSvg || !plane.contains(this.linkSvg)) {
+      this.linkSvg?.remove();
+      this.linkSvg = document.createElementNS(NS, "svg") as SVGSVGElement;
+      this.linkSvg.classList.add("domvec-plane-links");
+      plane.prepend(this.linkSvg);                 // behind every card
+    }
+    const svg = this.linkSvg;
+    while (svg.firstChild) svg.firstChild.remove();
+    const pairs: string[][] = [];
+    if (!this.plantNoPlaneLinks) {
+      const open = this.panels.filter((q) => !q.card.hasClass("is-collapsed") && q.card.isConnected);
+      for (let i = 0; i < open.length; i++) {
+        const la = this.linkedTo(open[i].path);
+        for (let j = i + 1; j < open.length; j++) {
+          if (la.has(open[j].path) || this.linkedTo(open[j].path).has(open[i].path)) pairs.push([open[i].path, open[j].path]);
+        }
+      }
+    }
+    const pr = plane.getBoundingClientRect();
+    svg.setAttribute("width", String(plane.scrollWidth)); svg.setAttribute("height", String(plane.scrollHeight));
+    // The point where the segment between two centres leaves a card's box.
+    const exit = (r: DOMRect, tx: number, ty: number) => {
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2, dx = tx - cx, dy = ty - cy;
+      const k = Math.min(Math.abs(dx) > 1e-6 ? (r.width / 2) / Math.abs(dx) : Infinity, Math.abs(dy) > 1e-6 ? (r.height / 2) / Math.abs(dy) : Infinity, 1);
+      return { x: cx + dx * k - pr.left + plane.scrollLeft, y: cy + dy * k - pr.top + plane.scrollTop };
+    };
+    for (const [a, b] of pairs) {
+      const ra = this.panelOf(a)!.card.getBoundingClientRect(), rb = this.panelOf(b)!.card.getBoundingClientRect();
+      const pa = exit(ra, rb.left + rb.width / 2, rb.top + rb.height / 2), pb = exit(rb, ra.left + ra.width / 2, ra.top + ra.height / 2);
+      const l = document.createElementNS(NS, "line");
+      l.setAttribute("x1", String(pa.x)); l.setAttribute("y1", String(pa.y));
+      l.setAttribute("x2", String(pb.x)); l.setAttribute("y2", String(pb.y));
+      l.dataset.a = a; l.dataset.b = b;
+      svg.appendChild(l);
+    }
+    this.linkStats.edges = pairs.length; this.linkStats.pairs = pairs;
   }
 
   toggleMinimized(path: string): boolean {

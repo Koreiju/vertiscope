@@ -12069,6 +12069,62 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-398",
+      asks: "links between the pulled-apart panels (PLUGIN_GOAL 183 'Links between panels'): two open cards whose notes link (a wiki link written in one) are joined by a line on the plane, border to border -- its ends on the cards' edges, never under a card's middle -- and the line follows a card that moves; a section PULLED OUT of the ego canvas is joined to the canvas the same way (its `[[...]]` line); planted plantNoPlaneLinks: no line",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvecPlane, NL = String.fromCharCode(10), CP = "domvec/ego canvas.md";
+          d.plantNoPlaneLinks = ${planted};
+          const tok = Date.now().toString(36), a = "domvec/graph/g398 a " + tok + ".md", b = "domvec/graph/g398 b " + tok + ".md";
+          const out = { planted: ${planted} };
+          const cf = app.vault.getAbstractFileByPath(CP), before = cf ? await app.vault.read(cf) : null;
+          try {
+            await d.openCanvas(); await sleep(400);
+            await d.create("notebook", { path: b, text: "the target" + NL });
+            await d.create("notebook", { path: a, text: "see [[" + b.replace(/\\.md$/, "") + "]]" + NL });
+            const ca = d.panelOf(a).card, cb = d.panelOf(b).card, plane = d.host.plane();
+            ca.style.right = "auto"; ca.style.left = "20px"; ca.style.top = "40px";
+            cb.style.right = "auto"; cb.style.left = (plane.clientWidth - cb.offsetWidth - 20) + "px"; cb.style.top = (plane.clientHeight - cb.offsetHeight - 20) + "px";
+            const line = () => [...plane.querySelectorAll(".domvec-plane-links line")].find((l) => (l.dataset.a === a && l.dataset.b === b) || (l.dataset.a === b && l.dataset.b === a));
+            for (let i = 0; i < 40 && !line(); i++) await sleep(150);
+            const pr = plane.getBoundingClientRect();
+            const onEdge = (card, x, y) => { const r = card.getBoundingClientRect(); const px = x + pr.left - plane.scrollLeft, py = y + pr.top - plane.scrollTop;
+              const inX = px >= r.left - 2 && px <= r.right + 2, inY = py >= r.top - 2 && py <= r.bottom + 2;
+              return inX && inY && (Math.abs(px - r.left) < 3 || Math.abs(px - r.right) < 3 || Math.abs(py - r.top) < 3 || Math.abs(py - r.bottom) < 3); };
+            const l1 = line();
+            out.linked = !!l1;
+            if (l1) {
+              const x1 = +l1.getAttribute("x1"), y1 = +l1.getAttribute("y1"), x2 = +l1.getAttribute("x2"), y2 = +l1.getAttribute("y2");
+              const [cA, cB] = l1.dataset.a === a ? [ca, cb] : [cb, ca];
+              out.ends_on_edges = onEdge(cA, x1, y1) && onEdge(cB, x2, y2);
+              // The card moves: the line follows.
+              ca.style.top = "160px"; await sleep(500);
+              const l2 = line(); out.follows = !!l2 && (+l2.getAttribute(l2.dataset.a === a ? "y1" : "y2")) !== (l1.dataset.a === a ? y1 : y2);
+            }
+            // A section pulled out of the canvas is joined to the canvas.
+            const secs = await d.canvas.sections();
+            const x = secs.find((s, i) => i > 0 && s.embedded && app.vault.getAbstractFileByPath(s.path) && !d.panelOf(s.path));
+            if (x) {
+              const cr = d.panelOf(CP).card.getBoundingClientRect();
+              await d.canvas.pullOut(x.path, { x: cr.left + 20, y: cr.bottom - 40 });
+              for (let i = 0; i < 40; i++) { if ([...plane.querySelectorAll(".domvec-plane-links line")].some((l) => [l.dataset.a, l.dataset.b].includes(CP) && [l.dataset.a, l.dataset.b].includes(x.path))) break; await sleep(150); }
+              out.canvas_linked = [...plane.querySelectorAll(".domvec-plane-links line")].some((l) => [l.dataset.a, l.dataset.b].includes(CP) && [l.dataset.a, l.dataset.b].includes(x.path));
+              try { d.panelOf(x.path)?.leaf.detach(); } catch (e) {}
+            }
+          } finally {
+            d.plantNoPlaneLinks = false;
+            if (cf && before !== null) await app.vault.modify(cf, before);
+            for (const q of [a, b]) { try { d.panelOf(q)?.leaf.detach(); } catch (e) {} for (let k = 0; k < 3; k++) { await sleep(700); const f = app.vault.getAbstractFileByPath(q); if (!f) break; await app.vault.trash(f, true); } }
+          }
+          return out;
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        return { pass: clean.linked && clean.ends_on_edges && clean.follows && clean.canvas_linked && !planted.linked && !planted.canvas_linked,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-397",
       asks: "the ego canvas's graph operations (PLUGIN_GOAL 183: pull out / push in, order = compile order): a CLICK on a section's header folds it and pulls nothing; a header HELD past the debounce and dropped off the canvas turns its line into a link `[[...]]` and opens the component as its own panel at the drop; that panel's card dropped on the canvas turns the line back into `![[...]]` AT the drop position and closes the panel; a header held and dropped inside the canvas moves its line there; planted plantPullNoLine: the pulled-out component's line still claims it is contained",
       async run() {
