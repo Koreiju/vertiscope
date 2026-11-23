@@ -1208,7 +1208,8 @@ plugin.
 ### 13f. Links: drawn, compiled, undirected
 
 - **A drawn link is code** (B3), written into the READING cell (node B's
-  below), never into a new one. Dropping A's output `hits` on B's input `items` rewrites one
+  below), never into a new one. Within one note, as here; across notes it
+  is a fence-line `{A#cell n}` instead (§13d). Dropping A's output `hits` on B's input `items` rewrites one
   argument of B's call cell: `summary = summarise(items=hits)`, where the
   argument was a literal (a widget) or another name. For two live objects, B's
   call cell gains one binding line, `b.x = a.y`, or a two-way trait link where
@@ -1306,7 +1307,12 @@ traitlets object with an AFM view.
   only stored truth). The trait is loaded from the turns, and each turn is
   written back into the note as a `## You` / `## <model>` turn;
 - its view is the conversation: a clear input box and typed blocks (G-394),
-  each code block a cell with the one code interface (B11);
+  each code block a cell with the one code interface (B11). It is ONE view
+  in three hosts (182: "One component, three hosts"): the browser strip, the
+  notebook chat and the plane's chat note. Each host supplies only the
+  context -- pinned web chunks, the rewound cells (T-2), the magnetised
+  panels -- as an input to the call, never as chat state. G-394 built the
+  plane's host; the other two are still their own (PRD G-394);
 - tokens stream as `custom` messages, the protocol's free channel (171).
   The tokens themselves come from the stream that already exists: the
   sidecar's model on CUDA (G-385, seen live under load) and the chat panel it
@@ -1618,6 +1624,8 @@ with the app, **U** an unclear term or step.
 | F-85 | I | GRAPH_WORKBENCH §6 vs DESIGN_VISION T-15, T-16 | two of §6's three questions shown open, ruled by T-15 and T-16 and built (G-388, G-389) | head note: §6 answered in full |
 | F-86 | M | spec O-5, NOTEBOOK head; DESIGN_VISION T-14 and 4c vs 148 | O-5 cited T-14 as "one environment per workspace"; the reader answered T-14 in 148: "No, share one", one interpreter for every workspace. DESIGN_VISION still shows T-14's ruling and "needs you" | O-5 cites 148; DESIGN_VISION's head note gains it; O-5's point stands (an interpreter is not a namespace) |
 | F-87 | I | DESIGN_VISION §5 vs 148 | D-B, D-C, D-D and D-E shown open, answered in 148; D-G built as T-1 | head note |
+| F-88 | U | spec §13h vs 182's second answer | `Chat` as one live object said nothing of 182's "One component, three hosts", each supplying its own context | one view in three hosts; the context an input from the host, never chat state; two hosts still separate (G-394) |
+| F-89 | U | spec §13f vs §13d | §13f's write-back read as covering every drawn link; it holds within one note | pointer to the cross-note form |
 
 **Still open** -- O-1 to O-4 and O-6 are work the design names; O-5 is a question for the reader:
 
