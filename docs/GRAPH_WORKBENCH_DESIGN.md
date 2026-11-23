@@ -1,7 +1,10 @@
 # The graph workbench: code, models and workflows as graph nodes
 
 > **Cross-check, 2026-11-22** (COMPUTATION_GRAPH_EDITOR_SPEC §14).
-> - §6's "the 2D editor's host" is answered: a plane inside the 3D view (50).
+> - §6 is answered in full: the 2D editor's host is a plane inside the 3D
+>   view (50); aggregates are a trie-path pattern (DESIGN_VISION T-15, built
+>   as G-388); rank-dominance collapse applies to every node (T-16, built as
+>   G-389).
 > - §4's four model files ARE on disk in `~/.cache/gpt4all` and are rows of
 >   `models.ROLES` (G-393), although 165 and 179 speak of them as not
 >   downloaded. See spec §10c.

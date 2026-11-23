@@ -19,6 +19,10 @@
 >   record, which says "Screenshots must be sparing" (2026-09-20 20:28).
 >   State is read as data through the harness, and a screenshot is taken when
 >   the question is what a person sees (spec §13k, F-69, F-80).
+> - §8's q2 and q3 are ruled: outputs are retrievable in the ego scope by
+>   default (DESIGN_VISION T-13); one interpreter for every workspace,
+>   nothing downloaded (148: "No, share one", over T-14's per-workspace
+>   environment).
 
 Addendum II puts this before the hovering SLM bar and asks that it be nailed
 down *first*: *"we move onward to the notebook kernel panel design first to nail

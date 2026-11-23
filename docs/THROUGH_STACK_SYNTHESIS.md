@@ -96,7 +96,7 @@ for the kernel's life. Enforcing "may only tighten" by re-installing the core
 would clobber readers' ordinary variables (`view`, `check`, `types`, `pages`,
 `chunk`, `focus` are core names). Options, for the reader: leave it; keep the
 core calls also under one reserved name (`domvec.search`, never shadowed);
-or warn when a cell shadows a core name.
+or warn when a cell shadows a core name. *(Asked in 181: "[No preference]"; left as found, §4.)*
 
 ## 2. Routes no document names (undocumented APIs)
 
@@ -136,5 +136,5 @@ run drawn in the signal flow. No new subsystem.
 
 * **Item 1 -- every call a run:** G-391, live run 88 (`50e79b4`).
 * **Item 3 -- review's answer path:** G-392, live run 90 (`caded6c`).
-* **Item 4 -- slots:** tested, held for the reader (1g above).
+* **Item 4 -- slots:** tested; asked in PLUGIN_GOAL 181, answered "[No preference]". Left as found, my choice, reversible on a word. The 2D editor shows which kind a shadowed name resolves to (COMPUTATION_GRAPH_EDITOR_SPEC §13n, boundary 4).
 * **Item 2 -- one model table:** G-393, live run 92 (`2bf4b0a`); chat = Hermes, my choice after "[No preference]" (PLUGIN_GOAL 181).

@@ -12,7 +12,15 @@
 >   a separate pane with no address" for terminals placed as cells.
 > - 187 (2026-11-22): code objects are established live objects and the
 >   graphical side is an existing node editor (spec §13). 1.6's one markdown
->   panel stands for prose.
+>   panel stands for every markdown record, prose notes and slates (spec
+>   F-83).
+> - T-14's ruling (its own environment per workspace) and 4c's "needs you":
+>   answered by the reader in 148, "No, share one" -- one interpreter for
+>   every workspace, nothing downloaded.
+> - §5 answered in 148 too: D-B "G-4: 94% is enough"; D-C re-key the chunk
+>   trie to five levels and split over-long single lines (R-C5); D-D "Drop
+>   spherical"; D-E disk cleanup not approved. D-G is T-1's post-process,
+>   built (4c).
 
 Asked for by PLUGIN_GOAL (142): every verbatim on the ego, the computation
 graph, panels, cells, gestures, rendering, syntax, assumptions, constraints and

@@ -1614,6 +1614,10 @@ with the app, **U** an unclear term or step.
 | F-81 | M | spec §13d (written in F-68) | "the record has one link" across notes, then "two paths" in the same paragraph; and a cross-note link wrote `{A}`, which binds note A whole, not the cell drawn from | one HARD link and one temporary link named; the link writes `{A#cell n}`, the outline's cell address; resolving it on a fence line is O-6 |
 | F-82 | I | spec §13h vs §13d, 182, G-394 | `Chat` "holds `messages` as a trait" beside the chat note's turns: two authorities for one conversation | the note's turns are the record; the trait mirrors them and each turn is written back |
 | F-83 | U | spec §13i, PRD G-402, G-403 vs §13b, §13h | the two rows were scoped to "prose", while §13b keeps prose notes and the cockpit slate apart, and the search node rests on G-403 for a slate field | scoped to markdown records: prose notes and slates (B10); B10 and the term "panel" say "markdown" for the same reason |
+| F-84 | I | THROUGH_STACK_SYNTHESIS 1g, §4 vs PLUGIN_GOAL 181 | shadowed core names "held for the reader" with options listed, after 181 asked and was answered "[No preference]" | marked: left as found, my choice, reversible; §13n boundary 4 shows the resolution |
+| F-85 | I | GRAPH_WORKBENCH §6 vs DESIGN_VISION T-15, T-16 | two of §6's three questions shown open, ruled by T-15 and T-16 and built (G-388, G-389) | head note: §6 answered in full |
+| F-86 | M | spec O-5, NOTEBOOK head; DESIGN_VISION T-14 and 4c vs 148 | O-5 cited T-14 as "one environment per workspace"; the reader answered T-14 in 148: "No, share one", one interpreter for every workspace. DESIGN_VISION still shows T-14's ruling and "needs you" | O-5 cites 148; DESIGN_VISION's head note gains it; O-5's point stands (an interpreter is not a namespace) |
+| F-87 | I | DESIGN_VISION §5 vs 148 | D-B, D-C, D-D and D-E shown open, answered in 148; D-G built as T-1 | head note |
 
 **Still open** -- O-1 to O-4 and O-6 are work the design names; O-5 is a question for the reader:
 
@@ -1637,8 +1641,9 @@ with the app, **U** an unclear term or step.
   the plane's nodes share one kernel (one note, or one kernel per plane),
   or cross-note links stay record-level. The answer also decides which note
   a node placed from the retrieval bar is written into. The record does not
-  say: T-14 rules one environment per workspace, which is packages, not one
-  namespace. Per-note state is NOTEBOOK §4's design ("a note is the unit a
+  say. 148 answered T-14 with "No, share one" (one interpreter for every
+  workspace, nothing downloaded), which is the Python environment and its
+  packages, not one kernel or one namespace. Per-note state is NOTEBOOK §4's design ("a note is the unit a
   reader thinks in"), mine and written before the plane held nodes, not a
   ruling.
 - O-6. A fence-line `{ref}` naming a cell (`{Note#cell n}`, the outline's
