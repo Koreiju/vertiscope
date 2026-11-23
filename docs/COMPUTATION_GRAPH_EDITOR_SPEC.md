@@ -12,7 +12,8 @@ interface design" -- that comes after, from this, plus web research (166 f).*
 the sensor, `AFFINE_MAP_GOAL.md`). Every other document cited here --
 including this one -- is a reading. Item numbers in `PLUGIN_GOAL.md` restart
 in each dated series, so every citation below carries its date:
-`(2026-11-01) 62` is not `(2026-10-11) 62`.
+`(2026-11-01) 62` is not `(2026-10-11) 62`. §12-§14 are the exception: they
+cite the latest series by bare number, under the rule at §13's head.
 
 ---
 
@@ -27,7 +28,7 @@ where it was read into a design.
 | 2026-09-09 | The most convenient interface "a small language model could interact with safely ... simple and separable for the REPL" | `CALLABLE_INTERFACE.md` (superseded in framing by the chained single-hop toolspace in `PLUGIN_GOAL.md`) |
 | 2026-10-11, Addendum II | "we move onward to the notebook kernel panel design first to nail it down correctly" | `NOTEBOOK_PANEL_DESIGN.md` (`P-N1..P-N10`, `P-M*`) |
 | 2026-10-18, 162-170 | Code artifacts; (170) the installed PyPI base drawn in 3D as projected chunks, layout chosen by measurement | `CODE_ARTIFACTS_DESIGN.md`, rows `G-233..G-241` |
-| 2026-10-18, 186a-186n | Install three local quantized models; "local code -> agents through interface panels"; (186c) "hard type constraints and conventions per quantised model and task"; (186e) recover the mothership's (mortegon) recursive reservoir 2D computation-graph editor | `GRAPH_WORKBENCH_DESIGN.md`, rows `G-237..G-240` (Open; models declined for now, 2026-11-16 (165)) |
+| 2026-10-18, 186a-186n | Install three local quantized models; "local code -> agents through interface panels"; (186c) "hard type constraints and conventions per quantised model and task"; (186e) recover the mothership's (mortegon) recursive reservoir 2D computation-graph editor | `GRAPH_WORKBENCH_DESIGN.md`, rows `G-237..G-240` (Open; models declined for now, 2026-11-16 (165), though the four files are on disk, §10c) |
 | 2026-10-29, 1-29 | The 3D/2D computation-graph reservoir; the cockpit and the craft ("something like kerbal space program ... first person view within a 'cockpit' as well as a 3rd person view") | `RESERVOIR_DESIGN.md` |
 | 2026-11-01, 49 | Cells run in real Jupyter kernels (`jupyter_client`, `ipykernel`) | built |
 | 2026-11-01, 50 | The 2D editor is a PLANE inside the 3D view, not a second pane | built (G-299 and kin) |
@@ -55,11 +56,11 @@ line in any design is interpretation.
 | Document | Holds | After 166 |
 |---|---|---|
 | `CALLABLE_INTERFACE.md` | The safe small-model interface; single-hop toolspace | **Revived in spirit**: 166's tool panels are its natural successor -- one toolspace per artifact, small enough to sit in a quantized model's context |
-| `NOTEBOOK_PANEL_DESIGN.md` | The kernel panel, outputs-in-markdown, vault-note addressing; §8 three open questions | Kept; its cells become the editor's unit |
+| `NOTEBOOK_PANEL_DESIGN.md` | The kernel panel, outputs-in-markdown, vault-note addressing; §8's three questions, all since answered (§4a, T-13, 148) | Kept; its cells become the editor's unit |
 | `GRAPH_WORKBENCH_DESIGN.md` | Code, models and workflows as graph nodes; the mothership's editor recovered | Kept for workflows and models; its "code as graph nodes" is narrowed by 166 (a) |
 | `CODE_ARTIFACTS_DESIGN.md` | The codebase and PyPI packages drawn in 3D | **Superseded in its layout part by 166 (a)**; confirmed and widened to the indexer by 167 Q1 ("Layout and indexer", G-375) |
 | `RESERVOIR_DESIGN.md` | The 2D/3D reservoir, cockpit, craft | Kept; §5 already corrected by (2026-11-01) 67 |
-| `SEARCH_GRAPH_DESIGN.md` | Search as one node, I/O as hard links | Kept; it is the db-search tool panel's graph form |
+| `SEARCH_GRAPH_DESIGN.md` | Search as one node, I/O as hard links | Kept; its node is the cockpit's `search` field (§13h); its stage panels were withdrawn by 164 |
 
 ## 3. What 166 (a) changes, measured
 
@@ -88,7 +89,8 @@ From 166 and the items it builds on:
    same way.
 3. A panel is a **code panel**: a notebook code cell (`(2026-11-01) 65`, one
    thing seen as node / panel / kernel cell / tree), run in the note's real
-   kernel (`(2026-11-01) 49`).
+   kernel (`(2026-11-01) 49`). *(Later, 167 c: a TOOL panel is read-only,
+   calls only (§13n); what runs is a reader's or an agent's call of it.)*
 4. Code and markdown are **one computation-graph unit** (166 d), which the
    slate already is: a Python module written as a markdown tree
    (`(2026-11-01) 62-63`).
@@ -242,7 +244,7 @@ lifecycle's back". Those are already "implicit calls into the world itself"
 (167 c). Below, each pane as calls only, a comment at each line's end.
 **`# exists`** marks a call that runs in a kernel today; **`# new`** marks a
 call the surface needs and the kernel does not have yet (the route behind it
-named where one exists). Nothing below is decided.
+named where one exists). Drafted undecided; G-377 has since built every call.
 
 ```python
 # search -- the store's retrieval
@@ -293,8 +295,8 @@ Agent.ask("summarise", context=hits)       # exists: the sidecar's local model, 
 check(slate)                               # exists: /slate_check -- the dialect's own errors (2026-11-01 62)
 ```
 
-Counted: **25 calls exist, 0 are new** (2026-11-22, G-377 built: the fourteen that were new, plus `types` for G-388; it was 10 exist / 14 new before) (computed: `python -m domvec.tool_surface` reads these blocks and resolves each call against the kernel bootstrap; `tests/test_tool_surface.py`) -- and every new one sits on a route
-or plugin action that already exists, so the surfaces are wrappers, not new
+Counted: **25 calls exist, 0 are new** (2026-11-22, G-377 built: the fourteen that were new, plus `types` for G-388; it was 10 exist / 14 new before) (computed: `python -m domvec.tool_surface` reads these blocks and resolves each call against the kernel bootstrap; `tests/test_tool_surface.py`) -- and every one that was new sat on a route
+or plugin action that already existed, so the surfaces are wrappers, not new
 machinery. Two rows decide their shape: `G-378` (a tool panel is read-only
 and cannot open the code behind it) and `G-380` (marimo-style: a call that
 changes the world in place -- `go`, `pin`, `act`, `attach` -- is invisible to
@@ -356,7 +358,9 @@ Sources: [marimo App API](https://docs.marimo.io/api/app/),
   notebooks as its `.py`; or keep the slate dialect (`G-379`) and compute the
   same def/use DAG with the standard `ast` module, marimo's rules (§5a) as
   the specification. The second keeps the dialect intact; the first gets
-  marimo's runtime. This is the reader's call.
+  marimo's runtime. *Answered by 167: "marimo style" (Q5) with the dialect
+  kept "very carefully" (Q4), so the second path, built as `dataflow.py`
+  (G-379, G-380).*
 - **Graph edits that keep the code readable.** A regular code artifact is
   graph-editable (`G-378`); an edit made on the graph has to be written back
   into the cell without destroying it. LibCST reprints code losslessly, and
@@ -418,11 +422,11 @@ Under that reading, each library is a part of one machine, not an option:
 
 | Part of the machine | What fills it | Status |
 |---|---|---|
-| edges of the graph face (who reads whose names) | marimo's rules | built as `domvec/dataflow.py` (G-380); marimo's own analysis is internal, not a public API -- whether to call into it instead is open |
+| edges of the graph face (who reads whose names) | marimo's rules | built as `domvec/dataflow.py` (G-380); marimo's own analysis is internal, not a public API -- answered by 167: our own, by marimo's rules (§9a) |
 | a graph-face edit written back into the code face, comments and layout kept | LibCST (MIT, **installed**, 1.9.0) | not started -- the write-back half of G-378 |
 | a module called as a node from another note | marimo's `app.embed(defs=...)` shape: free names in, definitions out | not started |
-| the plane on which the graph face is drawn and edited, inside the 3D layout | litegraph.js (MIT, Canvas2D, no framework) or the plane's own drawing (`planepanels.ts`) | open -- the plane already exists in 3D |
-| the agent that writes cells | smolagents `CodeAgent` (§10b) | not installed |
+| the plane on which the graph face is drawn and edited, inside the 3D layout | litegraph.js (MIT, Canvas2D, no framework) or the plane's own drawing (`planepanels.ts`) | answered by 187: an existing node editor, a pinned MIT litegraph (§13j) |
+| the agent that writes cells | smolagents `CodeAgent` (§10b) | installed (checked 2026-11-22, §10d); not yet wired |
 | the model behind each agent task | GGUFs through llama.cpp: GPT4All today (**installed**, 2.8.2), llama-cpp-python for constrained output | §10c |
 | what a ported model is, before it runs | `domvec/gguf_meta.py` (G-381) | built |
 
@@ -596,6 +600,11 @@ J.3-J.5 (the RAG, round-trip and iterated-compile scenarios).
 bottom) and a **graph face**. Mortegon's verbatim draws the two faces
 differently, and is the older record:
 
+*Superseded in part (2026-11-22): 182 retired the graph FORM and the flip
+gesture, and 187 made the 2D node the artifact's own interface in a node
+editor. The commute below now holds between the CODE and the graph editor
+(B2, §13c, §13d). The typed rows (M.2-M.5) stand as ports (§13d').*
+
 * **The two faces are PANEL form and GRAPH form.** "If a panel is double left
   clicked, it is compiled into computation graph form, which has similar
   folding over right click properties, but in graph space with pure links
@@ -668,7 +677,8 @@ syntax carried over.
 3. **The agent needs the editor's own calls.** Mortegon's agent authors with
    the user's primitives, and the cards ARE its API (§3A.2). So the §8 surfaces
    lack one surface: the editor's own -- `create`, `link`, `invoke`, `commit`,
-   `review`. Added below as `new`, for the reader to correct.
+   `review`. Added below; all five exist since (each marked `exists`;
+   `kernel_objects.py` boots them, §13h).
 4. **smolagents takes LangGraph's place in the same role.** Mortegon
    integrated GPT4All under LangGraph (E.10) and read a LangGraph node as a
    card (§3A.6). smolagents' step is the same unit in code form: a step is a
@@ -1097,7 +1107,12 @@ across notes, and both carry a record or its readout: the hard link, a
 fence-line `{ref}` (G-279; T-4 and T-6: `{ref}` resolves through "the kernel
 namespace" by trie address), and magnetism's temporary link, whose order
 passes a cell's output to the next (T-11, §12d). What neither carries is a live Python
-object: a value that exists only in one note's kernel.
+object: a value that exists only in one note's kernel. A third path is a reading, not
+the record: §9a and §10a read 166 e ("lightweight and modules composition of
+python programs") as a note CALLED like a function, its free names in and
+its definitions out (marimo's `app.embed(defs=...)` shape). That would carry
+values across notes without one shared kernel. It is "not started" (§10a),
+and is one of O-5's options.
 
 ### 13d'. Ports from Python -- the node-definition layer
 
@@ -1626,6 +1641,11 @@ with the app, **U** an unclear term or step.
 | F-87 | I | DESIGN_VISION §5 vs 148 | D-B, D-C, D-D and D-E shown open, answered in 148; D-G built as T-1 | head note |
 | F-88 | U | spec §13h vs 182's second answer | `Chat` as one live object said nothing of 182's "One component, three hosts", each supplying its own context | one view in three hosts; the context an input from the host, never chat state; two hosts still separate (G-394) |
 | F-89 | U | spec §13f vs §13d | §13f's write-back read as covering every drawn link; it holds within one note | pointer to the cross-note form |
+| F-90 | M | spec §9a vs F-38 | F-38 claimed §9a marked answered; it still ended "This is the reader's call" | marked: answered by 167 Q4, Q5 (the dialect kept; `dataflow.py`) |
+| F-91 | I | spec §1-§4, §8 | the date-citation rule stated for the whole spec while §12-§14 cite bare numbers; models "declined" without the files on disk; NOTEBOOK's §8 "open"; SEARCH as "the tool panel's graph form"; §4's tool panel as a kernel-run cell before 167 c; §8 "nothing decided" and "every new one" after G-377 built all | each restated in place |
+| F-92 | I | spec O-5, §13d vs §9a, §10a | O-5 omitted the spec's own reading of 166 e, a note called as a module (free names in, definitions out), which would carry values across notes | named in §13d and as one of O-5's three options |
+| F-93 | I | spec §10a vs §10d, 187, 167 | §10a's table still said smolagents "not installed", the plane's editor "open", and marimo's analysis "open" | installed; answered by 187 (§13j); answered by 167 (§9a) |
+| F-94 | I | spec §11b, §11d vs 182, 187 | the corrected reading still had a gesture flipping panel and graph FORMS, and §11d said the five editor calls were "added as `new`" while §8 counts them as existing | §11b noted as superseded in part (the commute is code <-> graph editor); §11d says all five exist (booted by `kernel_objects.py`) |
 
 **Still open** -- O-1 to O-4 and O-6 are work the design names; O-5 is a question for the reader:
 
@@ -1645,7 +1665,10 @@ with the app, **U** an unclear term or step.
   different notes. Today each note has its own kernel. Across notes the
   record gives a fence-line `{ref}` (a record, G-279, T-4, T-6) and
   magnetism's order (a readout, T-11), never an object living in another
-  kernel (§13d). Either
+  kernel (§13d). Three ways a live value could cross: the plane's nodes share
+  one kernel; a note is called as a module, its definitions returned
+  (§9a, §10a, my reading of 166 e); or cross-note links stay at records
+  and readouts. Either
   the plane's nodes share one kernel (one note, or one kernel per plane),
   or cross-note links stay record-level. The answer also decides which note
   a node placed from the retrieval bar is written into. The record does not
