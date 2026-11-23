@@ -1406,6 +1406,12 @@ Every row above is a download, so each waits for a yes.
 
 G-408 and G-409 need no download. G-410 to G-413 wait on §13j.
 
+A slice lands only with the plugin's existing live checks still passing:
+"I need something like this to work with our whole plugin without
+degrading the plugin's functions" (2026-11-08 19:16). The checks that drive
+the removed canvas API (O-2) are retired by name with the PRD's superseded
+rows, never left failing.
+
 "Live" means one thing here: each proof is a check in the MCP harness
 (`checks/live.mjs`, run through `confirm`), driven in the running app,
 reloading the plugin first, with its planted arm run the same way. Not a
@@ -1646,6 +1652,7 @@ with the app, **U** an unclear term or step.
 | F-92 | I | spec O-5, §13d vs §9a, §10a | O-5 omitted the spec's own reading of 166 e, a note called as a module (free names in, definitions out), which would carry values across notes | named in §13d and as one of O-5's three options |
 | F-93 | I | spec §10a vs §10d, 187, 167 | §10a's table still said smolagents "not installed", the plane's editor "open", and marimo's analysis "open" | installed; answered by 187 (§13j); answered by 167 (§9a) |
 | F-94 | I | spec §11b, §11d vs 182, 187 | the corrected reading still had a gesture flipping panel and graph FORMS, and §11d said the five editor calls were "added as `new`" while §8 counts them as existing | §11b noted as superseded in part (the commute is code <-> graph editor); §11d says all five exist (booted by `kernel_objects.py`) |
+| F-95 | M | spec §14a vs §13k | §14a's row for 2026-11-08 19:16 cited a rule in §13k ("every slice keeps the plugin's checks green") that §13k did not state | stated in §13k, with O-2's retired checks; also the 2026-09-23 22:56 row credited the browser's hover highlight to F-70, corrected |
 
 **Still open** -- O-1 to O-4 and O-6 are work the design names; O-5 is a question for the reader:
 
@@ -1731,7 +1738,7 @@ characters; the full text is in the inventory. Counts: 10 bear on the editor (tw
 | 2026-09-22 05:48 | Fix the _local_positions shell scaling | none for 2D: 3D |
 | 2026-09-23 01:46 | I'm seeing nodes way too jumbled together and tries that aren't DAG... | none for 2D: 3D trie layout |
 | 2026-09-23 22:41 | Are claude web fetches from the local network? | none for 2D: operational (session, build, git, process) |
-| 2026-09-23 22:56 | fix the missing images on the fan-out nodes. you will have to bring... | editor in part: highlight on hover and timing every phase (F-70); the rest is the 3D pipeline |
+| 2026-09-23 22:56 | fix the missing images on the fan-out nodes. you will have to bring... | editor in part: timing every phase (F-70); the hover highlight is the browser's, the rest the 3D pipeline |
 | 2026-09-23 23:16 | go ahead with the pipeline trace and time profile | none for 2D: 3D pipeline |
 | 2026-09-23 23:31 | yes, prove the placement hypothesis and fix it | none for 2D: 3D placement |
 | 2026-09-24 00:19 | What are the next steps? Assess from the global perspective. | none for 2D: operational (session, build, git, process) |
