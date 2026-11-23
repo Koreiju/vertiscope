@@ -1,5 +1,11 @@
 # The ego canvas (PLUGIN_GOAL 183)
 
+**Superseded 2026-11-22 by `COMPUTATION_GRAPH_EDITOR_SPEC.md` §12**, rewritten
+from the record after 184-186. This file's `![[...]]` / `[[...]]` sections, the
+separate canvas note and the nested panels are wrong against UR O.1a (a
+brace's three states are fold state), item 54 (one ego) and item 136 (links
+only from compilation); §12g lists each. Kept for its history.
+
 The reader's words are in `docs/PLUGIN_GOAL.md` item 183 and its answers.
 This file is my decomposition of them against what exists. Where it says
 "reading", it is my interpretation and not yet confirmed.

@@ -678,3 +678,551 @@ review("DuckDuckGo", "is this the right source?")  # exists: ask the reader befo
    under LangGraph. Does smolagents' code-writing step replace it -- each step
    a cell in the note -- or does the tick stay as the outer loop with
    smolagents inside the transform?
+
+## 12. The connected plan (2026-11-22, asked in PLUGIN_GOAL 186)
+
+186: "There was never really a conclusive plan on all these facets connecting
+together." This section is that plan. It invents nothing: each part is a
+decision already on record, and the work here is to put those decisions
+together. The sources are `DESIGN_VISION.md` (the whole-vision review, 142,
+ruled by 145), `RESERVOIR_DESIGN.md` §3, §4, §5, §10 and §12 (the mortegon
+dialect as distilled), §8-§11 above, and PLUGIN_GOAL 130-186. §12f names what
+my 183-185 slices got wrong against this record.
+
+### 12a. One record, many placements -- the governing rule
+
+"One representation, two places" (RESERVOIR §5, item 37; mortegon R.1, O.19).
+A thing -- a note, a cell, a chunk, a browser, a tool, a model, a run -- is
+ONE record: its slate text, its `{ref}` edges, its fold state and its current
+readout. What the reader sees are PLACEMENTS of that record, never copies kept
+in sync:
+
+| placement | where | when (159, 183, RESERVOIR §5) |
+|---|---|---|
+| a field, folded | one line of another record's text: `name {ref}` | braced-hidden |
+| a field, revealed | the target's rank-1 lines indented inline under that line, in the same grammar | revealed-internal |
+| a panel | its own Obsidian markdown view on the 2D plane, joined by a solid undirected line to every field that references it | resolved-external ("stuck") |
+| a node | a glowing node in 3D on the ego's own UMAP; hovered, it billboards its record revealed to its level | in flight |
+
+The first three are mortegon's three brace states (UR O.1a; RESERVOIR §3.1):
+"braced-hidden `{name}`; revealed-internal (the target's rank-1 lines indented
+inline, braces dropped); resolved-external (a solid line to a node already on
+screen)". **A brace's state is fold state, not text.** The note keeps
+`{outline_note}` whichever way it is drawn, so no gesture rewrites the line
+(this replaces 183's `![[...]]` / `[[...]]` encoding, 12f).
+
+"One record, one place drawn open" (184 a). A record revealed inline AND open
+as a panel would be two placements in 2D at once. Opening it as a panel
+resolves its braces to external: they fold to their line, and a solid line
+joins them to the panel.
+
+### 12b. The one panel, the one grammar
+
+- **The one markdown panel** is Obsidian's own markdown view, extended, the
+  same code everywhere: billboard markdown, code and node markdown, notebook
+  markdown cells, slates, the clipboard, chat (DESIGN_VISION 1.6; 5160 "Not
+  three different markdowns"; 5364 "one unified markdown panel"; 131-132 "the
+  slate is the markdown part of the notebook").
+- **The grammar** is the slate's: tabs and newlines, names (spaces allowed,
+  N.7), values, and `{ref}` as the only markup (RESERVOIR §3.1). Every field
+  NAME is a variable, drawn as a node in Obsidian's purple link style; values
+  stay plain (54, 55, 60); plain prose is never highlighted (137.9). It is a
+  Python module written as markdown (62, 63'): a name bound twice is an error.
+- **The gestures** are the native editor's plus UR §7.3.4 (RESERVOIR §3.3):
+  - a single left-click edits in place (M.8, 104);
+  - a right-click on a `{ref}` reveals or folds it;
+  - a right-click on the title collapses the record to its title, so the panel
+    becomes its node (110);
+  - typing `{` completes names, and an unknown name opens the halo;
+  - Tab, Shift-Tab and Enter restructure the tree;
+  - a double right-click on a `{ref}` deletes the link;
+  - a press held past the debounce picks a field up (182): dropped on the
+    plane it is resolved external (a panel), dropped on a field line it is
+    referenced there.
+- **NO special effects** (186, 158 "No fancy shapes"). A component is not a
+  box, a chip, a fold triangle or a hover toolbar. It is a field. Revealing
+  it draws its lines in the same grammar, at the same left margin and
+  indentation, on the same surface (185 "one uniform canvas surface").
+- **Editable where shown** (M.8, 104): a revealed line of a vault record is
+  edited in place and the edit is written to the record it belongs to. The
+  exception is a web chunk's markdown: "The markdown view of a cell must be
+  its own cell, and cannot be editable" (151). The page owns it.
+
+### 12c. The ego canvas
+
+- **The ego is the tool space** (158): "a more compact representation of the
+  *tool space* of the ego (i.e. web browser, attached artifacts, interactions
+  with the database, etc)". Its records are the cockpit (`ego`), the browsers,
+  the search (164, a single retrieval node), the notebooks, the chats, the
+  tagged chunks (74b) and the reader's own notes (77). It does NOT hold the
+  repository's code (158, 166).
+- **The canvas is the ego's record, written as fields.** The ego slate
+  `domvec/ego.md` already IS that record (54, 62). The canvas is that slate
+  with one field per component in compile order (142): `outline_note
+  {outline_note}`, `search {search}`, `browser {browser}`. Revealing a field
+  draws the component inline. Order is the order a model reads (T-2, T-11:
+  row-major). Whether the canvas is `ego.md` itself or a second note that
+  references `{ego}` first is decided by 54's "one ego, not two" (the next
+  paragraph).
+- **One ego** (54, 184 a). The canvas and the cockpit are one record. The
+  cockpit's fields (`view`, `camera`, `throttle`, `keys`, `plan`, `play`,
+  `search`) and the component fields sit in ONE slate. A separate "ego canvas"
+  note beside `ego.md` repeats "ego" -- the duplication 54 ruled out.
+- **At the centre of view** (183, the standing goal): the canvas is the plane's
+  central panel, and the plane is fixed to the camera at a constant distance
+  from the HUD (159).
+
+### 12d. Links: from compilation only
+
+- **Hard links come only from compilation** (136, 142): one record references
+  another "in any possible way" -- a `{ref}` in a slate or on a fence line, a
+  name a cell defines and another reads (marimo-style def/use, G-380, §5a), a
+  terminal call, two records attached to one chunk object. They are drawn
+  undirected (170.2, O.16); the direction is computed, not drawn. They are
+  solid when active, translucent when toggled off with a right-click (135d).
+- **Magnetism is placement and order, never a link** (136, 142, T-11). It
+  serialises compilation, rows top to bottom then left to right, and gives a
+  chat cell its context (T-2).
+- **A plain `[text](url)` or wiki link is a plain link** (T-4), not a
+  computational one. `[query](results)` is retrieval.
+
+### 12e. Computation, tools and agents -- the same records, run and called
+
+- **Cells are function nodes** (RESERVOIR §4): a fence's `{ref}`s are its
+  inputs, bound into the note's kernel before the run; the run is the forward
+  call, recorded (`FORWARD_MAPPED_TO`); the output written into the note is
+  the readout. A `{ref}` to an iterable runs per sample: the rollout.
+- **Dataflow** (G-380): marimo's rules over the slate's names. An edit marks
+  stale exactly what reads it. A world-changing call returns a value that
+  names what changed (§8).
+- **Every thing has a governing class** (T-10, 142): about 25 lines whose
+  public methods are its capability list. Its markdown control panel is
+  generated from those signatures as typed fields, and an instance is a
+  separate record linked to its class (89). A tool panel is that class
+  revealed read-only, calls only, the body never shown (167 c, F.5-F.6,
+  G-378). The browser's is built (`domvec/governing/browser.py`). The §8
+  surfaces are the rest.
+- **Black boxes all the way down** (80, 112, RESERVOIR §12.4): a `{code://...}`
+  field reveals its module's rank-1 definitions, each again a field, down to
+  the compiled base. The reveal is the one in 12a, nothing separate.
+- **The agent** (170.3, §10b-§11d) runs as smolagents steps. Each step is one
+  code cell appended to a note, its observation that cell's output. Its
+  context is the canvas read in compile order, each field as deep as it is
+  revealed (rank-1 minimalism, N.14). Its editor calls (`create`, `link`,
+  `invoke`, `commit`, `review`) are the reader's own gestures.
+- **Chat** (182) is a note of records: a turn's prompt, prose and each code
+  block are fields, and a code block carries the code-cell tools and typed
+  rows wherever it is drawn (182 addenda, G-395).
+- **Browsers** (T-5, 72, 137.4): a chunk is a browser cell framed to the chunk,
+  plus its markdown cell, both attached to one chunk object in code. The scope
+  ladder runs chunk -> group -> page -> browser (wheel over the header, T-9).
+  A browser field revealed in the canvas shows its governing fields, and its
+  live rendering at the field's scope (185: "similar seamlessness rendering
+  markdown chunks and browsers in their canvas views").
+
+### 12f. 3D: the same records, in flight
+
+- The ego is its OWN UMAP (76, 146), compact (149), drawn "exactly as world":
+  glowing nodes for its records and chunks, links for its compiled references
+  (183), "one uniform display of node and links" (158). The craft's circles
+  and dashed edges are the "deprecated node-based graph view artifacts" (186),
+  retired by 182 and 183.
+- A hovered node billboards its record revealed to its level: higher rank,
+  more of the tree (183).
+- **In flight vs stuck** (RESERVOIR §5, 159): double-click a linked node and
+  the ego flies until the camera plane meets it; at that intersection the
+  record becomes a placement on the 2D plane. Relegating it folds it back into
+  flight (183).
+- Readouts go on the perimeter with their bisector (G-282). Per 76, readouts
+  belong to the EGO's projection, not the world's shell (RESERVOIR §10.4
+  already notes G-282's placement as superseded). Signal flow is drawn as
+  light (99, 114).
+- The vehicle is non-holonomic, with first and third person views, always at
+  the centre of view (116, 146).
+
+### 12g. What my 183-185 slices got wrong against this record
+
+| built | the record | so |
+|---|---|---|
+| a separate note `domvec/ego canvas.md` beside `ego.md` | 54: one ego, the duplicative part fused | the canvas fields go INTO the ego slate |
+| `![[x]]` contained / `[[x]]` pulled out, rewriting the line on each gesture | O.1a: a brace's three states are fold state; the text stays `{x}` | `{x}` fields; state in the fold record |
+| nested Obsidian leaves in a card (184), seamless CSS over them (185) | 12b: revealed-internal is the target's lines inline in the same grammar | reveal, editable in place; no nested editors |
+| fold triangles, "nested" and "in canvas" chips, hover tools | 186, 158 | removed |
+| G-399: a card dropped on a card writes a wiki link | 136: "magnetizing new panels together doesn't create new links" | reverted. It corrupted the canvas note with `[[browser]]` x3 |
+| G-398: lines drawn between notes that share a wiki link | 136, 142, T-4: lines come from compilation | lines drawn from `{ref}`s and def/use |
+| the craft's circles still drawn in 2D and 3D | 182, 183, 186 | hidden now; G-400 draws the ego as world nodes |
+
+### 12h. Build order
+
+| row | slice | rests on |
+|---|---|---|
+| G-401 | the ego slate holds the canvas: one field per component, `name {ref}`, in compile order, seeded from the tool space (158); the separate canvas note and the nested-leaf machinery removed; braces kept, state in the fold record | 54, O.1a, 186 |
+| G-402 | revealed-internal is EDITABLE: a revealed line of a vault record is edited in place and written to its own record; a web chunk's reveal stays read-only (151) | M.8, 104, 151 |
+| G-403 | resolved-external: holding a field past the debounce and dropping it on the plane opens the record as a panel and folds its braces to external, with a solid line; dropping the panel back on a field line reveals it again; one placement open | 182, 184 a, O.1a |
+| G-404 | links from compilation only: G-399's card-on-card link reverted; the plane's lines drawn from `{ref}`s and def/use, undirected, with the right-click toggle | 136, 142, 135d, 170.2 |
+| G-405 | the craft's circles and dashed edges gone from 2D and 3D (plant restores them); then G-400: the ego as world nodes on its UMAP, billboards by level, double-click flight to the plane | 182, 183, 159 |
+| G-406 | a code field revealed carries its cell tools and typed rows; a tool field reveals its governing class's ~25 lines; an agent step appended as a cell | 182, T-10, 170.3 |
+| G-407 | a browser field revealed draws its governing fields and its live rendering at the field's scope, seamless with the surface | 185, T-5, T-9 |
+
+## 13. The 2D graph editor after 187 -- established live-object APIs and an existing node editor, integrated with the whole record (2026-11-22)
+
+187: "favor established APIs and packages for the graphical and interactive
+code structures rather than our in-markdown syntax ... the 'graphical' side
+is the graph editor for python modules and similar pre-existing permissive
+github repos". Then twice: "do thorough research to integrate the new ideas
+with your current research on the docs and the design for our 2D graph
+editor".
+
+**Read for this section, in full:** this spec §1-§12; `RESERVOIR_DESIGN.md`
+(all, §1-§12); `GRAPH_WORKBENCH_DESIGN.md`; `DESIGN_VISION.md` with its
+rulings (4b, 4c); `SEARCH_GRAPH_DESIGN.md`; `NOTEBOOK_PANEL_DESIGN.md`;
+`THROUGH_STACK_SYNTHESIS.md`; `EGO_CANVAS_DESIGN.md`; the head of
+`CALLABLE_INTERFACE.md`; PLUGIN_GOAL's verbatim from 2026-10-29 through 187;
+mortegon's UR §E, §F, §M-§T; the PRD rows G-277..G-400. External pages read
+are listed at the end. Where the text below says "reading" it is mine.
+
+### 13a. What binds the 2D editor -- the record, gathered
+
+Every row is the reader's own words or a ruling on them. 187 replaces none of
+them except where it says so, and recency decides any conflict (item 124).
+
+| # | commitment | source |
+|---|---|---|
+| B1 | ONE record, many placements -- never copies kept in sync | 37, R.1, O.19, RESERVOIR §5 |
+| B2 | the panel and graph forms COMMUTE: an edit in either round-trips losslessly | R.1, O.1, 135b |
+| B3 | hard links come ONLY from compilation (a name defined and read, a `{ref}`, a terminal call, one chunk object); magnetism is order, never a link | 136, 142, T-4, T-11 |
+| B4 | links are drawn UNDIRECTED, no arrowheads; the direction is computed | O.16, 170.2, G-383 |
+| B5 | dataflow is marimo-style: dependencies read statically from definitions and reads; running re-runs the readers | 167 f, G-380 |
+| B6 | cells run in the note's real Jupyter kernel; outputs live IN the markdown (trie content, one source of truth) | 49, NOTEBOOK §1, §4b |
+| B7 | every thing has a governing class of ~25 lines whose public methods are its capabilities; class and instance are two linked nodes | 142, T-10, 89 |
+| B8 | a TOOL panel is read-only, calls only, "implicit calls into the world itself"; a REGULAR code artifact is callable the same way AND explorable and graph-editable | 167 c, F.5-F.6, G-378 |
+| B9 | a Python object enters as typed rows `name: Type = value`; a function is memory lookup to its inputs, its output type inferred by wiring | M.2-M.5, E.6, O.15 |
+| B10 | the ONE markdown panel (Obsidian's own, extended) for every prose surface | 56, 133 c, 140 |
+| B11 | a code artifact has ONE interface -- run, terminal, open, unnest, typed rows -- wherever it sits | 182 addenda, G-395 |
+| B12 | the graph-view FORM goes; the nodes are the interactive typed artifacts themselves; in 2D only interface canvases, no circles | 182, 183 |
+| B13 | no special effects; one uniform display of node and link | 158, 186 |
+| B14 | gestures: single click edits in place; right-click reveals/folds; right-click on the base collapses the record to its node; double right-click deletes a link or reference; a press held past a debounce picks up, never a plain click | M.6-M.8, N.13, 110, 182 |
+| B15 | the plane is fixed to the camera; shift-scroll zooms the 2D plane, plain scroll the 3D view; the ego at the centre of view | 158, 159, 146 |
+| B16 | rank-1 minimalism; black boxes unfold recursively down to the base modules | N.14, R.3, 80, 112 |
+| B17 | the base toolset: browser, database retrieval, code/kernels, terminals, chat | 166, 187 |
+| B18 | signal flow is visible as light, in 2D and 3D | 99, 114 |
+| B19 | the agent loop is smolagents' step; each step a cell | 170.3, G-384 |
+| B20 | the bar: complex quantized-model workflows, custom tools written on the fly, in the same editor | 166 d-e, 187 |
+
+### 13b. What 187 changes
+
+187 changes two things, and the rows above decide everything else.
+
+1. **A code object's interactive form is an established API, not our
+   markdown grammar.** "Python objects that can be interacted with in this way
+   that is more structurally verbose and more well informed than our
+   syntactic approach". The standard for a Python object with live, typed,
+   observed state, drawn as its own interface and usable from code and a
+   terminal, is the **Jupyter widget** (traitlets on the Python side, the
+   kernel's comm channel between) with **anywidget's AFM** as the front-end
+   contract (§13e).
+2. **The graphical side is an existing node editor**, not the plane's own
+   drawing (§13c).
+
+What 187 does NOT change: B1-B11 and B14-B20. The slate grammar stays the
+form for PROSE notes and the cockpit, which are markdown (B10). 187 scopes its
+change to "the graphical and interactive code structures".
+
+### 13c. 182/183 and 187 are one requirement
+
+On the surface they conflict. 182 and 183 took the node-graph FORM out of 2D
+("completely do away with the 'graph view' form", "circles gone in 2D", "in
+the 2D plane, we deal only with the interface canvases themselves"). 187 puts
+a node graph editor on it. Read together they are one requirement, and
+182 says which: "the nodes are the interactive typed artifacts themselves ...
+in fully interactive and uniquely toolable form".
+
+What 182/183 retired was the ABSTRACT node: a circle standing for an artifact
+drawn elsewhere (G-281's graph form, the craft's circles). An editor in the
+ComfyUI lineage has no such node. Each node IS the object's interface: its
+inputs as sockets, its parameters as inline widgets, and its preview (an
+image, a text, a live DOM element) in the node's own body. So:
+
+- **a node on the plane is the object's canvas**, with ports on its edges. It
+  is never a circle (B12, B13);
+- **folded to its title** (litegraph's `collapse()`), it is the
+  panel-and-node fold parameter of item 110. That is the only "node form"
+  left, and it is the same record folded (B1);
+- **a prose note on the plane** is the same: the one markdown panel (B10) as
+  a node body, with ports for the names it defines and reads.
+
+This is the plane 183 described: interface canvases joined by links, where
+the links are now the editor's own.
+
+### 13d. One source of truth, three projections
+
+The text of the note -- its markdown, its code cells and their outputs -- is
+the only stored truth (B6, NOTEBOOK §1's "two sources of truth" argument). The
+graph editor's own JSON (`graph.serialize()`) is **never stored as authority**.
+It is rebuilt from the note, and a gesture on it is written back into the note
+as text.
+
+| projection | built from | written back by |
+|---|---|---|
+| **code**: the cells and the terminal | the note's text, run in its kernel (B6) | the reader typing |
+| **object canvas**: a live object's own widget | the object's traits over the comm (§13e) | `model.set` + `save_changes` -> the trait in the kernel |
+| **graph**: a node per cell, per live object and per function the note defines; a link per def/use edge | `dataflow.py` (B5) plus port definitions (§13d') | a drawn link becomes a line of code through LibCST; a deleted link removes it (§13f) |
+
+In trie terms: the note is a `vault://` page and its cells are addresses on it
+(`#cell n`, item 159). A node is a projection of one address. A link is a
+def/use edge between two addresses, computed and never stored, and a widget
+value is a trait whose assignment line sits at an address. Nothing in the
+editor holds state the trie does not.
+
+### 13d'. Ports from Python -- the node-definition layer
+
+Every editor in the ComfyUI and Langflow lineage has the same layer. The
+backend publishes a definition per node type, read from a Python class, and
+the front end registers node types from it. ComfyUI's `/object_info` returns,
+per node: inputs, outputs, `output_is_list`, `output_node`, and the input
+order. Langflow's `Component` lists `inputs` and `outputs`, each output named
+for the method that computes it. Mortegon's M.3 typed panel is the same
+information written as rows. **The three are one schema**, and B7/B9 already
+fix ours.
+
+| ours (B7, B9) | mortegon | ComfyUI | Langflow | in the editor |
+|---|---|---|---|---|
+| a function's parameter of a primitive type, with a default (`k: int = 8`) | `k: int = 8` row | an input WITH options (`("INT", {"default": 8})`) | `IntInput` | an inline **widget**, edited in place (B14) |
+| a parameter of an object type, or a `{ref}` value | `driver: WebDriver = {driver}` | a bare-type input (`("IMAGE",)`), socket-only | `HandleInput` | an input **socket** |
+| a `Literal[...]` parameter | -- | a combo list | `DropdownInput` | a combo widget |
+| the return, annotated | `scanner: {FunctionOutPutType}` | `RETURN_TYPES` | `Output(method=...)` | an output socket, its type from the annotation, else inferred by wiring (M.5, O.15) |
+| a governing class's public method (B7) | a function node of the object (F.5) | -- | one `Output` per method | an output socket per method, called when the link is written |
+| a trait of a live object | a property row (F.5) | -- | -- | a widget mirrored over the comm, or a socket when linked |
+| read-only tool class (B8) | `read_only`, `no_datablock` (F.6) | -- | -- | a node with sockets and no body code to open |
+
+The rule a widget-vs-socket choice needs is ComfyUI's, and it matches M.3. A
+primitive with a value is a widget. A type a value cannot be typed into is a
+socket. `force_input` turns a widget into a socket, which is exactly
+mortegon's "a literal row becomes `{ref}`".
+
+**Where the definitions come from:** the kernel, not a registry. A sidecar
+route asks the note's kernel for `inspect.signature` and `typing.get_type_hints`
+of every function and class the note defines, plus the traits of every live
+object (`HasTraits.traits()`). The plugin registers node types from that
+answer, so a function written in a cell is a node the moment the cell runs.
+That is "custom made code tools on the fly with the same editor interface"
+(B20), and it is ComfyUI's `object_info` sourced from a live namespace
+instead of a plugin directory.
+
+### 13e. Live objects: the comm bridge and the AFM host
+
+**The protocol, as specified.** An ipywidgets model is a comm with target
+`jupyter.widget`. `comm_open` carries the state, `comm_msg` carries
+`method: "update"` (state deltas), `"custom"` (free messages) or
+`"request_state"`, and `comm_close` ends it (the ipywidgets message spec,
+protocol version 2). anywidget objects are ipywidgets models whose front end
+is the AFM module in the `_esm` trait (a string or a file path; `_css`
+optional and loaded globally).
+
+**The AFM contract a HOST implements** (anywidget's AFM page, the spec as of
+anywidget 0.11). Each item is a MUST:
+
+1. load the module as an ES module;
+2. implement `AnyModel` per instance -- `get`, `set`, `off`,
+   `on("change:x")` (no arguments), `on("msg:custom", (msg, buffers))`,
+   `save_changes`, `send(content, callbacks, buffers)`;
+3. run `initialize({model, signal})` once per instance and await it before
+   any `render`;
+4. run `render({model, el, signal, host})` once per view, so several views
+   may share one model;
+5. abort `signal` when the instance is destroyed or the view removed;
+6. run any returned cleanup when its signal aborts;
+7. keep a registry of bindings keyed by model;
+8. resolve `"anywidget:<model_id>"` through `host.getWidget` and
+   `host.getModel`;
+9. cascade teardown to child views.
+
+A hook that throws fails that phase: abort, and report it.
+
+**What it means here.**
+- *Views are placements* (B1). Two views of one model are the AFM's own case
+  (item 4), so an object's canvas on the plane and its billboard in 3D are
+  two `render`s of one model. Nothing is copied.
+- *CSS goes in a shadow root*, as marimo hosts it. The AFM loads `_css`
+  globally, and Obsidian's own styles are global too (B10), so a widget's CSS
+  must not leak into the app.
+- *A trait change is a dataflow event.* marimo's rule: "When a UI element
+  assigned to a global variable is interacted with, marimo automatically runs
+  all cells that reference the variable (but don't define it)". In ours, a
+  `change:` from a view sets the trait in the kernel. `dataflow.rerun_plan`
+  then runs the cells that read the object's name (B5), and their outputs
+  re-render (B6). marimo also needs the wrapper `mo.ui.anywidget` for this to
+  happen, so a trait change alone does not count as a definition. The same
+  holds here: the comm bridge reports the change and the dataflow decides
+  the re-run.
+- *The terminal sees the same objects* (187 "terminal use"). A trait set from
+  a terminal call into the kernel (`w.value = 3`) emits `update`, and every
+  view redraws.
+
+**The bridge that has to exist** (measured in `domvec/obsidian/kernel.py`):
+`JupyterKernel.run` reads iopub only while a cell runs, and keeps `stream`,
+`execute_result`, `display_data` (text/plain) and `error`. It drops
+`comm_open`, `comm_msg` and the widget mimetype
+`application/vnd.jupyter.widget-view+json`. So: an iopub reader thread per
+kernel that keeps comm traffic at all times; a comm log with a sequence
+number that the plugin long-polls; and `comm_msg` sent back on the shell
+channel. `/chat_stream` is the only push channel today, so the long poll is
+the same pattern.
+
+### 13f. Links: drawn, compiled, undirected
+
+- **A drawn link is code** (B3). Connecting A's output to B's input writes
+  the binding into the note's cell: `b_in = a.out()` for a function, or
+  `b.x = a.y` / `traitlets.link((a, "y"), (b, "x"))` for live objects. It is
+  written losslessly through LibCST (installed). The edge then exists because
+  the code defines and reads a name. A link that would not compile, or would
+  close a cycle (`dataflow.CycleError`), is refused and never drawn.
+- **A deleted link removes its line.** A double right-click on the link does
+  it (N.13).
+- **Undirected** (B4). litegraph's `render_connection_arrows` defaults to
+  `false`. Its ports still sit left (in) and right (out), which is direction
+  in placement only, the computed direction 170.2 allows.
+- **Active vs off** (135d): a right-click on a link toggles it solid or
+  translucent. Off means the binding line is commented out, so the code view
+  shows the same thing.
+- **The editor never executes.** litegraph's `onExecute` / `runStep` engine
+  is not used. The kernel runs (B6) and the dataflow orders (B5). ComfyUI's
+  own caching is the same idea as ours, under other names:
+  - "only executes nodes that might produce a different result" is the stale
+    set;
+  - `IS_CHANGED` / `fingerprint_inputs` is our `exact_hash` of the cell source
+    (NOTEBOOK §4);
+  - `not_idempotent` is §8's world-changing call, which must return a value
+    naming what changed.
+- **Signal flow as light** (B18): a run lights its node and pulses its links.
+  That is G-321/G-331's pulse, drawn on the editor's links.
+
+### 13g. The editor on the plane -- litegraph's defaults against the record
+
+| litegraph default | the record | so |
+|---|---|---|
+| wheel zooms the canvas | plain wheel zooms 3D; shift-wheel zooms the plane (159) | `processMouseWheel` acts only with shift |
+| right-click opens a context menu | right-click reveals/folds; on the title, folds the record to its node (B14) | `processContextMenu` replaced: title -> `collapse()`; a row -> its reveal |
+| clicking a link opens a menu | double right-click deletes, right-click toggles (N.13, 135d) | link handlers replaced |
+| a node drags at once | a press held past the debounce picks up; a click edits (182) | drag starts after the hold |
+| node shapes: box, round, card | one shape (158, 186) | one shape, no per-kind decoration |
+| dark grey theme | Obsidian's own look for markdown bodies (56); black slate for code (S.4) | the theme from Obsidian's CSS variables |
+| its own canvas pan | the plane is fixed to the camera, the ego at the centre (159, 146) | the litegraph canvas is the plane's surface; the plane keeps its place |
+| search box on double-click | new nodes from the retrieval bar over typed nodes (133 d) | the searchbox fed by the retrieval bar's typed nodes |
+
+**DOM in a node.** A litegraph widget is drawn on the canvas. An Obsidian
+editor and an AFM view are DOM. ComfyUI's front end overlays DOM widgets on
+the canvas and re-places them from the canvas transform each frame, hiding
+them below a zoom threshold. The panels on our plane are already DOM over the
+3D canvas (`planepanels.ts`), so the same placement applies: a node's body is
+its DOM, positioned by `ds` (the canvas's DragAndScale). Reading: below the
+zoom threshold the node shows its title, which is the fold parameter of
+item 110, not a separate mode.
+
+### 13h. The base tools as live objects -- chat first
+
+Each base tool (B17) is ONE live-object class. Its public methods are its
+~25-line capability list (B7). Its traits are its state, and its read-only
+class listing is its tool panel (B8). `kernel_objects.py` already boots
+`search`, `Database`, `WebBrowser`, `Agent`, `Vault` and the editor calls
+(`create`, `link`, `invoke`, `commit`, `review`, `answer`) into every kernel,
+and `domvec/governing/browser.py` is the first governing class. Each becomes a
+traitlets object with an AFM view.
+
+**Chat first**, because 187 says chat models force the standard:
+- `Chat(model, tools)` holds `messages` as a trait;
+- its view is the conversation: a clear input box and typed blocks (G-394),
+  each code block a cell with the one code interface (B11);
+- tokens stream as `custom` messages, the protocol's free channel (171);
+- the callback is marimo's `mo.ui.chat` shape: `model(messages, config)` may
+  be a generator that yields DELTAS, which the view accumulates; a Stop
+  cancels it (sync generators get `GeneratorExit`, async ones
+  `CancelledError`);
+- the agent is smolagents' `CodeAgent` (B19): each step is a cell, and a
+  tool defined in a cell is a node on the plane AND a tool the agent is
+  handed in the next step (B20).
+
+### 13i. What stands from §12, what this replaces
+
+| §12 | after 187 |
+|---|---|
+| 12a one record, placements | **stands** (B1). The placements gain the object canvas (§13e) and the graph node (§13c) |
+| 12b one panel, the grammar, gestures, no effects, edit in place | **stands for prose and slates**. The gestures map onto the editor (§13g) |
+| 12c the ego canvas is the ego slate's fields | **stands as the cockpit's record**. Its components are nodes on the plane, the ego slate's fields ordering them (compile order, 142) |
+| 12d links from compilation | **stands**, made concrete by §13f |
+| 12e governing class, tool panels, agents, chat | **stands**, each made a live object (§13h) |
+| 12f 3D | **stands**: a 3D billboard is one more `render` of the same model |
+| 12h G-401 (fields in the ego slate) | built; stands for the cockpit |
+| 12h G-402/403 (reveal editable; resolved-external drop) | **superseded for code objects** by the object canvas and the editor's nodes; stands for prose fields |
+| 12h G-404 (links only from compilation) | **stands** |
+| 12h G-405 (the craft's circles hidden) | **stands** |
+| 12h G-406 (code field reveals tools and typed rows) | **superseded** by §13d' (typed rows ARE ports and widgets) |
+| 12h G-407 (browser field reveals its rendering) | **superseded** by the browser as a live object (§13h) |
+
+### 13j. Packages -- what can be used, and what each needs
+
+| package | licence | state (checked 2026-11-22) | for |
+|---|---|---|---|
+| `anywidget` | MIT | active; the AFM spec at 0.11 | live objects' Python side; pulls `ipywidgets` (BSD-3) |
+| `@comfyorg/litegraph` | MIT | **archived**. Merged into `Comfy-Org/ComfyUI_frontend` (`src/lib/litegraph`) on 2025-08-05, and that repository is **GPL-3.0**. Only the npm releases published before the merge are confirmed MIT | the graphical side, in TypeScript |
+| `litegraph.js` (jagenjo) | MIT | 0.7.18 the latest on npm; not confirmed maintained | the same, in JavaScript |
+
+So: **code is never taken from ComfyUI_frontend's tree** (GPL-3.0). The
+editor is a pinned, MIT-licensed litegraph release vendored into the plugin.
+Reading: the last standalone `@comfyorg/litegraph`, because it is TypeScript
+like the plugin and carries ComfyUI's widget work, frozen and owned here from
+then on.
+
+Every row above is a download, so each waits for a yes.
+
+### 13k. Build order -- each a live check with a planted arm
+
+| row | slice | proof (live) | planted |
+|---|---|---|---|
+| G-408 | the comm bridge: an iopub reader per kernel; a comm log with a sequence number, long-polled; `comm_msg` back on the shell channel | a comm opened by a cell is read in the plugin; a `comm_msg` sent from the plugin changes a value read back in the kernel | the reader off: the comm is never seen |
+| G-409 | node definitions from the live namespace (§13d'): signatures, hints, traits | a function defined in a cell appears in the definitions with its ports; a default primitive is a widget, an object type a socket | hints ignored: every input a socket |
+| G-410 | the AFM host in a plane panel, per the nine MUSTs | an anywidget made in a cell renders; set from a terminal, the view updates; set in the view, the kernel reads it; two views, one model | `save_changes` dropped: the kernel never sees the view's set |
+| G-411 | litegraph on the plane: nodes from G-409, links from def/use, gestures per §13g, no arrowheads, one shape | the graph's links equal `dataflow`'s edges; a drawn link writes one line, a deleted one removes it, a cycle is refused | a link drawn without the write-back: the code and the graph disagree |
+| G-412 | `Chat` as a live object (§13h) | tokens stream into the view; a code block runs as a cell; a tool defined in a cell is called by the agent | deltas accumulated in Python: the view gets whole messages |
+| G-413 | the base tools as live objects: Search, Browser, Terminal, Kernel, from their governing classes | each tool panel lists its class read-only; an instance's trait changes re-run its readers | the dataflow event off: readers stay stale |
+
+G-408 and G-409 need no download. G-410 to G-413 wait on §13j.
+
+### 13l. Readings that are mine
+
+None of these is a question: the record settles each, and they are written
+here so a correction has somewhere to land.
+
+- 182/183 + 187 = nodes that are their interfaces (§13c), by 182's own words
+  and recency (124).
+- The node-definition schema is one table (§13d'), from M.3 + ComfyUI +
+  Langflow.
+- litegraph's JSON is never authority (§13d), by NOTEBOOK §1's argument.
+- The pinned MIT litegraph is the editor (§13j), by licence and language.
+
+Sources (read 2026-11-22):
+[anywidget AFM](https://anywidget.dev/en/afm/),
+[anywidget, Getting started](https://anywidget.dev/en/getting-started/),
+[ipywidgets message spec](https://github.com/jupyter-widgets/ipywidgets/blob/689bc46a14e81c83c97ff8534b4eda6dfa46f574/packages/schema/messages.md),
+[marimo anywidget](https://docs.marimo.io/api/inputs/anywidget/),
+[marimo on anywidget](https://marimo.io/blog/anywidget),
+[marimo interactivity](https://docs.marimo.io/guides/interactivity/),
+[marimo chat](https://docs.marimo.io/api/inputs/chat/),
+[ComfyUI custom node properties](https://docs.comfy.org/custom-nodes/backend/server_overview),
+[ComfyUI walkthrough](https://docs.comfy.org/custom-nodes/walkthrough),
+[ComfyUI V3 schema](https://docs.comfy.org/custom-nodes/v3_migration),
+[ComfyUI node definition JSON](https://docs.comfy.org/specs/nodedef_json_1_0),
+[ComfyUI object_info](https://docs.comfy.org/api-reference/cloud/node/get-all-node-information.md),
+[ComfyUI JS objects](https://docs.comfy.org/essentials/javascript_objects_and_hijacking),
+[Langflow custom components](https://docs.langflow.org/components-custom-components),
+[Langflow licence](https://github.com/langflow-ai/langflow/blob/main/LICENSE),
+[Comfy litegraph configuration](https://github.com/comfy-org/litegraph.js/blob/master/_autodocs/configuration.md) (through Context7),
+[Comfy litegraph LGraphNode](https://github.com/comfy-org/litegraph.js/blob/master/_autodocs/api-reference/LGraphNode.md) (through Context7),
+[@comfyorg/litegraph README](https://cdn.jsdelivr.net/npm/@comfyorg/litegraph@0.17.2/README.md),
+[litegraph.js](https://github.com/jagenjo/litegraph.js),
+[litegraph.js on jsDelivr](https://www.jsdelivr.com/package/npm/litegraph.js),
+[ComfyUI_frontend](https://raw.githubusercontent.com/Comfy-Org/ComfyUI_frontend/main/README.md),
+[ComfyUI_frontend on ecosyste.ms](https://awesome.ecosyste.ms/projects/github.com%2FComfy-Org%2FComfyUI_frontend),
+[smolagents](https://huggingface.co/docs/smolagents/v1.7.0/reference/agents),
+[Ryven](https://github.com/leon-thomm/Ryven), [Elyra](https://pypi.org/project/elyra/),
+[Hamilton](https://pypi.org/project/sf-hamilton/1.43.1/).

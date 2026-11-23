@@ -6387,3 +6387,142 @@ the level of the node hovered (a higher-ranked node billboards a more
 comprehensive canvas); selecting or clicking moves a part between the plane
 and the 3D view (included on the plane, or relegated to the 3D chunk map).
 182's "circles stay as a level-of-detail fallback" is superseded in 2D.*
+
+### 184. (2026-11-22) The canvas IS native Obsidian panels, nested; a duplicate defers to the nested one
+
+Said over a screenshot of the plane: the ego canvas at the centre, its `ego`
+section unfolded, and the same `ego` slate open again as its own card at the
+right.
+
+> With duplicative panels present, the nested ones in the central canvas are
+> the correct ones. a simple nesting field at the panel's main header level
+> would then generalize the nesting to allow for the panel to collapse on its
+> heading field. Also, the nested fields should be native obsidian markdown
+> panels. We'll start with that and generalize with graph links on the
+> generic obsidian panels. I see way too many deviant structures in your
+> solution proposal that is otherwise purely obsidian markdown panels in the
+> graph plane editor view. So the same panels that work in the tabs in
+> obsidian also work interoperably and the same and are what the ego canvas
+> really basically is at its base.
+
+*Read as (mine, to be confirmed): (a) a note contained in the canvas has ONE
+panel -- the nested one; asking for it elsewhere (the cockpit's own card, a
+node click) reaches that nested panel, never a second card. (b) The canvas's
+sections are not a structure of their own (no custom section rows or fold
+triangles): each is the SAME plane panel a note gets anywhere -- its header
+bar, its tools, a native Obsidian markdown leaf -- placed inside the canvas
+card. (c) Nesting is a FIELD on that header bar: set, the panel sits in the
+canvas; cleared, it is a free panel on the plane (183's pull out / push in,
+as a field rather than a separate gesture). (d) A nested panel collapses on
+its heading the way any panel does -- to its header bar. (e) Next, not now:
+graph links generalised over the same generic panels.*
+
+### 185. (2026-11-22) Seamless, not nested: one uniform canvas surface
+
+Said over a screenshot of 184's first slice: the ego canvas card with the
+`ego` slate in a bordered, scrolling box inside it, and `outline_note` and
+`g394 look` below as header pills each with a `nested` chip.
+
+> I don't think "embedded" works as well as I'd hoped. Ideally, our canvases
+> are *seamlessly* integrated together, meaning no 'nesting' of canvases
+> within canvases either. The attached structure has nested panels from the
+> looks of it, but "seamless" means one uniform canvas surface keeping all
+> interactive subsurfaces *seamlessly* embedded. The structure is almost
+> purely at the recursive rendering and styling level for things like
+> markdown and code artifacts, with similar "seamlessness" rendering markdown
+> chunks and browsers in their canvas views.
+
+*Read as (mine, to be confirmed): 184's one-panel-per-note and native leaves
+stand; its LOOK goes. Inside the canvas a component is not a box: no border,
+no card background, no scrollbar of its own, no pill -- its native editor
+grows to its content and the canvas scrolls as ONE surface, one component
+running into the next like sections of one document. What marks a component
+is a quiet heading line (its name), which still folds it; the in/out field
+stays as a small control on that line, not as a "nested" chip. The same
+seamless rendering is owed to markdown chunks and browsers in their canvas
+views (next). 183's `![[...]]` stays the storage; "embedded" is not the look.*
+
+### 186. (2026-11-22) No special effects: the canvas is a uniform set of markdown fields; and a conclusive plan
+
+Said over two screenshots of 185's slice: (1) the canvas scrolled to a
+component drawn in reading view as huge serif headings with pills, a dashed
+plane-link line crossing the canvas, and the craft's circle nodes still drawn
+beneath it; (2) the canvas with the `ego` slate and, under it, `▸ outline_note`
+and `▸ g394 look` as quiet fold lines.
+
+> Leftover edge and the deprecated node-based graph view artifacts still
+> present.
+>
+> The "nested" fields are also incorrect because they're supposed to be a
+> uniform set of markdown fields, NO SPECIAL EFFECTS
+
+and then:
+
+> Please continue with a solid understanding of the asks and the overall
+> design, since we did significant research on UI component elements and how
+> our computation in the graph will work live, and how we'll structure
+> calling code as tools etc. There was never really a conclusive plan on all
+> these facets connecting together from the sounds of it.
+
+*Read as (mine, to be confirmed): the canvas's components are FIELDS in the
+same markdown grammar as every other slate field (a name and its value, the
+value a `{ref}` that reveals in place) -- no fold triangles, hover chrome,
+special heading styling or per-component rendering mode. The leftover dashed
+edges and the craft's circle nodes under the plane are 182's retired graph
+view and must go from 2D. And before more slices: one plan that connects the
+UI components, the live computation in the graph, and code called as tools.*
+
+*Three questions on 186 (COMPUTATION_GRAPH_EDITOR_SPEC §12h), the reader's
+answers (verbatim): the canvas model -- **"[No preference]"**; edit a
+revealed line in place -- **"[No preference]"**; the craft under the plane --
+**"[No preference]"**. The questions should not have been asked: the record answers each
+(UR O.1a's three brace states, items 54, 104, 136, 151, 158, 182; see
+COMPUTATION_GRAPH_EDITOR_SPEC §12, rewritten from the record). Taken as leave
+to proceed on those answers: the canvas IS a slate of `name {ref}`
+fields revealed in place (G-401); a revealed line is editable where it is
+shown, written back to its own note (G-402); the craft's circles and edges are
+hidden now behind a planted flag, ahead of G-400 (G-405).*
+
+### 187. (2026-11-22) Established interactive-object APIs over the in-markdown syntax
+
+Said after COMPUTATION_GRAPH_EDITOR_SPEC §12 was rewritten around the slate's
+`{ref}` grammar, while G-401 (the canvas as the ego slate's fields) was being
+built:
+
+> i think we should favor established APIs and packages for the graphical and
+> interactive code structures rather than our in-markdown syntax to keep
+> interactions and canvases consolidated to their base canvas display and
+> interaction types. there are likely plenty of python objects that can be
+> interacted with in this way that is more structurally verbose and more well
+> informed than our syntactic approach, while still aiming to the same end of
+> live compilation and updates over a computation graph that renders
+> real-time updates to the different interactive code-object thing canvas
+> interfaces, which are somewhat like base python code structures but with
+> the added capability of being dynamic, live, and interactive components or
+> objects themselves, while still not taking away from base code manipulation
+> etc and enabling for terminal use of the code as well as in-canvas
+> interactions to see live updates, similar to how we tried with our ego
+> card, but of course generalized to code objects. This keeps the assumption
+> on our base tool set of things like browser, database retrieval,
+> code/kernels, terminals, chat, etc. But things like chat models is where we
+> start to see python code objects rendered live as a real standard that that
+> our computation graph has to handle. It has to be well designed enough to
+> the extent that it supports coding complex quantized model workflows with
+> custom made code tools on the fly with the same editor interface.
+
+*Then, mid-turn (verbatim):*
+
+> this means that the "graphical" side is the graph editor for python modules
+> and similar pre-existing permissive github repos etc.
+
+*Read as (187), mine, to be confirmed by what is built: (a) a live code object
+is an established interactive-object API -- a Python object with typed,
+observed attributes, synced both ways with its kernel, drawn as its own
+widget -- not a markdown grammar of ours; the same object is usable from code
+and the terminal, and every change shows live in its canvas; (b) the
+GRAPHICAL side, the graph of those objects and of Python modules, is an
+existing permissively licensed node editor, not the plane's own drawing; (c)
+the base toolset stays (browser, retrieval, kernels, terminals, chat), each
+exposed as such objects; chat models are the first case that forces it; (d)
+the bar is complex quantized-model workflows with custom tools written on the
+fly, in the same editor.*
