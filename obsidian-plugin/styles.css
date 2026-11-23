@@ -1515,3 +1515,4 @@ body.domvec-chatui-pulling, body.domvec-chatui-pulling * { user-select: none !im
 .domvec-canvas-body > .workspace-leaf > .workspace-leaf-content { height: 100%; }
 .domvec-canvas-body .view-header { display: none; }
 .domvec-canvas.plant-autoheight .domvec-canvas-body > .workspace-leaf { height: auto; }
+.domvec-canvas-head.is-armed { box-shadow: inset 0 0 0 2px #7aa2f7; cursor: grabbing; }

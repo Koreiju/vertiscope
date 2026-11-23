@@ -12069,6 +12069,80 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-397",
+      asks: "the ego canvas's graph operations (PLUGIN_GOAL 183: pull out / push in, order = compile order): a CLICK on a section's header folds it and pulls nothing; a header HELD past the debounce and dropped off the canvas turns its line into a link `[[...]]` and opens the component as its own panel at the drop; that panel's card dropped on the canvas turns the line back into `![[...]]` AT the drop position and closes the panel; a header held and dropped inside the canvas moves its line there; planted plantPullNoLine: the pulled-out component's line still claims it is contained",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvecPlane, C = d.canvas.constructor, CP = "domvec/ego canvas.md";
+          await d.openCanvas(); await d.canvas.render(); await sleep(800);
+          const file = app.vault.getAbstractFileByPath(CP), before = await app.vault.read(file);
+          const out = { planted: ${planted} };
+          C.plantPullNoLine = ${planted};
+          try {
+            const card = d.panelOf(CP).card, plane = d.host.plane();
+            const head = (p) => card.querySelector('.domvec-canvas-section[data-path="' + p + '"] .domvec-canvas-head');
+            const secs0 = await d.canvas.sections();
+            const x = secs0.find((s, i) => i > 0 && s.embedded && app.vault.getAbstractFileByPath(s.path) && !d.panelOf(s.path));
+            if (!x) return { error: "no embedded section to pull" };
+            out.x = x.path; out.x_index = secs0.indexOf(x);
+            const pe = (el, type, px, py) => (type === "pointerdown" ? el : window).dispatchEvent(new PointerEvent(type, { clientX: px, clientY: py, button: 0, bubbles: true, pointerId: 1 }));
+            const hr = () => head(x.path).getBoundingClientRect();
+            // A CLICK: folds, never pulls.
+            const ops0 = { ...d.canvas.opStats };
+            let r0 = hr(); pe(head(x.path), "pointerdown", r0.left + 20, r0.top + 5); await sleep(60); pe(head(x.path), "pointerup", r0.left + 20, r0.top + 5); head(x.path).click(); await sleep(900);
+            out.click = { clicks: d.canvas.opStats.clicks - ops0.clicks, pulled: d.canvas.opStats.pulled - ops0.pulled, unfolded: d.canvas.unfolded.has(x.path) };
+            d.canvas.unfolded.delete(x.path); await d.canvas.render(); await sleep(300);
+            // HOLD and drop OFF the canvas: pulled out.
+            const cr = card.getBoundingClientRect(), pr = plane.getBoundingClientRect();
+            const drop = { x: cr.left - pr.left > 160 ? cr.left - 120 : cr.right + 40, y: cr.top + 60 };
+            r0 = hr(); pe(head(x.path), "pointerdown", r0.left + 20, r0.top + 5); await sleep(C.HOLD_MS + 150);
+            pe(head(x.path), "pointermove", r0.left + 40, r0.top + 5); pe(head(x.path), "pointermove", drop.x, drop.y); pe(head(x.path), "pointerup", drop.x, drop.y);
+            for (let i = 0; i < 30 && !d.panelOf(x.path); i++) await sleep(100);
+            await sleep(400);
+            const s1 = (await d.canvas.sections()).find((s) => s.path === x.path);
+            const pc = d.panelOf(x.path)?.card;
+            out.pull = { line_is_link: !!s1 && s1.embedded === false, same_index: (await d.canvas.sections()).findIndex((s) => s.path === x.path) === out.x_index,
+                         panel_open: !!pc, near_drop: !!pc && Math.abs(pc.getBoundingClientRect().left - drop.x) < 80 };
+            if (!${planted}) {
+              // PUSH IN: the card dropped on the canvas at section 4's top -- BELOW its
+              // own pulled-out line (index 1), so it lands just before that section: index 3.
+              const sec1 = card.querySelectorAll(".domvec-canvas-section")[4].getBoundingClientRect();
+              d.wireDrop(x.path, cr.left + 40, sec1.top + 2);
+              for (let i = 0; i < 30 && d.panelOf(x.path); i++) await sleep(100);
+              await sleep(500);
+              const s2 = await d.canvas.sections();
+              out.push = { contained: s2.some((s) => s.path === x.path && s.embedded), index: s2.findIndex((s) => s.path === x.path), panel_closed: !d.panelOf(x.path) };
+              // REORDER: the LAST section held and dropped at the top of section 1.
+              await d.canvas.render(); await sleep(400);
+              const last = s2[s2.length - 1];
+              const lh = head(last.path), lr = lh.getBoundingClientRect();
+              const t1 = card.querySelectorAll(".domvec-canvas-section")[1].getBoundingClientRect();
+              pe(lh, "pointerdown", lr.left + 20, lr.top + 5); await sleep(C.HOLD_MS + 150);
+              pe(lh, "pointermove", lr.left + 20, lr.top - 20); pe(lh, "pointermove", cr.left + 40, t1.top + 2); pe(lh, "pointerup", cr.left + 40, t1.top + 2);
+              await sleep(800);
+              const s3 = await d.canvas.sections();
+              out.move = { path: last.path, index: s3.findIndex((s) => s.path === last.path), count: s3.length, was: s2.length };
+            }
+          } finally {
+            C.plantPullNoLine = false;
+            if (out.x) { try { d.panelOf(out.x)?.leaf.detach(); } catch (e) {} }
+            await app.vault.modify(file, before);
+            await sleep(500); await d.canvas.render();
+          }
+          return out;
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean;
+        return { pass: !c.error && c.click.clicks === 1 && c.click.pulled === 0 && c.click.unfolded
+                       && c.pull.line_is_link && c.pull.same_index && c.pull.panel_open && c.pull.near_drop
+                       && c.push.contained && c.push.index === 3 && c.push.panel_closed
+                       && c.move.index === 1 && c.move.count === c.move.was
+                       && !planted.error && planted.pull.panel_open && planted.pull.line_is_link === false,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-396",
       asks: "the ego as ONE central artifact canvas (PLUGIN_GOAL 183): `domvec/ego canvas.md` holds the cockpit and the ego's members as embedded sections (`![[...]]`), seeded from the craft's membership; drawn at the plane's CENTRE; the cockpit's section unfolded with its LIVE editor (the slate's own text, editable), the rest folded to a header with no editor; a header click unfolds a section (an editor mounted) and folds it again (released); planted plantAutoHeight: the unfolded section draws no editor (seen 2026-11-22); the canvas FOLLOWS the ego -- a note made after the seed joins it, contained (a check's scratch note never does); planted plantSeedOnce: it does not",
       async run() {

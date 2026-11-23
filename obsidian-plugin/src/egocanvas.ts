@@ -27,6 +27,10 @@ export interface CanvasDesk {
   plane(): HTMLElement | null;
   /** The ego's members as the craft knows them (G-291's rule). */
   members(): string[];
+  /** A component opened as its own panel at a screen point (pulled out). */
+  openPanel(path: string, at: { x: number; y: number }): Promise<void>;
+  /** A component's own panel closed (pushed in: the canvas draws it now). */
+  closePanel(path: string): void;
 }
 
 export class EgoCanvas {
@@ -91,6 +95,105 @@ export class EgoCanvas {
    *  never followed -- a note made after the seed is not in the canvas. */
   static plantSeedOnce = false;
   syncStats = { joined: 0 };
+  /** G-397: what the graph operations did, for the harness. */
+  opStats = { pulled: 0, pushed: 0, moved: 0, clicks: 0, last: null as any };
+  static HOLD_MS = 350;
+  /** Planted (G-397): a pull-out only opens the panel -- the canvas line is
+   *  not rewritten, so the canvas still claims to contain it. */
+  static plantPullNoLine = false;
+
+  /** The section index a screen point falls on (for a drop inside the canvas). */
+  indexAt(y: number): number {
+    if (!this.el) return 0;
+    const secs = Array.from(this.el.querySelectorAll(".domvec-canvas-section")) as HTMLElement[];
+    for (let i = 0; i < secs.length; i++) { const r = secs[i].getBoundingClientRect(); if (y < r.top + r.height / 2) return i; }
+    return secs.length;
+  }
+
+  /** Is a screen point on the canvas card? */
+  holds(x: number, y: number): boolean {
+    const card = this.el?.parentElement;
+    if (!card) return false;
+    const r = card.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
+
+  /** PULL OUT (183): the line becomes a link, the component its own panel. */
+  async pullOut(path: string, at: { x: number; y: number }): Promise<void> {
+    if (!EgoCanvas.plantPullNoLine) await this.setLine(path, false);
+    this.unfolded.delete(path);
+    await this.desk.openPanel(path, at);
+    this.opStats.pulled++; this.opStats.last = { op: "pull", path };
+  }
+
+  /** PUSH IN (183): a panel dropped on the canvas is contained, at the drop. */
+  async pushIn(path: string, y: number): Promise<void> {
+    // A pulled-out component still has its line: dropped BELOW it, the line
+    // leaves first (the same correction as a reorder).
+    const from = (await this.sections()).findIndex((q) => q.path === path);
+    let to = this.indexAt(y);
+    if (from >= 0 && to > from) to--;
+    await this.setLine(path, true, to);
+    this.desk.closePanel(path);
+    this.opStats.pushed++; this.opStats.last = { op: "push", path };
+  }
+
+  /** REORDER (item 142): a header dropped within the canvas moves its line. */
+  async moveTo(path: string, y: number, embedded: boolean): Promise<void> {
+    const secs = await this.sections();
+    const from = secs.findIndex((s) => s.path === path);
+    let to = this.indexAt(y);
+    if (from >= 0 && to > from) to--;                 // the line itself leaves first
+    if (to === from) return;
+    await this.setLine(path, embedded, to);
+    this.opStats.moved++; this.opStats.last = { op: "move", path, from, to };
+  }
+
+  /** A header: a CLICK folds (or, pulled out, opens the panel); a press HELD
+   *  past the debounce picks the section up -- dropped off the canvas it is
+   *  pulled out, dropped on it it moves (182's rule: a click is never a pull). */
+  private holdHeader(head: HTMLElement, s: Section, click: () => void): void {
+    // The fold answers the CLICK event itself -- a keyboard or assistive
+    // click too, which carries no pointer (G-396's check found a header that
+    // listened to pointers only); a click that ENDS a held drag is swallowed.
+    let swallow = false;
+    head.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (swallow) { swallow = false; return; }
+      this.opStats.clicks++; click();
+    });
+    head.addEventListener("pointerdown", (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      const x0 = e.clientX, y0 = e.clientY;
+      let armed = false, ghost: HTMLElement | null = null;
+      const timer = window.setTimeout(() => {
+        armed = true; head.addClass("is-armed");
+        ghost = document.body.createDiv({ cls: "domvec-chatui-ghost", text: s.path.replace(/^.*\//, "").replace(/\.md$/, "") });
+        ghost.style.left = x0 + 8 + "px"; ghost.style.top = y0 + 8 + "px";
+      }, EgoCanvas.HOLD_MS);
+      const move = (m: PointerEvent) => {
+        if (!armed) { if (Math.hypot(m.clientX - x0, m.clientY - y0) > 4) { window.clearTimeout(timer); done(); } return; }
+        if (ghost) { ghost.style.left = m.clientX + 8 + "px"; ghost.style.top = m.clientY + 8 + "px"; }
+      };
+      const up = (u: PointerEvent) => {
+        window.clearTimeout(timer);
+        const was = armed;
+        done();
+        if (!was) return;                          // the click event follows and folds
+        swallow = true; window.setTimeout(() => { swallow = false; }, 400);
+        if (this.holds(u.clientX, u.clientY)) void this.moveTo(s.path, u.clientY, s.embedded);
+        else void this.pullOut(s.path, { x: u.clientX, y: u.clientY });
+      };
+      const done = () => {
+        window.removeEventListener("pointermove", move, true);
+        window.removeEventListener("pointerup", up, true);
+        head.removeClass("is-armed"); ghost?.remove(); ghost = null;
+      };
+      window.addEventListener("pointermove", move, true);
+      window.addEventListener("pointerup", up, true);
+    });
+  }
   async sync(): Promise<number> {
     if (!this.file || EgoCanvas.plantSeedOnce) return 0;
     const have = new Set((await this.sections()).map((s) => s.path));
@@ -121,12 +224,16 @@ export class EgoCanvas {
       head.createSpan({ cls: "domvec-canvas-fold", text: s.embedded ? (open ? "▾" : "▸") : "↗" });
       head.createSpan({ cls: "domvec-canvas-name", text: name });
       if (!(f instanceof TFile)) head.createSpan({ cls: "domvec-canvas-missing", text: "  (no such note)" });
-      head.onclick = (e) => {
-        e.stopPropagation();
-        if (!s.embedded) return;
+      this.holdHeader(head, s, () => {
+        if (!s.embedded) {
+          // A pulled-out section's header brings its panel forward.
+          const r = this.el!.getBoundingClientRect();
+          void this.desk.openPanel(s.path, { x: r.right + 24, y: r.top + 40 });
+          return;
+        }
         if (this.unfolded.has(s.path)) this.unfolded.delete(s.path); else this.unfolded.add(s.path);
         void this.render();
-      };
+      });
       head.addEventListener("mousedown", (e) => e.stopPropagation());
       if (open && f instanceof TFile) {
         keep.add(s.path);

@@ -747,6 +747,19 @@ export class PlaneDesk {
       const g: any = this.app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
       return [...new Set<string>((g?.craft?.nodes || []).filter((n: any) => n.kind === "note" && n.path).map((n: any) => n.path))];
     },
+    openPanel: async (path, at) => {
+      const f = this.app.vault.getAbstractFileByPath(path);
+      if (!(f instanceof TFile)) return;
+      const plane = this.host.plane();
+      const r = plane?.getBoundingClientRect();
+      const p = await this.open(f);
+      const c = p?.card || this.panelOf(path)?.card;
+      if (c && plane && r) {
+        c.style.right = "auto"; c.style.left = `${Math.round(at.x - r.left)}px`; c.style.top = `${Math.round(at.y - r.top)}px`;
+        clampToPlane(c, plane);
+      }
+    },
+    closePanel: (path) => { const q = this.panelOf(path); if (q) { try { q.leaf.detach(); } catch { /* gone */ } } },
   });
   async openCanvas(): Promise<any> {
     const f = await this.canvas.ensure();
@@ -1018,6 +1031,11 @@ export class PlaneDesk {
   plantNoWiring = false;
   wireStats = { wired: 0, last: null as any };
   wireDrop(from: string, x: number, y: number): boolean {
+    // PUSH IN (183, G-397): a card dropped on the ego canvas is contained there.
+    if (from !== CANVAS_PATH && this.panelOf(CANVAS_PATH) && this.canvas.holds(x, y)) {
+      void this.canvas.pushIn(from, y);
+      return true;
+    }
     const f = this.flipped;
     if (!f || this.plantNoWiring || !f.members.includes(from)) return false;
     const to = f.members.find((m) => {
