@@ -691,7 +691,7 @@ syntax carried over.
 ```python
 # the editor -- the graph itself, by the same calls the gestures make (mortegon §3A.7, S.1)
 create("scan for duckduckgo url", "{scan}")  # exists: a node, panel and graph at once (N.2)
-link("DuckDuckGo", "scanner")              # exists: left-click-drag in graph form (N.4)
+link("DuckDuckGo", "scanner")              # exists, but writes a wiki link today; owed: a compiled link (O-7)
 invoke("DuckDuckGo")                       # exists: run the walk; nodes reveal as reached (O.9)
 commit("research agent")                   # exists: keep a subgraph as one node (3A.7)
 review("DuckDuckGo", "is this the right source?")  # exists: ask the reader before going on (3A.7)
@@ -1266,7 +1266,7 @@ plugin.
 | its own pan and zoom | the plane is fixed to the camera at a constant distance, with the ego at the centre (159, 146) | the plane does not move with the 3D camera. The editor's pan and zoom ARE the plane's: shift-wheel zooms and a drag on empty plane pans. The 3D camera moves only the world behind it |
 | search box on double-click | new nodes from the retrieval bar over typed nodes (133 d) | the searchbox fed by the retrieval bar's typed nodes |
 | a click selects | a click on a node's TITLE opens its halo (T-8, 81); a click in its BODY edits in place (M.8) | title click -> the halo; a double-click on the title opens or folds the node (T-8), the same fold as the right-click on the title (M.6, 110), two ways to one action; body clicks reach the body |
-| groups (a framed region holding nodes) | the containment gesture: Alt+click gathers the folded nodes linked to a node (111, G-327) | containment IS a group, made only by that gesture |
+| groups (a framed region holding nodes) | the containment gesture: Alt+click gathers the folded nodes linked to a node (111, G-327) | containment IS a group, made only by that gesture; "linked" means hard links (§12d), never wiki links (T-4; the app still reads wiki links, O-7) |
 | no edge snapping | magnetism: nodes snap on bare edges, setting compile order row-major and a chat's context, a temporary link, never a hard link (134 c, 136, 142, T-2, T-11) | snapping added, as ONE settle when a node is released (below); order read from it; no line drawn |
 | node size by its content | Ctrl+= / Ctrl+- resize a notebook (133 h); a panel sizes to what it shows (110) | sized to content; the keys scale the selected node |
 
@@ -1658,8 +1658,10 @@ with the app, **U** an unclear term or step.
 | F-96 | U | spec §13m vs F-79, `ego.md` | "field" defined as one line, while the search field holds sub-fields | a field includes the lines indented under it |
 | F-97 | U | spec §13n | an app tool "as a node" had "the read-only listing" as the node's body, blurring the reader's call cell (editable) with the tool it calls | the call cell is workspace code; the tool's listing is what its callable unfolds to; boundary 4 places the read-only mark there and cites 181's answer (F-84) |
 | F-98 | I | spec §13n (F-97's wording) vs §13d' | F-97 made the call cell an app tool's only node; §13d' also draws the tool class itself as a node with sockets | both named: the tool panel as a node, and the reader's call cell |
+| F-99 | I | RESERVOIR §1, §3.3, §4, §6, §6b, §8, §8b, §10.1, §10.2, §11.2, §11.4, §12.8 | read line by line: graph form, circles, the old cockpit fields, `Agent` as a download, the browser cockpit slate, three rungs, `+` buttons and soft links, libcst asked, the telescope -- all overridden later and not in its head note | head note extended, each named with what overrides it |
+| F-100 | I | app vs T-4, §12d, §13f: `editorcalls.ts` `link`, `planepanels.ts` `linkedTo`, `magnetized`, the wire drop; RESERVOIR §12.3; spec §11d | wiki links stand in for hard links: `link()` writes one, containment and chat context read them, while the plane draws only `{ref}`s (G-404) | O-7; §11d's comment and §13g's containment row say so |
 
-**Still open** -- O-1 to O-4 and O-6 are work the design names; O-5 is a question for the reader:
+**Still open** -- O-1 to O-4, O-6 and O-7 are work the design names; O-5 is a question for the reader:
 
 - O-1. The pinned litegraph release's own licence file must be read before
   it is vendored (§13j); only third-party listings say MIT.
@@ -1692,6 +1694,13 @@ with the app, **U** an unclear term or step.
 - O-6. A fence-line `{ref}` naming a cell (`{Note#cell n}`, the outline's
   grammar) is not resolved: `refs.resolve` matches note and page titles,
   then falls back to retrieval. A drawn cross-note link (§13d) needs it.
+- O-7. Wiki links still stand in for hard links in the app, against T-4
+  and §12d. The editor call `link(a, b)` (`editorcalls.ts`) and the retired
+  graph form's wire drop append a markdown wiki link. Containment
+  (`linkedTo`, G-327) and a chat's context (`magnetized`) read the metadata
+  cache's resolved links. The plane draws only compiled `{ref}`s (G-404), so
+  a `link()` call makes a link that is neither drawn nor compiled. Each
+  must write or read compiled links: a fence-line `{ref}` or a def/use.
 
 ### 14a. The recovered prompts, one by one (F-59)
 

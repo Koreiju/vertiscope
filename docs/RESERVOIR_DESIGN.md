@@ -21,6 +21,21 @@
 > - §12.1's strict-scale rule: withdrawn as the default by 127, restated by
 >   141 and ruled by DESIGN_VISION T-1. 158 separates the craft's drawn
 >   layout from it.
+> - Read line by line on 2026-11-22 (spec F-99), more of the same kind:
+>   §1's "flip losslessly between a panel and a computation graph" and §6b's
+>   "two-state node in graph form" (graph form retired, 182); §3.3's
+>   title right-click "the circular node", §6's cockpit "collapsed, a
+>   circle", §8 step 2 and §8b's "title collapse to the circle" (a panel folds
+>   to its title, 110); §6's cockpit fields (now as `ego.md` holds them, spec
+>   §12c); §4's `Agent` "a download only with your go-ahead" (built, on the
+>   sidecar's local model, G-279); §10.1's browser cockpit slate (the browser
+>   is a live object, spec §13h, G-413, G-407 superseded); §10.2's three rungs
+>   (T-9 rules four, spec O-4); §11.2's `+ notebook` and soft-link field (a
+>   retrieval bar, 133 d; soft links subsumed by "similar", 133 g); §11.4's
+>   libcst question (installed, §9 q10); §12.8's telescope (removed, T-17).
+> - §12.3's containment gathers nodes linked by the metadata cache's
+>   resolved WIKI links. Under T-4 and spec §12d a wiki link is a plain
+>   link, so "linked" there must mean compiled links (spec F-100, O-7).
 
 *Design before code, for PLUGIN_GOAL 2026-10-29 items 1–29 ("we need to focus on the full
 scope of the design of our 3D/2D computation graph reservoir. The mortegon docs are
