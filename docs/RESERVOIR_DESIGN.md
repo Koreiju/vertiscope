@@ -15,6 +15,9 @@
 > - §9: every question is answered. q1 and q5 by 50 and 52; q2 by T-4; q3 by
 >   T-5; q4 by 133 d (a retrieval bar replaces the `+` strip); q6 by T-9;
 >   q7 by T-6; q8 by T-7 (amended by 134 g); q9 by T-8; q10 by 102.
+> - §12.4's `code://repo/` boxes: the repository left the index (167 Q1,
+>   G-375). The app's own modules are app tools now, shown as rows and never
+>   as source (spec §13n). Installed libraries still unnest, read-only.
 > - §12.1's strict-scale rule: withdrawn as the default by 127, restated by
 >   141 and ruled by DESIGN_VISION T-1. 158 separates the craft's drawn
 >   layout from it.

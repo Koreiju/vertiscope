@@ -5,6 +5,9 @@
 > - §4's four model files ARE on disk in `~/.cache/gpt4all` and are rows of
 >   `models.ROLES` (G-393), although 165 and 179 speak of them as not
 >   downloaded. See spec §10c.
+> - §3's compact code KG was built over the repository's stored CPG. The
+>   repository has since left the store (167 Q1, G-375), so the KG now covers
+>   web code and workspace code only (spec §13n).
 > - §1's card (UR S.4, T) is mortegon's. Here the slate keeps that class,
 >   and code objects follow spec §13.
 

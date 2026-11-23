@@ -45,9 +45,9 @@ where it was read into a design.
 | 2026-11-22, 182 | Chat as typed building blocks; the graph-view FORM goes, the artifacts ARE the nodes; one interface per code artifact | G-394, G-395 |
 | 2026-11-22, 183-186 | The ego as one central canvas; then native panels; then seamless; then "NO SPECIAL EFFECTS" and "a conclusive plan" | §12; G-396..G-405 |
 | **2026-11-22, 187** | Established interactive-object APIs over the in-markdown syntax; the graphical side is an existing permissive node editor for Python modules | §13; G-408..G-413 |
-| 2026-11-22, 188-190 | The cross-check goal, no agents, design docs with fragments only; code tools on canvases scoped as app tools vs workspace code; eleven late-transcribed messages | §13n, §14 |
+| 2026-11-22, 188-191 | The cross-check goal, no agents, design docs with fragments only; code tools on canvases scoped as app tools vs workspace code; eleven late-transcribed messages; every session prompt in the check (85 recovered, PLUGIN_GOAL's 2026-11-22 inventory) | §13n, §14 |
 
-Where the verbatim record ends: 2026-11-22, item 190 (it was 166 when this table was first written). Anything below that
+Where the verbatim record ends: 2026-11-22, item 191 (it was 166 when this table was first written). Anything below that
 line in any design is interpretation.
 
 ## 2. The designs already written, and what 166 does to each
@@ -830,7 +830,8 @@ joins them to the panel.
   separate record linked to its class (89). A tool panel is that class
   revealed read-only, calls only, the body never shown (167 c, F.5-F.6,
   G-378). The browser's is built (`domvec/governing/browser.py`). The §8
-  surfaces are the rest.
+  tool surfaces are a different grain: one per TOOLSPACE, listing the calls
+  on those classes and globals (§13m).
 - **Black boxes all the way down** (80, 112, RESERVOIR §12.4): a `{code://...}`
   field reveals its module's rank-1 definitions, each again a field, down to
   the compiled base. The reveal is the one in 12a, nothing separate.
@@ -914,10 +915,12 @@ are listed at the end. Where the text below says "reading" it is mine.
 **How items are cited in §12-§14.** PLUGIN_GOAL's item numbers restart in
 each series (the rule at the head of this spec). A bare number cites the
 series that opens at PLUGIN_GOAL's "**2026-10-29**" (the reservoir prompt)
-and runs to 2026-11-22: items 1-152 in its running text, 153-190 under dated
+and runs to 2026-11-22: items 1-152 in its running text, 153-191 under dated
 headings. Older series reuse most of those numbers (e.g. Addendum X's 133,
 and Addendum XI's (2026-10-18) 162-186), so a citation of an older series
-always carries its date, e.g. `(2026-10-18) 186c`. UR, DM and BS are
+always carries its date, e.g. `(2026-10-18) 186c`. A message from either
+"Recovered verbatim" inventory has no number and is cited by its UTC date
+and time, e.g. `2026-11-08 17:43`. UR, DM and BS are
 mortegon's documents. B1-B21 refer to §13a, and T-1-T-17 to DESIGN_VISION §4.
 
 ### 13a. What binds the 2D editor -- the record, gathered
@@ -940,7 +943,7 @@ them except where it says so, and recency decides any conflict (item 124).
 | B11 | a code artifact has ONE interface -- run, terminal, open, unnest, typed rows -- wherever it sits | 182 addenda, G-395 |
 | B12 | the graph-view FORM goes; the nodes are the interactive typed artifacts themselves; in 2D only interface canvases, no circles | 182, 183 |
 | B13 | no special effects; one uniform display of node and link | 158, 186 |
-| B14 | gestures: a single click in a body edits in place, on a title opens the halo (T-8); right-click reveals/folds; right-click on the base collapses the record to its node; double right-click deletes a link or reference; a press held past a debounce picks up, never a plain click | M.6-M.8, N.13, 110, 182 |
+| B14 | gestures: a single click in a body edits in place, on a title opens the halo (T-8); right-click reveals/folds; right-click on the title (mortegon's "base node", the header) collapses the record to its node; double right-click deletes a link or reference; a press held past a debounce picks up, never a plain click | M.6-M.8, N.13, 110, 182 |
 | B15 | the plane is fixed to the camera; shift-scroll zooms the 2D plane, plain scroll the 3D view; the ego at the centre of view | 158, 159, 146 |
 | B16 | rank-1 minimalism; black boxes unfold recursively down to the base modules | N.14, R.3, 80, 112 |
 | B17 | the base toolset: browser, database retrieval, code/kernels, terminals, chat | 166, 187 |
@@ -963,6 +966,13 @@ them except where it says so, and recency decides any conflict (item 124).
    contract (§13e).
 2. **The graphical side is an existing node editor**, not the plane's own
    drawing (§13c).
+
+187 names its precedent: "similar to how we tried with our ego card, but of
+course generalized to code objects". That is the cockpit slate bound both
+ways to the agent and the search (G-280, RESERVOIR §6): editing `view`
+switches the camera, and Shift/Ctrl write `throttle` back into the text. A live object is that two-way binding,
+made standard and given to every code object. The cockpit stays a slate
+(B10).
 
 What 187 does NOT change: B1-B11 and B14-B21. The slate grammar stays the
 form for PROSE notes and the cockpit, which are markdown (B10). 187 scopes its
@@ -1031,8 +1041,27 @@ In trie terms: the note is a `vault://` page and its cells are addresses on it
 (`#cell n`, item 159). A node is a projection of one address. A link is a
 def/use edge between two addresses, computed and never stored, and a widget
 value is a literal argument of a call cell, at that cell's address. A live
-object's trait is kernel state, reported into its cell's output (§13e). Nothing in the
-editor holds state the trie does not.
+object's trait is kernel state, reported into its cell's output (§13e).
+
+What the editor keeps itself is PLACEMENT only: each node's position, size
+and fold. It is kept the way the plane already keeps its panels' places,
+keyed by the cell's address. Edges, ports and values are never kept, because
+they are read from the note. Placement still matters: magnetised nodes are
+read row-major for compile order and for a chat's context (T-2, T-11). That
+is order, not a link (B3).
+
+**The note is the boundary of def/use.** Each note has its own kernel
+(`kernel.py` keys kernels by note) and its own dataflow (`dataflow.py` reads
+one note's cells). So a def/use link, and §13f's write-back, join two cells
+of ONE note. Between notes the record has one link: a `{ref}` on the reading
+cell's fence line (12d, G-279), which binds the named RECORD (a note's
+text, a page), resolved before the cell runs, and never another kernel's
+value. A link drawn from a node of note A to a node of note B therefore
+writes `{A}` on B's fence line. The plane today makes every new panel a new
+note (`planepanels.ts`, `create`, under `domvec/graph/`), so this boundary
+decides what most drawn links on the plane can mean. Passing a VALUE between
+notes, and so which note a node placed from the retrieval bar is written
+into, is not settled by the record (O-5).
 
 ### 13d'. Ports from Python -- the node-definition layer
 
@@ -1133,13 +1162,17 @@ A hook that throws fails that phase: abort, and report it.
 `application/vnd.jupyter.widget-view+json`. So: an iopub reader thread per
 kernel that keeps comm traffic at all times; a comm log with a sequence
 number that the plugin long-polls; and `comm_msg` sent back on the shell
-channel. `/chat_stream` is the only push channel today, so the long poll is
-the same pattern.
+channel. `/chat_stream` is the only push channel today: one HTTP response
+held open and flushed per token, which fits a turn that ends. A comm lives
+as long as its kernel, so the plugin long-polls the comm log by sequence
+number instead, and a dropped poll resumes from the last number it saw.
+Either way the plugin opens the request; the sidecar never calls the
+plugin.
 
 ### 13f. Links: drawn, compiled, undirected
 
-- **A drawn link is code** (B3), written into the READING cell (B's), never
-  into a new one. Dropping A's output `hits` on B's input `items` rewrites one
+- **A drawn link is code** (B3), written into the READING cell (node B's
+  below), never into a new one. Dropping A's output `hits` on B's input `items` rewrites one
   argument of B's call cell: `summary = summarise(items=hits)`, where the
   argument was a literal (a widget) or another name. For two live objects, B's
   call cell gains one binding line, `b.x = a.y`, or a two-way trait link where
@@ -1180,23 +1213,47 @@ the same pattern.
 | dark grey theme | node bodies are Obsidian's own panels (56, 184); a slate keeps its slate class (G-278) | links, ports and titles take Obsidian's theme colours; nothing else is styled |
 | its own pan and zoom | the plane is fixed to the camera at a constant distance, with the ego at the centre (159, 146) | the plane does not move with the 3D camera. The editor's pan and zoom ARE the plane's: shift-wheel zooms and a drag on empty plane pans. The 3D camera moves only the world behind it |
 | search box on double-click | new nodes from the retrieval bar over typed nodes (133 d) | the searchbox fed by the retrieval bar's typed nodes |
-| a click selects | a click on a node's TITLE opens its halo (T-8, 81); a click in its BODY edits in place (M.8) | title click -> the halo; body clicks reach the body |
+| a click selects | a click on a node's TITLE opens its halo (T-8, 81); a click in its BODY edits in place (M.8) | title click -> the halo; a double-click on the title opens or folds the node (T-8), the same fold as the right-click on the title (M.6, 110), two ways to one action; body clicks reach the body |
 | groups (a framed region holding nodes) | the containment gesture: Alt+click gathers the folded nodes linked to a node (111, G-327) | containment IS a group, made only by that gesture |
-| no edge snapping | magnetism: nodes snap on bare edges, setting compile order row-major and a chat's context, never a link (134 c, 136, T-2, T-11) | snapping added; order read from it; no line drawn |
+| no edge snapping | magnetism: nodes snap on bare edges, setting compile order row-major and a chat's context, never a link (134 c, 136, T-2, T-11) | snapping added, as ONE settle when a node is released (below); order read from it; no line drawn |
 | node size by its content | Ctrl+= / Ctrl+- resize a notebook (133 h); a panel sizes to what it shows (110) | sized to content; the keys scale the selected node |
 
 **DOM in a node.** A litegraph widget is drawn on the canvas. An Obsidian
-editor and an AFM view are DOM. ComfyUI's front end overlays DOM widgets on
+editor and an AFM view are DOM. ComfyUI's legacy front end (its DOM-widget
+script, read from mirrored copies, not current source) overlays DOM widgets on
 the canvas and re-places them from the canvas transform each frame, hiding
-them below a zoom threshold. The panels on our plane are already DOM over the
+them below a zoom threshold. The pattern does not depend on their current
+code. The panels on our plane are already DOM over the
 3D canvas (`planepanels.ts`), so the same placement applies: a node's body is
-its DOM, positioned by `ds` (the canvas's DragAndScale). Reading: below the
-zoom threshold the node shows its title, which is the fold parameter of
+its DOM, positioned by `ds` (the canvas's DragAndScale). Reading: below
+the zoom threshold the node shows its title, which is the fold parameter of
 item 110, not a separate mode.
+
+**Nothing on the plane moves by itself.** 141 (2026-11-08) rules motion
+for the layout: "a singular post-process that ensures stability/convergence
+on constraints within a limited time bound", not "gaseous chunks moving
+erratically forever". Two recovered messages from the same day (2026-11-08
+17:43 and 18:33) name the cost of breaking that: "significant and severe
+lag", and "jostling when there wasn't before". On the plane that means:
+- a node moves only while the reader drags it;
+- magnetism is ONE settle when the node is released, done within a fixed
+  bound, and then nothing moves;
+- the editor redraws, and re-places its DOM bodies, only when a node, a
+  link or the plane's pan and zoom changes, never every frame;
+- the idle drift turns the 3D camera only (T-12, 150), and the plane is
+  fixed to the camera, so the drift never moves a node.
+
+**The gesture help** (159: "a hoverable button that expands into a full
+panel of instructions on the gestures on the 2D computation graph") lists
+exactly this table's "so" column, so the help and the editor cannot
+disagree. It is a panel only while it is hovered and folds back to its
+button when the pointer leaves. A readout that stays open over the view is
+the defect the reader reported at 2026-09-24 05:04: "The logs on the panel in the
+3D graph now cover the actual UI view".
 
 ### 13h. The base tools as live objects -- chat first
 
-Each base tool (B17) is ONE live-object class. Its public methods are its
+Each base tool (B17) is an APP tool (§13n) and ONE live-object class. Its public methods are its
 ~25-line capability list (B7). Its traits are its state, and its read-only
 class listing is its tool panel (B8). `kernel_objects.py` already boots
 `search`, `Database`, `WebBrowser`, `Agent`, `Vault` and the editor calls
@@ -1208,14 +1265,24 @@ traitlets object with an AFM view.
 - `Chat(model, tools)` holds `messages` as a trait;
 - its view is the conversation: a clear input box and typed blocks (G-394),
   each code block a cell with the one code interface (B11);
-- tokens stream as `custom` messages, the protocol's free channel (171);
+- tokens stream as `custom` messages, the protocol's free channel (171).
+  The tokens themselves come from the stream that already exists: the
+  sidecar's model on CUDA (G-385, seen live under load) and the chat panel it
+  was wired into (2026-11-22 01:19: "wire the token stream into
+  the app's chat panel"; G-394). The comm is a second hop for the same
+  stream, not a second model or a second stream. G-385-load's bar (gap p50
+  under 30 ms while the embedder runs) holds for the token as the VIEW
+  receives it, not only as the sidecar sends it;
 - the callback is marimo's `mo.ui.chat` shape: `model(messages, config)` may
   be a generator that yields DELTAS, which the view accumulates; a Stop
   cancels it (sync generators get `GeneratorExit`, async ones
   `CancelledError`);
 - the agent is smolagents' `CodeAgent` (B19): each step is a cell, and a
   tool defined in a cell is a node on the plane AND a tool the agent is
-  handed in the next step (B20).
+  handed in the next step (B20);
+- a block, or a selected range of lines, dragged off a turn (after the
+  hold, 182) becomes its own node, linked back to its source address and
+  usable in retrieval and dataflow (182's answer "Select + drag").
 
 ### 13i. What stands from §12, what this replaces
 
@@ -1239,11 +1306,12 @@ traitlets object with an AFM view.
 | package | licence | state (checked 2026-11-22) | for |
 |---|---|---|---|
 | `anywidget` | MIT | active; the AFM spec at 0.11 | live objects' Python side; pulls `ipywidgets` (BSD-3) |
-| `@comfyorg/litegraph` | MIT | **archived**. Merged into `Comfy-Org/ComfyUI_frontend` (`src/lib/litegraph`) on 2025-08-05, and that repository is **GPL-3.0**. Only the npm releases published before the merge are confirmed MIT | the graphical side, in TypeScript |
+| `@comfyorg/litegraph` | MIT | **archived**. Merged into `Comfy-Org/ComfyUI_frontend` (`src/lib/litegraph`) on 2025-08-05, and that repository is **GPL-3.0**. The npm releases published before the merge are listed as MIT, but no release's own licence file has been read yet (O-1) | the graphical side, in TypeScript |
 | `litegraph.js` (jagenjo) | MIT | 0.7.18 the latest on npm; not confirmed maintained | the same, in JavaScript |
 
 So: **code is never taken from ComfyUI_frontend's tree** (GPL-3.0). The
-editor is a pinned, MIT-licensed litegraph release vendored into the plugin.
+editor is a pinned litegraph release, its MIT licence read in the release
+itself before it is vendored into the plugin (O-1).
 Reading: the last standalone `@comfyorg/litegraph`, because it is TypeScript
 like the plugin and carries ComfyUI's widget work, frozen and owned here from
 then on.
@@ -1257,11 +1325,20 @@ Every row above is a download, so each waits for a yes.
 | G-408 | the comm bridge: an iopub reader per kernel; a comm log with a sequence number, long-polled; `comm_msg` back on the shell channel | a comm opened by a cell is read in the plugin; a `comm_msg` sent from the plugin changes a value read back in the kernel | the reader off: the comm is never seen |
 | G-409 | node definitions from the live namespace (§13d'): signatures, hints, traits | a function defined in a cell appears in the definitions with its ports; a default primitive is a widget, an object type a socket | hints ignored: every input a socket |
 | G-410 | the AFM host in a plane panel (a node body once G-411 lands), per the nine MUSTs | an anywidget made in a cell renders; set from a terminal, the view updates; set in the view, the kernel reads it; two views, one model | `save_changes` dropped: the kernel never sees the view's set |
-| G-411 | litegraph on the plane: nodes from G-409, links from def/use, gestures per §13g, no arrowheads, one shape | the graph's links equal `dataflow`'s edges; a drawn link writes one line, a deleted one removes it, a cycle is refused | a link drawn without the write-back: the code and the graph disagree |
-| G-412 | `Chat` as a live object (§13h) | tokens stream into the view; a code block runs as a cell; a tool defined in a cell is called by the agent | deltas accumulated in Python: the view gets whole messages |
+| G-411 | litegraph on the plane: nodes from G-409, links from def/use, gestures per §13g, no arrowheads, one shape | the graph's links equal `dataflow`'s edges; a drawn link within a note writes one line (across notes, one fence-line `{ref}`, §13d), a deleted one removes it, a cycle is refused | a link drawn without the write-back: the code and the graph disagree |
+| G-412 | `Chat` as a live object (§13h) | tokens stream into the view, gap p50 under 30 ms at the view (G-385-load's bar); a code block runs as a cell; a tool defined in a cell is called by the agent | deltas accumulated in Python: the view gets whole messages |
 | G-413 | the base tools as live objects: Search, Browser, Terminal, Kernel, from their governing classes | each tool panel lists its class read-only; an instance's trait changes re-run its readers | the dataflow event off: readers stay stale |
 
 G-408 and G-409 need no download. G-410 to G-413 wait on §13j.
+
+"Live" means one thing here: each proof is a check in the MCP harness
+(`checks/live.mjs`, run through `confirm`), driven in the running app,
+reloading the plugin first, with its planted arm run the same way. Not a
+script, and not an agent. The reader's words: "I still think you could work
+more to integrate the MCPs with improved perception over the full space of
+things we are tracking" (2026-09-21 01:05), and "from here on out, run
+all harnesses yourself, never use agents, this is a rule. Always test with
+the MCP-first" (2026-11-15 21:48).
 
 ### 13l. Readings that are mine
 
@@ -1274,6 +1351,38 @@ here so a correction has somewhere to land.
   Langflow.
 - litegraph's JSON is never authority (§13d), by NOTEBOOK §1's argument.
 - The pinned MIT litegraph is the editor (§13j), by licence and language.
+
+### 13m. Terms -- one meaning each
+
+Several words in the record carry two meanings. Each is pinned here, with
+where it comes from. A term not listed is used in its plain sense.
+
+| term | means | not to be confused with | source |
+|---|---|---|---|
+| **record** | one thing (note, cell, chunk, browser, tool, model, run): its text, its edges, its fold state, its current readout | a copy of it | 37, RESERVOIR §5 |
+| **placement** | where a record is drawn: a field (folded or revealed), a panel or node on the plane, a node in 3D, a view of a live object | a second record | §12a, §13d |
+| **field** | one line `name value` of a slate; the value may be a `{ref}` | a widget (below) | 62, UR E.4 |
+| **slate** | a note whose tree is a Python module written in markdown (the cockpit is one) | a code cell | 62, 63' |
+| **panel** | Obsidian's own markdown view, extended, wherever prose is shown | a node body that is not markdown | 56, 133 c, 140 |
+| **cell** | one fenced code block of a note, or one top-level slate tree: the unit of dataflow, within its note (§13d) | a panel | 49, G-380 |
+| **call cell** | a cell that binds one call of a callable or a class; the editor's typed node | any cell | §13d |
+| **node (2D)** | a cell drawn in the editor: its body the cell's interface, its ports its inputs and outputs; folded to its title it is the fold parameter of 110 | the retired abstract circle (182, 183) | §13c |
+| **node (3D)** | a record placed in the world or the ego's UMAP: a glowing orb, billboarding its record when hovered | the 2D node | 183, 12f |
+| **port / widget / socket** | a node's input or output; a WIDGET when its value is a literal edited in place, a SOCKET when it is linked by a name | the comm protocol's "widget" (a live object) | §13d' |
+| **live object** | a Python object with typed, observed state synced to its views over the kernel's comm channel (a Jupyter widget, front end per AFM) | a widget port | §13b, §13e |
+| **view** | one drawing of a live object's model; many views share one model | a placement of a markdown record | §13e |
+| **canvas** | the interactive surface of an artifact (182's "interface canvases"). The EGO canvas is the cockpit's record ordering the ego's components (§12c) | a separate canvas note (retired, §12g) | 182, 183, §12c |
+| **plane** | the 2D surface fixed to the camera, in the 3D view, where nodes and panels sit; the editor's pan and zoom | an Obsidian pane | 50, 159 |
+| **ego / cockpit / craft** | the ego is the reader's tool space; the cockpit is its slate (`ego.md`); the craft is its 3D form, its own UMAP, flown first or third person | -- | 54, 67-69, 146, 158 |
+| **tool space (of the ego)** | the ego's set of tools and attached artifacts: browsers, retrieval, notebooks, chats, tagged chunks | a toolspace | 158 |
+| **toolspace** | one group of the app's capabilities, one per README pane (3D graph, ego, browser cell, panels, notebook/slates, search) | the ego's tool space | 166, 167 b, G-376 |
+| **governing class** | the ~25-line class of one THING whose public methods are its capabilities; an instance is a separate, linked record | a tool surface | 142, T-10, 89 |
+| **tool surface** | one TOOLSPACE written as calls only, a comment per line: the calls on the governing classes and globals in that pane | a governing class | 166, 167 b, G-377 |
+| **tool panel** | the canvas form of an APP tool: a tool surface or a governing class shown as a READ-ONLY code artifact, calls visible, bodies never | a regular code artifact (explorable, graph-editable) | 167 c, G-378, F.6 |
+| **app tool** | a capability shipped with the app, shown as calls only, its dependencies never visible (§13n) | workspace code | 167 c, 189, G-378, G-382 |
+| **workspace code** | code made in the project workspace, fully explorable, editable and unfoldable down to base modules (§13n) | an app tool | 167 c, 189, 112 |
+| **hard link** | an edge that exists because code defines a name another cell reads, or a `{ref}` resolves, or two records share one chunk object; drawn undirected | magnetism (placement order, never a link); a plain or wiki link; a retrieval link `[query](results)` | 136, 142, T-4 |
+| **readout** | a cell's stored output; on the perimeter, a terminal node's rendering placed in 3D | a view | RESERVOIR §4, §5 |
 
 ### 13n. Code tools on canvases -- app tools and workspace code (189)
 
@@ -1295,7 +1404,7 @@ what a canvas shows, how far it unfolds, what can be edited, how it is found.
 | as a node (§13d) | a call cell's callable: its parameters are ports; the node's body is the read-only listing | its cells are nodes with ports; its functions and classes are callables for further call cells |
 | as a live object (§13h) | the base tools: the view and the traits are visible, the implementation is not | a reader's own live-object class: fully visible |
 | found by | retrieval over `tool://` pages, placed in 3D (G-382, 170 a) | retrieval over vault pages; the reader's own artifacts live in the ego (77, RESERVOIR 10.6) |
-| embedded as | its rendered listing | its prose only: docstrings and comments, never the code (51, G-52) |
+| embedded as | like every code artifact (51): its comments and docstrings, which carry a calls-only listing's meaning; a vector from its rendered panel per G-382 (170 a) | its prose only: docstrings and comments, never the code (51, G-52) |
 | from the 3D layout and the index | always present (not repository code) | present as vault pages |
 
 Four boundaries make the scope exact:
@@ -1306,6 +1415,9 @@ Four boundaries make the scope exact:
 2. **A dependency is visible exactly when it is not the app.** A workspace
    unfold goes through other notes and installed libraries to the base modules
    (112). It stops at an app tool's rows, and nothing in an app tool unfolds.
+   An import of the app's own package from a workspace cell counts as the
+   app: it shows the imported names' rows, as an app tool, never their source.
+   The kernel has that package on its path (T-14, 148), so this case is real.
 3. **Tools made on the fly are workspace code** (187: "custom made code tools
    on the fly with the same editor interface"). A function written in a cell
    is a node and an agent's tool the moment its cell runs (§13d'), and it
@@ -1318,38 +1430,6 @@ Four boundaries make the scope exact:
    mortegon's read-only mark instead (F.6's lock), the one difference. A
    workspace definition that shadows an app name carries the name of the app
    tool it hides.
-
-### 13m. Terms -- one meaning each
-
-Several words in the record carry two meanings. Each is pinned here, with
-where it comes from. A term not listed is used in its plain sense.
-
-| term | means | not to be confused with | source |
-|---|---|---|---|
-| **record** | one thing (note, cell, chunk, browser, tool, model, run): its text, its edges, its fold state, its current readout | a copy of it | 37, RESERVOIR §5 |
-| **placement** | where a record is drawn: a field (folded or revealed), a panel or node on the plane, a node in 3D, a view of a live object | a second record | §12a, §13d |
-| **field** | one line `name value` of a slate; the value may be a `{ref}` | a widget (below) | 62, UR E.4 |
-| **slate** | a note whose tree is a Python module written in markdown (the cockpit is one) | a code cell | 62, 63' |
-| **panel** | Obsidian's own markdown view, extended, wherever prose is shown | a node body that is not markdown | 56, 133 c, 140 |
-| **cell** | one fenced code block of a note, or one top-level slate tree: the unit of dataflow | a panel | 49, G-380 |
-| **call cell** | a cell that binds one call of a callable or a class; the editor's typed node | any cell | §13d |
-| **node (2D)** | a cell drawn in the editor: its body the cell's interface, its ports its inputs and outputs; folded to its title it is the fold parameter of 110 | the retired abstract circle (182, 183) | §13c |
-| **node (3D)** | a record placed in the world or the ego's UMAP: a glowing orb, billboarding its record when hovered | the 2D node | 183, 12f |
-| **port / widget / socket** | a node's input or output; a WIDGET when its value is a literal edited in place, a SOCKET when it is linked by a name | the comm protocol's "widget" (a live object) | §13d' |
-| **live object** | a Python object with typed, observed state synced to its views over the kernel's comm channel (a Jupyter widget, front end per AFM) | a widget port | §13b, §13e |
-| **view** | one drawing of a live object's model; many views share one model | a placement of a markdown record | §13e |
-| **canvas** | the interactive surface of an artifact (182's "interface canvases"). The EGO canvas is the cockpit's record ordering the ego's components (§12c) | a separate canvas note (retired, §12g) | 182, 183, §12c |
-| **plane** | the 2D surface fixed to the camera, in the 3D view, where nodes and panels sit; the editor's pan and zoom | an Obsidian pane | 50, 159 |
-| **ego / cockpit / craft** | the ego is the reader's tool space; the cockpit is its slate (`ego.md`); the craft is its 3D form, its own UMAP, flown first or third person | -- | 54, 67-69, 146, 158 |
-| **tool space (of the ego)** | the ego's set of tools and attached artifacts: browsers, retrieval, notebooks, chats, tagged chunks | a toolspace | 158 |
-| **toolspace** | one group of the app's capabilities, one per README pane (3D graph, ego, browser cell, panels, notebook/slates, search) | the ego's tool space | 166, 167 b, G-376 |
-| **governing class** | the ~25-line class of one THING whose public methods are its capabilities; an instance is a separate, linked record | a tool surface | 142, T-10, 89 |
-| **tool surface** | one TOOLSPACE written as calls only, a comment per line: the calls on the governing classes and globals in that pane | a governing class | 166, 167 b, G-377 |
-| **tool panel** | a tool surface or a governing class shown as a READ-ONLY code artifact: calls visible, bodies never | a regular code artifact (explorable, graph-editable) | 167 c, G-378, F.6 |
-| **app tool** | a capability shipped with the app, shown as calls only, its dependencies never visible (§13n) | workspace code | 167 c, 189, G-378, G-382 |
-| **workspace code** | code made in the project workspace, fully explorable, editable and unfoldable down to base modules (§13n) | an app tool | 167 c, 189, 112 |
-| **hard link** | an edge that exists because code defines a name another cell reads, or a `{ref}` resolves, or two records share one chunk object; drawn undirected | magnetism (placement order, never a link); a plain or wiki link; a retrieval link `[query](results)` | 136, 142, T-4 |
-| **readout** | a cell's stored output; on the perimeter, a terminal node's rendering placed in 3D | a view | RESERVOIR §4, §5 |
 
 Sources (read 2026-11-22):
 [anywidget AFM](https://anywidget.dev/en/afm/),
@@ -1383,13 +1463,14 @@ Sources (read 2026-11-22):
 The whole set, re-read at every pass. Scope: this spec, the sibling designs
 (RESERVOIR, GRAPH_WORKBENCH, DESIGN_VISION, SEARCH_GRAPH, NOTEBOOK_PANEL,
 THROUGH_STACK_SYNTHESIS, EGO_CANVAS, CALLABLE_INTERFACE's head), PLUGIN_GOAL
-from 2026-10-29 to 187, mortegon UR §E, §F, §M-§T, and the PRD rows they
-cite. Kinds: **M** a mistake, **I** an inconsistency between documents or
+from 2026-10-29 to 191, mortegon UR §E, §F, §M-§T, the PRD rows they
+cite, and every prompt the reader sent in this session's transcript
+(2026-09-12 to 2026-11-23 UTC, 238 messages; from F-59). Kinds: **M** a mistake, **I** an inconsistency between documents or
 with the app, **U** an unclear term or step.
 
 | # | kind | where | finding | resolution |
 |---|---|---|---|---|
-| F-1 | I | spec §1 | the record table stopped at 166 | rows to 187 added; "record ends" updated |
+| F-1 | I | spec §1 | the record table stopped at 166 | rows to 191 added; "record ends" updated |
 | F-2 | U | spec §12-§13 | bare item numbers, while numbers restart per series and older series reuse most of 1-186 | citation rule at §13's head |
 | F-3 | U | spec §13d | a node was "per cell, per live object and per function", while the dataflow is per cell | the node is the cell; a call cell is the typed node; definitions unfold as rows |
 | F-4 | U | spec §13f | where a drawn link's code is written | into the READING cell: one argument, or one binding line |
@@ -1431,11 +1512,37 @@ with the app, **U** an unclear term or step.
 | F-40 | U | spec §13n | "read-only" app tools whose calls change the world | read-only is about the CODE; calls act and name what changed |
 | F-41 | I | PLUGIN_GOAL vs spec §9, §11, §13 | eleven of the reader's messages were acted on, two of them quoted in the spec, but never transcribed (against 101) | backfilled verbatim as item 190, dated |
 | F-42 | I | PRD G-280, G-296, G-383 | Confirm rows still naming the circle collapse and the graph form | a dated scope note on each; the standing parts kept |
+| F-43 | U | spec §12e vs §13m | "the §8 surfaces are the rest" made tool surfaces governing classes | §12e restated: a different grain, per toolspace |
+| F-44 | U | spec §13n | a workspace cell importing the app's own package would expose app source through the unfold | boundary 2: such an import shows rows only, as an app tool |
+| F-45 | I | RESERVOIR §12.4, GRAPH_WORKBENCH §3 | `code://repo` boxes in the unnest, and a code KG over the repository's CPG, after 167 Q1 / G-375 removed the repository from the index | head notes: both now apply to web code and workspace code; the app's own modules are app tools |
+| F-46 | M | spec §13j | pre-merge `@comfyorg/litegraph` releases called "confirmed MIT"; only listings were seen | "listed as MIT"; the licence is read in the release itself (O-1) |
+| F-47 | U | spec §13g | the DOM-widget overlay stated as ComfyUI's current behaviour | sourced to its legacy script, as read; only the pattern is used |
+| F-48 | U | spec §13h vs 182 | the pulled-out piece of a chat turn under the editor | its own node, linked back to its source address |
+| F-49 | U | spec §13b vs 187 | 187's "similar to how we tried with our ego card" was unread | the cockpit's two-way binding (G-280) as the precedent; the cockpit stays a slate |
+| F-50 | U | spec §13g vs 159 | the 2D gesture help after the gestures change | the help lists §13g's mapping |
+| F-51 | U | spec §13 | §13n stood before §13m | moved after the terms |
+| F-52 | I | spec §14 | the ledger's scope and F-1 still said 187 | 191 |
+| F-53 | U | spec §13m | "tool panel" and "app tool" overlapped without a stated relation | a tool panel is the canvas form of an app tool |
+| F-54 | I | spec §13n vs 51 | an app tool "embedded as its rendered listing" against "every code artifact embeds its PROSE only" | stated under 51, with G-382's rendered-panel vector (170 a, the later ruling) |
+| F-55 | M | spec §13d | "Nothing in the editor holds state the trie does not" -- node positions are editor state, and magnetism's order depends on them | placement (position, size, fold) is the editor's only state, keyed by address; edges, ports and values never |
+| F-56 | M | spec §13g | the zoom-threshold reading had landed inside the gesture-help paragraph | moved back under "DOM in a node" |
+| F-57 | U | spec §13g vs T-8, M.6 | T-8's double-click (open/close) and the title right-click (fold) on one node | the same fold, two ways |
+| F-58 | U | spec §13h vs §13n | the base tools' kind | app tools |
+| F-59 | I | PLUGIN_GOAL vs the session transcript | 84 of the reader's 238 prompts in this session were in no record and one only in part, against 101 | recorded verbatim, by UTC time: PLUGIN_GOAL "Recovered verbatim (2026-11-22 inventory)" |
+| F-60 | U | spec §13g vs 141 and 2026-11-08 17:43, 18:33 | magnetism "snapping added" said nothing of WHEN things move; the record rules one bounded settle, and the reader reported lag and jostling from continuous motion | "Nothing on the plane moves by itself": drag, one settle on release, redraw on change only, drift turns the camera only |
+| F-61 | U | spec §13g vs 2026-09-24 05:04 | the gesture help "expands into a full panel" without saying when it folds; a readout left open over the view was a reported defect | a panel only while hovered |
+| F-62 | I | spec §13h vs G-385, G-394, 2026-11-22 01:19 | `Chat`'s tokens over the comm stated as if no stream existed; one is seen live, wired into the chat panel, with a measured bar | the comm is a second hop of that stream; G-385-load's bar holds at the view; G-412's proof carries it |
+| F-63 | U | spec §13k vs 2026-09-21 01:05, 2026-11-15 21:48, CLAUDE.md | "a live check" did not say through what | MCP harness checks (`checks/live.mjs` via `confirm`), plugin reloaded first, planted arm alike; never a script or an agent |
+| F-64 | U | 150's reading vs 2026-11-08 17:43 | 150 is read as drift wanted ON (overriding T-12); the recovered 17:43 asked continuous motion off "for now" and "back on for after decisions" | no conflict: the off was temporary by the reader's own words, which supports the reading. The 2D plane is unaffected either way (F-60) |
+| F-65 | M | spec §13e | "`/chat_stream` is the only push channel today, so the long poll is the same pattern": `/chat_stream` is a held-open response flushed per token, not a long poll | the two told apart, and why the comm log long-polls |
+| F-66 | U | B14 vs §13g | "right-click on the base" (B14) and "on the title" (§13g) for one gesture | B14 names it the title, mortegon's "base node" (RESERVOIR §10.2) |
+| F-67 | U | spec §13f | "(B's)" read as a B-commitment of §13a | "node B's below" |
+| F-68 | U | spec §13d, §13f vs `kernel.py`, `dataflow.py`, `planepanels.ts` | def/use links and their write-back were stated without the note boundary: kernels and dataflow are per note, and the plane makes each new panel its own note | the boundary stated; across notes a drawn link is a fence-line `{ref}` (G-279); a value between notes is open, O-5 |
 
-**Still open** -- not a design question; each is work the design names:
+**Still open** -- O-1 to O-4 are work the design names; O-5 is a question for the reader:
 
 - O-1. The pinned litegraph release's own licence file must be read before
-  it is vendored (§13j); the package metadata says MIT.
+  it is vendored (§13j); only third-party listings say MIT.
 - O-2. `checks/live.mjs` still drives G-396..G-398 through the removed canvas
   API, and G-399 part 4 expects a card-on-card link that G-404 now refuses.
   The app and its checks disagree until those checks follow the PRD's
@@ -1446,3 +1553,13 @@ with the app, **U** an unclear term or step.
   (from 137.4, "chunk groups"); the governing browser class and
   G-301 step chunk -> page -> live. The ruling is the later word: the class
   gains a `group` rung.
+- O-5. **For the reader.** A value passed between nodes of two different
+  notes. Today each note has its own kernel, and the only link across notes
+  is a fence-line `{ref}`, which binds a record, not a value (§13d). Either
+  the plane's nodes share one kernel (one note, or one kernel per plane),
+  or cross-note links stay record-level. The answer also decides which note
+  a node placed from the retrieval bar is written into. The record does not
+  say: T-14 rules one environment per workspace, which is packages, not one
+  namespace. Per-note state is NOTEBOOK §4's design ("a note is the unit a
+  reader thinks in"), mine and written before the plane held nodes, not a
+  ruling.

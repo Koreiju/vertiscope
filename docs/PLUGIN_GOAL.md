@@ -6622,3 +6622,502 @@ which quote them. Verbatim, in order:*
 done -- spec §5, §9-§11 -- and integrates with it; (b) questions the record
 answers are not asked; (c) Context7 may be used, its freshness doubted; (d)
 the work stays on 188's goal.*
+
+### 191. (2026-11-22) Every prompt of the session, cross-checked
+
+*Verbatim:*
+
+> Make sure also to include the full set of transcripts in this session,
+> which is quite a large history of my own prompts.
+
+*Read as (191): the cross-check of 188 takes in every prompt the reader
+sent in this session, not only the records written from them. Done as the
+inventory below (85 recovered: 84 unrecorded, one in part) and spec §14 F-59 to F-64.*
+
+### Recovered verbatim (2026-11-22 inventory)
+
+*Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,
+238 messages) was compared with this file. 84 were not here at all and
+one only in part (2026-09-24 00:40, Addendum V); all 85 are below, whole,
+by UTC time. Two more flagged by the comparison ARE here and are left out
+(the 2026-10-18 paste is Addendum XI; the 2026-09-26 `/loop` message is in
+Addendum VII). Most are operational
+("keep going", "commit it"); they are recorded anyway, because a
+record that keeps only what someone judged substantive is a reading, not
+a record. Recorded late: no row decomposed from them was checked against
+them when it was written. Their bearing on the 2D editor is assessed in
+`docs/COMPUTATION_GRAPH_EDITOR_SPEC.md` §14 (F-59 onward).*
+
+**2026-09-12 22:14**
+
+> What project are we in?
+
+**2026-09-12 22:15**
+
+> please switch to domvec, or whichever folder holds our running obsidian
+> plugin
+
+**2026-09-12 22:16**
+
+> Are the PRD and goal docs you're referencing the verbatim requirements
+> with the most recent updates to our panel layout, web browser, all that
+> stuff?
+
+**2026-09-12 22:22**
+
+> Now, please check on the running and open obsidian, connect the various
+> mcps and tools, repos, other similar plugins, search for new ones per your
+> travels, and we will begin building on these two documents with our
+> workspace to update and design our obsidian plugin.
+
+**2026-09-12 22:59**
+
+> A switch to a kernel run and then a command terminal when switching to a
+> separate pane.
+
+**2026-09-12 23:22**
+
+> reload obsidian so it sees the notes
+
+**2026-09-12 23:29**
+
+> wire the build to write straight into the vault plugin dir
+
+**2026-09-12 23:32**
+
+> start on vault-note addressing into the trie
+
+**2026-09-12 23:47**
+
+> commit it once the suite is green
+
+**2026-09-12 23:48**
+
+> just kill it and run the targeted tests instead
+
+**2026-09-12 23:59**
+
+> keep going with step 2
+
+**2026-09-13 00:07**
+
+> put the kernel in the sidecar
+
+**2026-09-13 00:20**
+
+> keep going with step 4
+
+**2026-09-13 00:47**
+
+> Are you fully seeing the obsidian interface with mcp tools to the extent
+> you can navigate the app yourself and see everything open?
+
+**2026-09-13 00:55**
+
+> Are you able to interact at least with our existing panels? Perhaps as
+> well to some extent the 3D graph viewer GUI? Those are priorities; that
+> you can see and touch exactly what I can.
+
+**2026-09-13 01:00**
+
+> Look around github until all perception gaps are filled, ideally without
+> images at all
+
+**2026-09-13 03:31**
+
+> I hit my usage limit while you were working, but it has reset now. Please
+> continue from where you left off.
+
+**2026-09-13 03:45**
+
+> Reopen everything. Assess your unknowns with self awareness of everything
+> that can be interacted with and known as tools and workspaces for yourself
+> with any and all relevant github packages
+
+**2026-09-13 03:54**
+
+> keep going with step 6
+
+**2026-09-13 04:11**
+
+> keep going with step 7
+
+**2026-09-13 04:31**
+
+> fix D-8 first
+
+**2026-09-13 15:03**
+
+> Let's continue on our new design. Please bring everything up again
+
+**2026-09-13 15:16**
+
+> Let's continue building, making sure you're always interfacing with the
+> app yourself to confirm and actuate
+
+**2026-09-13 21:46**
+
+> Collapse capture and place into one round trip
+
+**2026-09-13 23:38**
+
+> Let's continue
+
+**2026-09-14 04:08**
+
+> What's next on the PRD?
+
+**2026-09-14 04:31**
+
+> Both lease
+
+**2026-09-19 22:50**
+
+> Where are the files for our set of design verbatim prompts located?
+
+**2026-09-19 22:51**
+
+> Where's our PRD?
+
+**2026-09-19 23:01**
+
+> write Addendum IV
+
+**2026-09-19 23:10**
+
+> Now re-derive the PRD rows against Addendum IV
+
+**2026-09-20 01:57**
+
+> I find that opening a few pages re-sets all the UMAP embeddings for the
+> main page chunks through the patricia trie. I'm not sure if all the chunks
+> are getting their own UMAP dimensions for the 3D view correctly, they all
+> seem jumbled in the center.
+
+**2026-09-20 19:59**
+
+> There are significant degradations in the quality of the features
+> described. Even if you self report they are delivered, I don't see them
+> showing up at all in the user interface. Please be more careful to
+> interact with it yourself now and prove to yourself that each requirement
+> has not yet been satisfied in a way that is useful to the UI of the plugin
+> up until this point. Emphasize more on how much you yourself can see and
+> know is happening within our system, frontend and backend, full-stack.
+> Until you gain full stack observability and sufficient measurements
+> everywhere to verify the features work and actually surface to our UI, we
+> do not have any effective progress.
+
+**2026-09-20 20:28**
+
+> Again, I will repeat our main focus for you to consider the next steps on:
+>
+> There are significant degradations in the quality of the features
+> described. Even if you self report they are delivered, I don't see them
+> showing up at all in the user interface. Please be more careful to
+> interact with it yourself now and prove to yourself that each requirement
+> has not yet been satisfied in a way that is useful to the UI of the plugin
+> up until this point. Emphasize more on how much you yourself can see and
+> know is happening within our system, frontend and backend, full-stack.
+> Until you gain full stack observability and sufficient measurements
+> everywhere to verify the features work and actually surface to our UI, we
+> do not have any effective progress. And please take this on as a harness
+> engineering problem more so than an application development problem.
+> Because we won't get any new features actually surfacing until you gain
+> enough MCP based awareness for effective action that can be seen directly
+> from the plugin. Screenshots must be sparing, so I suggest instead paying
+> careful attention to what pipes as data to the overall obsidian layer that
+> essentially is a wrapper ontop of obsidian (I think this is one of our
+> MCPs) that captures the interface at the data structure level. This would
+> mean some more dev overhead, but to the end that we stay more
+> token-efficient overall by investigating the full UIX at this harness
+> layer rather than just screenshots. This allows for multi-chained
+> interactions from you to the app to be fully monitored, inspected,
+> changed, and verified. I'd like to see what we already currently have on
+> this and how we can properly realize this full-stack observability at a
+> high level efficiently with our existing code. Make sure you're focusing
+> on the global scope of what can be wrapped overtop of the UI layer that
+> makes full observability and interaction efficient with both the frontend
+> as well as clear outlines and traces of backend processing that ensues
+> from frontend interactions. This should be doable.
+
+**2026-09-20 20:30**
+
+> Restarted our session. you should be able to see all the new tools. Please
+> test each one
+
+**2026-09-20 22:55**
+
+> The two layer UMAP and force directed unfold on the patricia trie has
+> degraded and doesn't work
+
+**2026-09-21 01:05**
+
+> I still think you could work more to integrate the MCPs with improved
+> perception over the full space of things we are tracking in our
+> requirements for features. Ideally, you use the app yourself and clearly
+> state in what you see from the MCPs and the effects they have that what
+> you're doing is working. And build if you can't get to this state just yet
+> where you can clearly state all observable requirements that make our
+> plugin what it is are satisfied via the harness/toolspace that you
+> yourself have full exposure to and visibility of. This means tool calls
+> everywhere, no need for bash scripts any longer.
+
+**2026-09-22 05:08**
+
+> Nodes in the 3D viewer are still way too clumped together. Remember what I
+> said about per-page UMAP and force-directed patricia trie unfolds.
+
+**2026-09-22 05:24**
+
+> Fix the LinksTo query and the live capture, then verify
+
+**2026-09-22 05:48**
+
+> Fix the _local_positions shell scaling
+
+**2026-09-23 01:46**
+
+> I'm seeing nodes way too jumbled together and tries that aren't DAGs in
+> our current 3D gui. Measure with your harness until you verify this
+> insight to be true. Then, please fix until these measures show that such
+> is true.
+
+**2026-09-23 22:41**
+
+> Are claude web fetches from the local network?
+
+**2026-09-23 22:56**
+
+> fix the missing images on the fan-out nodes. you will have to bring up
+> obsidian again. I also suspect you hadn't fully completed the measure
+> twice cut once harness that verifies the force-directed graph nodes are
+> bounded by much larger, sensible maximum lengths such that they do not
+> jumble together as much. I also suspect an improvement to this dual based
+> approach would be best. Instead, stream O(delta) diff chunk updates in
+> queue based batches to a fitted UMAP projector that incrementally re-fits
+> for every 2x growth in the number of total chunks (as their aggregate 512
+> token form from their components), which resides downstream directly from
+> the similar vectorization and electron browser navigation panel that runs
+> recursive shadow DOM mutationobserver chunk extraction on the *fullest*
+> possible set of content detection dictionaries that can be collected
+> throughout our current code space and possibly some improvements from the
+> diff as well. Please trace through the entire pipeline as described.
+> Please also note the important additional step of markdown-rightclick
+> function that also shows a clear highlight (non-blinding) over the current
+> chunk's cartesian bounding box in the electron browser.
+> Highlight-on-chunk-hover is an important step in scanning. It should be
+> such that whichever element that is hovered is recursively chunked first,
+> such that its highlighted panel and downstream processing is focal and
+> projected through our 3D graph as fast as possible. Please also assess
+> projection improvements for speed, as well as any more speed improvements
+> from a full time-profile breakdown of the entire pipeline, all the way to
+> the 3D graph projector's current view (not relying on diff information,
+> but from some listener that observes and operates over the 3D graph via
+> MCP tools). Infusing tests at each level of the time profiler would be the
+> best means of debugging and verifying the full pipeline as well.
+
+**2026-09-23 23:16**
+
+> go ahead with the pipeline trace and time profile
+
+**2026-09-23 23:31**
+
+> yes, prove the placement hypothesis and fix it
+
+**2026-09-24 00:19**
+
+> What are the next steps? Assess from the global perspective.
+
+**2026-09-24 00:20**
+
+> How about the time-profiled pipeline and integrating all that with our
+> app?
+
+**2026-09-24 00:40**
+
+> The profile technically exists, but much more detached from the browser
+> I'm navigating right now. It can likely be another overlay as a
+> collapsible panel. A small black box on the bottom right corner that, when
+> hovered, shows the actual live processing that the real scanning pipeline
+> is actually running in the real app on the actual electron browser with
+> meaningful feedback on hovering chunks, streams to the projector, and most
+> importantly, the thing about our force-directed layout: all chunks, as in
+> the 256 context window limited ones, are embedded and sent to the
+> projector for transforms with intermittent refits.
+
+**2026-09-24 05:04**
+
+> The logs on the panel in the 3D graph now cover the actual UI view. Have a
+> screenshot to see what I mean.
+
+**2026-09-26 19:11**
+
+> Go ahead with the fresh-workspace test runner
+
+**2026-09-26 21:03**
+
+> Is the cron loop still running?
+
+**2026-10-07 01:26**
+
+> Let's pick up where we left off
+
+**2026-10-07 02:05**
+
+> Never mind, you fixed the dual issue
+
+**2026-10-07 08:46**
+
+> The app was quit while you were working. Please continue from where you
+> left off.
+
+**2026-10-12 03:37**
+
+> are tests currently running?
+
+**2026-10-19 02:01**
+
+> wouldnt be this repo but nearby folders that the repo is in likely
+
+**2026-10-19 02:04**
+
+> perhaps explore faster models of jev that also use deepseek, it think
+> there might be some, find and download it too, we can trade off between
+> both models
+
+**2026-10-21 00:01**
+
+> can you please remove all secrets and push to a brand new remote (public)
+> branch with "git" in the commandline/powershell (gitignoring the databases
+> and large files etc), naming this new branch and project "vertiscope" and
+> make it public.
+
+**2026-10-21 00:19**
+
+> logged into github. please push like i asked
+
+**2026-10-21 00:26**
+
+> please very quickly start the sidecar again
+
+**2026-10-29 23:53**
+
+> Let's bring the mortegon back up
+
+**2026-10-29 23:54**
+
+> please close this thing
+
+**2026-10-29 23:58**
+
+> Thank you. Let's bring our full obsidian plugin sidecar etc back up
+
+**2026-10-30 12:00**
+
+> take the older PRD rows next in order
+
+**2026-11-01 21:49**
+
+> please continue, bringing the app back up
+
+**2026-11-04 23:23**
+
+> We have about 17% of our weekly token limit, so we need to make it count.
+> We need all the features from all my prompts implemented as visibly as
+> possible. Please also bring up our app + plugin too so I can see
+> immediately the "visible" part.
+
+**2026-11-07 00:22**
+
+> conductor we have a problem
+
+**2026-11-07 16:45**
+
+> Please continue on all open glitches I had noted to you. There were quite
+> a few
+
+**2026-11-07 16:50**
+
+> Including what you found in transcripts
+
+**2026-11-08 17:41**
+
+> Please clearly and legibly state all decisions needed from me
+
+**2026-11-08 17:43**
+
+> Continuous motion currently in our 3D graph, causing significant and
+> severe lag. Turn off the hook for now and we'll turn it back on for after
+> decisions.
+
+**2026-11-08 18:33**
+
+> There is still significant jostling when there wasn't before. I think
+> reverting to the original framework prior to a recent addition you made
+> might be better for compute.
+
+**2026-11-08 19:16**
+
+> I need something like this to work with our whole plugin without degrading
+> the plugin's functions.
+
+**2026-11-08 20:17**
+
+> If you haven't noticed, things are broken
+
+**2026-11-09 01:37**
+
+> Please also commit and push to our remote branch whenever the next time
+> for that presents itself
+>
+> Clicking 'recenter' completely disappears the 3D graph
+
+**2026-11-09 06:49**
+
+> please also screen for and remove all secrets and personal data throughout
+> the diff until now, perhaps keeping it as a gitignored script
+
+**2026-11-09 07:00**
+
+> Alright. lets continue, we have tons of ego interface completion left to
+> cover
+
+**2026-11-14 18:33**
+
+> I got some transcripts from 3-5 days ago with antigravity locally where we
+> tried to improve on some of the observed new defects from recent updates.
+> I'd like you to have a look at what we were developing on, the issues
+> reported, and see if you're able to get a better look at what a more naive
+> antigravity context attempted, focusing mostly and primarily on fixing the
+> base complaints yourself and tying in loose ends that naive antigravity
+> attempted.
+
+**2026-11-15 01:43**
+
+> I reset the GPU driver, check if it cleared
+
+**2026-11-15 02:01**
+
+> keep going on the open list while it warms up
+
+**2026-11-15 21:10**
+
+> You're wrong. look at the original suggestion for things like impeccable
+> etc.
+
+**2026-11-15 21:48**
+
+> from here on out, run all harnesses yourself, never use agents, this is a
+> rule. Always test with the MCP-first
+
+**2026-11-22 00:11**
+
+> why does the vault need reindexing each time? this seems inefficient
+
+**2026-11-22 01:19**
+
+> wire the token stream into the app's chat panel
+
+**2026-11-22 10:04**
+
+> done gaming, go ahead with the restart and re-runs
