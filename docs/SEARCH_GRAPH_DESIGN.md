@@ -1,9 +1,19 @@
 # The search as a computation graph on the 2D plane
 
-> **Cross-check, 2026-11-22** (COMPUTATION_GRAPH_EDITOR_SPEC §13). Under 187
-> the one retrieval node of 164 is a CALL CELL in the node editor: its query,
-> toggles and `k` are widgets, the results its output socket, and "similar"
-> re-enters it with a result as its query (spec §13d, §13d').
+> **Cross-check, 2026-11-22** (COMPUTATION_GRAPH_EDITOR_SPEC §13h). Under 187
+> the one retrieval node of 164 is the cockpit's `search` field (`ego.md`)
+> resolved external as its own node on the plane. It is a slate field, not a
+> call cell (spec F-78, correcting F-18), shaped like one: its query,
+> toggles and `k` are the `search` app tool's arguments, `results` its
+> output, and "similar" re-enters it with a result as its query. The browser
+> cell is a socket when `duckduckgo` is on.
+> - The result links are not def/use edges, because a result is a chunk, not a
+>   cell. Each is the `{results}` brace's `{ref}` to that chunk (a record
+>   link, spec §12d), drawn to the result's node when it is placed on the
+>   plane and recomputed with every search, never stored ("Live search only").
+> - §6 is answered: q1 by 164 (all three factors, keyed by the ref); q2 is
+>   moot, since 164 withdrew the stage panels; q3 by 164 ("Live search
+>   only", nothing kept per search).
 
 Design before code, for PLUGIN_GOAL items 163 and 164 (2026-11-15).
 

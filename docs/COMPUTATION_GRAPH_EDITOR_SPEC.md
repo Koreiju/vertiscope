@@ -814,6 +814,12 @@ joins them to the panel.
   while the nodes touch, is never drawn, and is never written. It
   serialises compilation, rows top to bottom then left to right, and gives a
   chat cell its context (T-2).
+  T-11 adds what it carries: "A terminal's or kernel's output is an input to
+  the next cell in that order", so magnetism passes a READOUT (the output
+  as it stands in its note, B6) along the order, whichever notes the cells
+  belong to. Built so far for one reader only: a chat's context
+  (`planepanels.ts`, `chatContext`), which reads the magnetised notes' text
+  in compile order.
 - **A plain `[text](url)` or wiki link is a plain link** (T-4), not a
   computational one. `[query](results)` is retrieval.
 
@@ -944,7 +950,7 @@ them except where it says so, and recency decides any conflict (item 124).
 | B7 | every thing has a governing class of ~25 lines whose public methods are its capabilities; class and instance are two linked nodes | 142, T-10, 89 |
 | B8 | a TOOL panel is read-only, calls only, "implicit calls into the world itself"; a REGULAR code artifact is callable the same way AND explorable and graph-editable | 167 c, F.5-F.6, G-378 |
 | B9 | a Python object enters as typed rows `name: Type = value`; a function is memory lookup to its inputs, its output type inferred by wiring | M.2-M.5, E.6, O.15 |
-| B10 | the ONE markdown panel (Obsidian's own, extended) for every prose surface | 56, 133 c, 140 |
+| B10 | the ONE markdown panel (Obsidian's own, extended) for every markdown surface: prose notes, slates, chat, the clipboard (§12b) | 56, 133 c, 140 |
 | B11 | a code artifact has ONE interface -- run, terminal, open, unnest, typed rows -- wherever it sits | 182 addenda, G-395 |
 | B12 | the graph-view FORM goes; the nodes are the interactive typed artifacts themselves; in 2D only interface canvases, no circles | 182, 183 |
 | B13 | no special effects; one uniform display of node and link | 158, 186 |
@@ -1045,14 +1051,18 @@ kinds of cell give the editor its typed ports:
 - **a call cell**, one binding of a callable or a class: `hits = search(query,
   k=8)`. Its inputs are the callable's parameters (§13d'), and its output is
   the name it binds. Placing a node from the retrieval bar writes a new call
-  cell with the defaults. This is the ComfyUI-like node.
+  cell with the defaults (into which note is O-5). This is the ComfyUI-like
+  node.
 - **any other cell** (a function body, a class, a script, a slate tree). Its
   ports are its plain refs and defs. Unfolding one of its defs reveals that
   definition's typed rows (§13d'), which is the black-box unfold of 80 and
   112, at rank-1 (N.14).
 
 A live object is the output of the call cell that made it, and its traits
-are rows of that node.
+are rows of that node. One more node is not a whole cell: a slate field
+resolved external (§12a) is drawn as its own node for as long as it is
+resolved. It is a placement of a row of its slate's cell, and its ports are
+that field's `{ref}`s and its sub-fields (the search node, §13h).
 
 In trie terms: the note is a `vault://` page and its cells are addresses on it
 (`#cell n`, item 159). A node is a projection of one address. A link is a
@@ -1070,15 +1080,24 @@ is order, a temporary link in 142's word, never a hard link (B3).
 **The note is the boundary of def/use.** Each note has its own kernel
 (`kernel.py` keys kernels by note) and its own dataflow (`dataflow.py` reads
 one note's cells). So a def/use link, and §13f's write-back, join two cells
-of ONE note. Between notes the record has one link: a `{ref}` on the reading
-cell's fence line (12d, G-279), which binds the named RECORD (a note's
-text, a page), resolved before the cell runs, and never another kernel's
-value. A link drawn from a node of note A to a node of note B therefore
-writes `{A}` on B's fence line. The plane today makes every new panel a new
+of ONE note. Between notes the record has one HARD link: a `{ref}` on the
+reading cell's fence line (12d, G-279), which binds the named RECORD,
+resolved before the cell runs, and never another kernel's value. A link
+drawn from cell n of note A to a node of note B therefore writes
+`{A#cell n}` on B's fence line. That is the cell address the outline already
+uses (`refs.py`: `{Note#cell 2}`), and it binds that cell's record: its
+source and its readout. A fence-line ref resolves only note and page TITLES
+today, so a cell address there would fall through to retrieval's top hit
+(O-6). The plane today makes every new panel a new
 note (`planepanels.ts`, `create`, under `domvec/graph/`), so this boundary
 decides what most drawn links on the plane can mean. Passing a VALUE between
 notes, and so which note a node placed from the retrieval bar is written
-into, is not settled by the record (O-5).
+into, is not settled by the record (O-5). The record does give two paths
+across notes, and both carry a record or its readout: the hard link, a
+fence-line `{ref}` (G-279; T-4 and T-6: `{ref}` resolves through "the kernel
+namespace" by trie address), and magnetism's temporary link, whose order
+passes a cell's output to the next (T-11, §12d). What neither carries is a live Python
+object: a value that exists only in one note's kernel.
 
 ### 13d'. Ports from Python -- the node-definition layer
 
@@ -1257,8 +1276,11 @@ lag", and "jostling when there wasn't before". On the plane that means:
   bound, and then nothing moves;
 - the editor redraws, and re-places its DOM bodies, only when a node, a
   link or the plane's pan and zoom changes, never every frame;
-- the idle drift turns the 3D camera only (T-12, 150), and the plane is
-  fixed to the camera, so the drift never moves a node.
+- the idle drift turns the 3D camera and cycles the 3D colours (T-12, 150;
+  "rotates both cartesian and color coordinates", DESIGN_VISION 1.2). The
+  plane is fixed to the camera, so the drift never moves a node, and the
+  plane's nodes and links take Obsidian's theme colours, which do not
+  cycle.
 
 **The gesture help** (159: "a hoverable button that expands into a full
 panel of instructions on the gestures on the 2D computation graph") lists
@@ -1279,7 +1301,10 @@ and `domvec/governing/browser.py` is the first governing class. Each becomes a
 traitlets object with an AFM view.
 
 **Chat first**, because 187 says chat models force the standard:
-- `Chat(model, tools)` holds `messages` as a trait;
+- `Chat(model, tools)` holds `messages` as a trait, as a mirror only. The
+  chat note's turns are the record (182, G-394; §13d: the note's text is the
+  only stored truth). The trait is loaded from the turns, and each turn is
+  written back into the note as a `## You` / `## <model>` turn;
 - its view is the conversation: a clear input box and typed blocks (G-394),
   each code block a cell with the one code interface (B11);
 - tokens stream as `custom` messages, the protocol's free channel (171).
@@ -1301,6 +1326,18 @@ traitlets object with an AFM view.
   hold, 182) becomes its own node, linked back to its source address and
   usable in retrieval and dataflow (182's answer "Select + drag").
 
+**The search node** (164) is the cockpit's `search` field (`ego.md`: `query`,
+`db`, `duckduckgo`, `where`, `k`, `n`, `results`). It is drawn as its own
+node on the plane by resolving that field external (§12a, G-403), a
+placement of the same record (B1). It is a slate field, not a call cell,
+because the cockpit stays a slate (§13b). Its fields have the shape a call
+cell's widgets have, since they are the arguments of the `search` app tool,
+and `results` is its output. Its output links run to the results, which
+are chunks, not cells. So each is a `{ref}` from the
+`{results}` brace to that chunk (12d), drawn to the result's node when it is
+on the plane and recomputed with every search, never stored ("Live search
+only", 164).
+
 ### 13i. What stands from §12, what this replaces
 
 | §12 | after 187 |
@@ -1312,7 +1349,7 @@ traitlets object with an AFM view.
 | 12e governing class, tool panels, agents, chat | **stands**, each made a live object (§13h) |
 | 12f 3D | **stands**: a 3D billboard is one more `render` of the same model |
 | 12h G-401 (fields in the ego slate) | written, not yet seen live (PRD Partly); stands for the cockpit |
-| 12h G-402/403 (reveal editable; resolved-external drop) | **superseded for code objects** by the object canvas and the editor's nodes; stands for prose fields |
+| 12h G-402/403 (reveal editable; resolved-external drop) | **superseded for code objects** by the object canvas and the editor's nodes; stands for markdown records, prose notes and slates alike (B10), so for the cockpit's fields too (the search node, §13h) |
 | 12h G-404 (links only from compilation) | **stands** |
 | 12h G-405 (the craft's circles hidden) | **stands** |
 | 12h G-406 (code field reveals tools and typed rows) | **superseded** by §13d' (typed rows ARE ports and widgets) |
@@ -1342,7 +1379,7 @@ Every row above is a download, so each waits for a yes.
 | G-408 | the comm bridge: an iopub reader per kernel; a comm log with a sequence number, long-polled; `comm_msg` back on the shell channel | a comm opened by a cell is read in the plugin; a `comm_msg` sent from the plugin changes a value read back in the kernel | the reader off: the comm is never seen |
 | G-409 | node definitions from the live namespace (§13d'): signatures, hints, traits | a function defined in a cell appears in the definitions with its ports; a default primitive is a widget, an object type a socket | hints ignored: every input a socket |
 | G-410 | the AFM host in a plane panel (a node body once G-411 lands), per the nine MUSTs | an anywidget made in a cell renders; set from a terminal, the view updates; set in the view, the kernel reads it; two views, one model | `save_changes` dropped: the kernel never sees the view's set |
-| G-411 | litegraph on the plane: nodes from G-409, links from def/use, gestures per §13g, no arrowheads, one shape | the graph's links equal `dataflow`'s edges; an edit to one cell re-parses that cell only (rebuild timed as its own phase); a drawn link within a note writes one line (across notes, one fence-line `{ref}`, §13d), a deleted one removes it, a cycle is refused | a link drawn without the write-back: the code and the graph disagree |
+| G-411 | litegraph on the plane: nodes from G-409, links from def/use, gestures per §13g, no arrowheads, one shape | the graph's links equal `dataflow`'s edges; an edit to one cell re-parses that cell only (rebuild timed as its own phase); a drawn link within a note writes one line (across notes, one fence-line `{A#cell n}`, §13d, which waits on O-6), a deleted one removes it, a cycle is refused | a link drawn without the write-back: the code and the graph disagree |
 | G-412 | `Chat` as a live object (§13h) | tokens stream into the view, gap p50 under 30 ms at the view (G-385-load's bar); a code block runs as a cell; a tool defined in a cell is called by the agent | deltas accumulated in Python: the view gets whole messages |
 | G-413 | the base tools as live objects: Search, Browser, Terminal, Kernel, from their governing classes | each tool panel lists its class read-only; an instance's trait changes re-run its readers | the dataflow event off: readers stay stale |
 
@@ -1373,6 +1410,8 @@ here so a correction has somewhere to land.
   Langflow.
 - litegraph's JSON is never authority (§13d), by NOTEBOOK §1's argument.
 - The pinned MIT litegraph is the editor (§13j), by licence and language.
+- The search node is the cockpit's `search` field resolved external
+  (§13h), by 164's "one node" and the cockpit staying a slate (§13b).
 
 ### 13m. Terms -- one meaning each
 
@@ -1385,10 +1424,10 @@ where it comes from. A term not listed is used in its plain sense.
 | **placement** | where a record is drawn: a field (folded or revealed), a panel or node on the plane, a node in 3D, a view of a live object | a second record | §12a, §13d |
 | **field** | one line `name value` of a slate; the value may be a `{ref}` | a widget (below) | 62, UR E.4 |
 | **slate** | a note whose tree is a Python module written in markdown (the cockpit is one) | a code cell | 62, 63' |
-| **panel** | Obsidian's own markdown view, extended, wherever prose is shown | a node body that is not markdown | 56, 133 c, 140 |
+| **panel** | Obsidian's own markdown view, extended, wherever markdown is shown (prose notes, slates, chat) | a node body that is not markdown | 56, 133 c, 140 |
 | **cell** | one fenced code block of a note, or one top-level slate tree: the unit of dataflow, within its note (§13d) | a panel | 49, G-380 |
 | **call cell** | a cell that binds one call of a callable or a class; the editor's typed node | any cell | §13d |
-| **node (2D)** | a cell drawn in the editor: its body the cell's interface, its ports its inputs and outputs; folded to its title it is the fold parameter of 110 | the retired abstract circle (182, 183) | §13c |
+| **node (2D)** | a cell drawn in the editor: its body the cell's interface, its ports its inputs and outputs; folded to its title it is the fold parameter of 110. Also a slate FIELD resolved external (§12a), drawn as its own node while it is (the search node, §13h) | the retired abstract circle (182, 183) | §13c |
 | **node (3D)** | a record placed in the world or the ego's UMAP: a glowing orb, billboarding its record when hovered | the 2D node | 183, 12f |
 | **port / widget / socket** | a node's input or output; a WIDGET when its value is a literal edited in place, a SOCKET when it is linked by a name | the comm protocol's "widget" (a live object) | §13d' |
 | **live object** | a Python object with typed, observed state synced to its views over the kernel's comm channel (a Jupyter widget, front end per AFM) | a widget port | §13b, §13e |
@@ -1509,7 +1548,7 @@ with the app, **U** an unclear term or step.
 | F-15 | I | DESIGN_VISION 1.4, T-12, 4c | the flip gesture (182), drift off (150), "open" rows since built | head note |
 | F-16 | I | GRAPH_WORKBENCH §6 | "the 2D editor's host" still asked | answered by 50; head note |
 | F-17 | I | NOTEBOOK_PANEL §1, §2, §4a, §7 | subprocess-first (49), the `+` buttons (133 d), terminals as cells (142), no interactive outputs (187) | head note |
-| F-18 | U | SEARCH_GRAPH | what the one retrieval node is under 187 | a call cell in the editor; head note |
+| F-18 | U | SEARCH_GRAPH | what the one retrieval node is under 187 | a call cell in the editor; head note. Corrected by F-78: the cockpit's `search` field, resolved external |
 | F-19 | I | UR S.4 vs 133 f | "no x, no minimizer" vs "minimize and exit" on panels | recency (124): 133 f; noted in RESERVOIR |
 | F-20 | I | 186 vs 187 | "NO SPECIAL EFFECTS" vs a node editor's title bars and ports | 187 is later and scoped to code objects; prose stays fields; §13g allows one shape and nothing styled beyond theme colours |
 | F-21 | M | first §13 | `@comfyorg/litegraph` named as a live MIT package | archived and merged into a GPL-3.0 repository; only a pinned pre-merge release (§13j) |
@@ -1559,14 +1598,24 @@ with the app, **U** an unclear term or step.
 | F-65 | M | spec §13e | "`/chat_stream` is the only push channel today, so the long poll is the same pattern": `/chat_stream` is a held-open response flushed per token, not a long poll | the two told apart, and why the comm log long-polls |
 | F-66 | U | B14 vs §13g | "right-click on the base" (B14) and "on the title" (§13g) for one gesture | B14 names it the title, mortegon's "base node" (RESERVOIR §10.2) |
 | F-67 | U | spec §13f | "(B's)" read as a B-commitment of §13a | "node B's below" |
-| F-68 | U | spec §13d, §13f vs `kernel.py`, `dataflow.py`, `planepanels.ts` | def/use links and their write-back were stated without the note boundary: kernels and dataflow are per note, and the plane makes each new panel its own note | the boundary stated; across notes a drawn link is a fence-line `{ref}` (G-279); a value between notes is open, O-5 |
+| F-68 | U | spec §13d, §13f vs `kernel.py`, `dataflow.py`, `planepanels.ts` | def/use links and their write-back were stated without the note boundary: kernels and dataflow are per note, and the plane makes each new panel its own note | the boundary stated; across notes a drawn link is a fence-line `{ref}` (G-279); a value between notes is open, O-5 Refined by F-74 and F-81 |
 | F-69 | U | spec §13k vs 2026-09-20 20:28 | how a live check reads the editor | as data through the harness; a screenshot only when what a person sees is the question |
 | F-70 | I | spec §13d vs the binding goal (O(delta), phases timed; CLAUDE.md goal, constraints 4, 5b, 5c) | "rebuilt from the note" with no cost; `dataflow.graph` re-parses every cell per call | re-parse cells whose `exact_hash` changed, re-join their names, a slate tree's neighbourhood invalidation stated; the rebuild a timed phase; G-411's proof carries it |
 | F-71 | M | spec §12a | "`![[...]]` / `[[...]]` encoding, 12f" -- that table is §12g | corrected |
 | F-72 | I | spec §12e vs §13n | the `{code://...}` unfold "down to the compiled base" without the app-tool stop | stated: workspace code and libraries unfold; an app tool stops at its rows |
 | F-73 | I | spec B3, §12d, §13d, §13g, §13m vs 142 | the spec said magnetism is "never a link"; the reader's own word (142) is "a temporary link for compilation serialization" | the reader's term kept: a TEMPORARY link, never a hard link, never drawn or written |
+| F-74 | I | spec §12d, §13d, O-5 vs DESIGN_VISION T-4, T-6, T-11 | T-11's second half (a terminal's or kernel's output is an input to the next cell in magnetism's order) was missing, and O-5 said the `{ref}` was the only path across notes | §12d carries T-11 (built only for a chat's context); §13d and O-5 name both paths, a record and a readout; O-5 narrowed to a LIVE value |
+| F-75 | U | spec §13g vs DESIGN_VISION 1.2 | the drift "rotates both cartesian and color coordinates"; whether colours cycle on the plane was unsaid | camera and 3D colours only; the plane keeps the theme's colours |
+| F-76 | U | SEARCH_GRAPH 164 vs spec §13d | 164's result outputs "as hard links" against nodes that are cells, while results are chunks | a `{ref}` link per result, record-level (12d), drawn when placed, recomputed per search; stated in §13h and SEARCH's head |
+| F-77 | I | SEARCH_GRAPH §6 | three questions shown open; 164 answered two and made the third moot | marked in SEARCH's head note |
+| F-78 | M | F-18's resolution, SEARCH_GRAPH head | the search node called "a call cell"; in `ego.md` it is the `search` subtree of the cockpit slate, and the cockpit stays a slate (§13b) | a slate field resolved external as its own node (§12a, G-403), call-cell-shaped; §13h and SEARCH's head corrected |
+| F-79 | I | spec §13d, §13m vs §12a, §13h | "the grain of a node is the CELL", while a slate field resolved external (the search node) is drawn as its own node | both kinds named: a cell, or a field resolved external, a placement of its cell's row |
+| F-80 | I | NOTEBOOK §5 vs 2026-09-20 20:28, §13k | "never a screenshot" against "screenshots must be sparing", and against G-394's defects found only by a screenshot | head note: data first, a screenshot for what a person sees |
+| F-81 | M | spec §13d (written in F-68) | "the record has one link" across notes, then "two paths" in the same paragraph; and a cross-note link wrote `{A}`, which binds note A whole, not the cell drawn from | one HARD link and one temporary link named; the link writes `{A#cell n}`, the outline's cell address; resolving it on a fence line is O-6 |
+| F-82 | I | spec §13h vs §13d, 182, G-394 | `Chat` "holds `messages` as a trait" beside the chat note's turns: two authorities for one conversation | the note's turns are the record; the trait mirrors them and each turn is written back |
+| F-83 | U | spec §13i, PRD G-402, G-403 vs §13b, §13h | the two rows were scoped to "prose", while §13b keeps prose notes and the cockpit slate apart, and the search node rests on G-403 for a slate field | scoped to markdown records: prose notes and slates (B10); B10 and the term "panel" say "markdown" for the same reason |
 
-**Still open** -- O-1 to O-4 are work the design names; O-5 is a question for the reader:
+**Still open** -- O-1 to O-4 and O-6 are work the design names; O-5 is a question for the reader:
 
 - O-1. The pinned litegraph release's own licence file must be read before
   it is vendored (§13j); only third-party listings say MIT.
@@ -1580,9 +1629,11 @@ with the app, **U** an unclear term or step.
   (from 137.4, "chunk groups"); the governing browser class and
   G-301 step chunk -> page -> live. The ruling is the later word: the class
   gains a `group` rung.
-- O-5. **For the reader.** A value passed between nodes of two different
-  notes. Today each note has its own kernel, and the only link across notes
-  is a fence-line `{ref}`, which binds a record, not a value (§13d). Either
+- O-5. **For the reader.** A LIVE value passed between nodes of two
+  different notes. Today each note has its own kernel. Across notes the
+  record gives a fence-line `{ref}` (a record, G-279, T-4, T-6) and
+  magnetism's order (a readout, T-11), never an object living in another
+  kernel (§13d). Either
   the plane's nodes share one kernel (one note, or one kernel per plane),
   or cross-note links stay record-level. The answer also decides which note
   a node placed from the retrieval bar is written into. The record does not
@@ -1590,6 +1641,9 @@ with the app, **U** an unclear term or step.
   namespace. Per-note state is NOTEBOOK §4's design ("a note is the unit a
   reader thinks in"), mine and written before the plane held nodes, not a
   ruling.
+- O-6. A fence-line `{ref}` naming a cell (`{Note#cell n}`, the outline's
+  grammar) is not resolved: `refs.resolve` matches note and page titles,
+  then falls back to retrieval. A drawn cross-note link (§13d) needs it.
 
 ### 14a. The recovered prompts, one by one (F-59)
 

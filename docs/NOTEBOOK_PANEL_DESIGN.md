@@ -15,6 +15,10 @@
 >   sets the boundary of def/use links: across notes only a fence-line
 >   `{ref}`, which binds a record, not a value (spec §13d, F-68). Whether
 >   that stands is the open question O-5.
+> - §5's "verifiable over CDP, never a screenshot" is stricter than the
+>   record, which says "Screenshots must be sparing" (2026-09-20 20:28).
+>   State is read as data through the harness, and a screenshot is taken when
+>   the question is what a person sees (spec §13k, F-69, F-80).
 
 Addendum II puts this before the hovering SLM bar and asks that it be nailed
 down *first*: *"we move onward to the notebook kernel panel design first to nail
