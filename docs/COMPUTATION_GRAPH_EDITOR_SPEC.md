@@ -1449,7 +1449,7 @@ where it comes from. A term not listed is used in its plain sense.
 |---|---|---|---|
 | **record** | one thing (note, cell, chunk, browser, tool, model, run): its text, its edges, its fold state, its current readout | a copy of it | 37, RESERVOIR §5 |
 | **placement** | where a record is drawn: a field (folded or revealed), a panel or node on the plane, a node in 3D, a view of a live object | a second record | §12a, §13d |
-| **field** | one line `name value` of a slate; the value may be a `{ref}` | a widget (below) | 62, UR E.4 |
+| **field** | one line `name value` of a slate, with the lines indented under it (its sub-fields, as `search`'s in `ego.md`); the value may be a `{ref}` | a widget (below) | 62, UR E.4 |
 | **slate** | a note whose tree is a Python module written in markdown (the cockpit is one) | a code cell | 62, 63' |
 | **panel** | Obsidian's own markdown view, extended, wherever markdown is shown (prose notes, slates, chat) | a node body that is not markdown | 56, 133 c, 140 |
 | **cell** | one fenced code block of a note, or one top-level slate tree: the unit of dataflow, within its note (§13d) | a panel | 49, G-380 |
@@ -1489,7 +1489,7 @@ what a canvas shows, how far it unfolds, what can be edited, how it is found.
 | hidden | the bodies, its imports, the modules and routes it calls, the store behind it (167 c: "no way of exploring the underlying codebase"; F.6: `read_only`, `no_datablock`) | nothing of its own |
 | how far it unfolds | its typed rows only. A row whose type is itself an app type unfolds to THAT type's rows, never to an implementation | down its dependencies (80, 112, G-328): another workspace note to its cells; an installed library to its definitions, read from the installed source, READ-ONLY; the base modules at the bottom. An app tool it calls stops the unfold at the app tool's rows |
 | editable | never: "read-only" means its code cannot be opened or edited; its calls still act on the world (`go`, `pin`, `act`, `Vault.write`), each returning a value that names what changed (§8) | in place: values, types, renames written back losslessly (G-378); links drawn in the editor (§13f) |
-| as a node (§13d) | a call cell's callable: its parameters are ports; the node's body is the read-only listing | its cells are nodes with ports; its functions and classes are callables for further call cells |
+| as a node (§13d) | the callable of a call cell. The call cell is the reader's (workspace code, editable); its ports are the tool's parameters; unfolding the callable shows the tool's read-only listing | its cells are nodes with ports; its functions and classes are callables for further call cells |
 | as a live object (§13h) | the base tools: the view and the traits are visible, the implementation is not | a reader's own live-object class: fully visible |
 | found by | retrieval over `tool://` pages, placed in 3D (G-382, 170 a) | retrieval over vault pages; the reader's own artifacts live in the ego (77, RESERVOIR 10.6) |
 | embedded as | like every code artifact (51): its comments and docstrings, which carry a calls-only listing's meaning; a vector from its rendered panel per G-382 (170 a) | its prose only: docstrings and comments, never the code (51, G-52) |
@@ -1513,9 +1513,11 @@ Four boundaries make the scope exact:
    an app tool.
 4. **Names.** A workspace cell may reuse an app tool's name, and the cell's
    definition then wins for that kernel's life (THROUGH_STACK_SYNTHESIS 1g,
-   tested). 181 left this unruled. So the canvas says which kind a name
-   resolves to. Nodes keep one shape (B13), and an app tool carries
-   mortegon's read-only mark instead (F.6's lock), the one difference. A
+   tested). 181 asked and got "[No preference]", so it stays as found, my
+   choice (F-84). So the canvas says which kind a name resolves to. Nodes
+   keep one shape (B13); a tool panel, and an app callable wherever its rows
+   are shown, carries mortegon's read-only mark instead (F.6's lock), the
+   one difference. A
    workspace definition that shadows an app name carries the name of the app
    tool it hides.
 
@@ -1653,6 +1655,8 @@ with the app, **U** an unclear term or step.
 | F-93 | I | spec §10a vs §10d, 187, 167 | §10a's table still said smolagents "not installed", the plane's editor "open", and marimo's analysis "open" | installed; answered by 187 (§13j); answered by 167 (§9a) |
 | F-94 | I | spec §11b, §11d vs 182, 187 | the corrected reading still had a gesture flipping panel and graph FORMS, and §11d said the five editor calls were "added as `new`" while §8 counts them as existing | §11b noted as superseded in part (the commute is code <-> graph editor); §11d says all five exist (booted by `kernel_objects.py`) |
 | F-95 | M | spec §14a vs §13k | §14a's row for 2026-11-08 19:16 cited a rule in §13k ("every slice keeps the plugin's checks green") that §13k did not state | stated in §13k, with O-2's retired checks; also the 2026-09-23 22:56 row credited the browser's hover highlight to F-70, corrected |
+| F-96 | U | spec §13m vs F-79, `ego.md` | "field" defined as one line, while the search field holds sub-fields | a field includes the lines indented under it |
+| F-97 | U | spec §13n | an app tool "as a node" had "the read-only listing" as the node's body, blurring the reader's call cell (editable) with the tool it calls | the call cell is workspace code; the tool's listing is what its callable unfolds to; boundary 4 places the read-only mark there and cites 181's answer (F-84) |
 
 **Still open** -- O-1 to O-4 and O-6 are work the design names; O-5 is a question for the reader:
 
