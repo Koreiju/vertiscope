@@ -1492,3 +1492,26 @@ body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) 
 .domvec-chatui.is-busy .domvec-chatui-send { opacity: 0.3; pointer-events: none; }
 .domvec-chatui-ghost { position: fixed; z-index: 9999; pointer-events: none; max-width: 320px; white-space: pre; overflow: hidden; font: 11px var(--font-monospace); background: #0e0e12; color: #ccc; border: 1px solid #7aa2f7; border-radius: 4px; padding: 4px 6px; opacity: 0.9; }
 body.domvec-chatui-pulling, body.domvec-chatui-pulling * { user-select: none !important; cursor: grabbing !important; }
+
+/* The ego canvas (PLUGIN_GOAL 183, G-396): one central panel, its sections
+   the ego's components -- contained (drawn live) or pulled out (a link). */
+.domvec-plane-card.is-canvas > .workspace-leaf { display: none; }
+.domvec-plane-card.is-canvas > .domvec-rows { display: none; }
+/* min-height: the panel's own sizing (G-326) writes an inline height for a
+   card whose leaf is hidden -- 120 px, seen 2026-11-22 */
+.domvec-plane-card.is-canvas { min-height: min(560px, 70vh); border-color: #b48ef0; }
+.domvec-canvas { flex: 1 1 auto; min-height: 0; overflow-y: auto; background: #111116; padding: 4px 6px; }
+.domvec-canvas-section { border: 1px solid #2a2a36; border-radius: 6px; margin: 4px 0; background: #16161c; }
+.domvec-canvas-section.is-out { border-style: dashed; opacity: 0.75; }
+.domvec-canvas-head { display: flex; gap: 6px; align-items: center; padding: 3px 8px; cursor: pointer; user-select: none; font-size: 12px; color: #ccc; }
+.domvec-canvas-head:hover { background: #1f1f28; }
+.domvec-canvas-fold { width: 12px; color: #b48ef0; }
+.domvec-canvas-name { font-weight: 600; }
+.domvec-canvas-missing { color: #e07070; font-style: italic; }
+.domvec-canvas-body { border-top: 1px solid #2a2a36; }
+/* A leaf's content is absolutely positioned: with height auto it drew
+   nothing (seen 2026-11-22). A fixed height, scrolled inside. */
+.domvec-canvas-body > .workspace-leaf { position: relative; height: 300px; }
+.domvec-canvas-body > .workspace-leaf > .workspace-leaf-content { height: 100%; }
+.domvec-canvas-body .view-header { display: none; }
+.domvec-canvas.plant-autoheight .domvec-canvas-body > .workspace-leaf { height: auto; }

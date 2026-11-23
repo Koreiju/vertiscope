@@ -12069,6 +12069,63 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-396",
+      asks: "the ego as ONE central artifact canvas (PLUGIN_GOAL 183): `domvec/ego canvas.md` holds the cockpit and the ego's members as embedded sections (`![[...]]`), seeded from the craft's membership; drawn at the plane's CENTRE; the cockpit's section unfolded with its LIVE editor (the slate's own text, editable), the rest folded to a header with no editor; a header click unfolds a section (an editor mounted) and folds it again (released); planted plantAutoHeight: the unfolded section draws no editor (seen 2026-11-22); the canvas FOLLOWS the ego -- a note made after the seed joins it, contained (a check's scratch note never does); planted plantSeedOnce: it does not",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvecPlane, C = d.canvas.constructor;
+          C.plantAutoHeight = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            await d.openCanvas(); await d.canvas.render(); await sleep(1200);
+            const card = d.panelOf("domvec/ego canvas.md").card, plane = d.host.plane();
+            const pr = plane.getBoundingClientRect(), cr = card.getBoundingClientRect();
+            out.centred = Math.abs((cr.left + cr.right) / 2 - (pr.left + pr.right) / 2) < pr.width * 0.08;
+            const secs = await d.canvas.sections();
+            out.sections = secs.length; out.embedded = secs.filter((s) => s.embedded).length;
+            out.first = secs[0] && secs[0].path;
+            const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+            const members = new Set((g?.craft?.nodes || []).filter((n) => n.kind === "note" && !C.scratch(n.path)).map((n) => n.path));
+            out.members_contained = [...members].filter((p) => secs.some((s) => s.path === p)).length; out.members = members.size;
+            const bodyOf = (p) => card.querySelector('.domvec-canvas-section[data-path="' + p + '"] .domvec-canvas-body');
+            const ego = bodyOf("domvec/ego.md");
+            out.ego_drawn = !!ego && ego.offsetHeight > 100 && !!ego.querySelector(".cm-editor") && (ego.querySelector(".cm-content")?.innerText || "").includes("throttle");
+            out.folded_editors = [...card.querySelectorAll(".domvec-canvas-section")].filter((x) => x.dataset.path !== "domvec/ego.md" && x.querySelector(".cm-editor")).length;
+            // A note made AFTER the seed joins the canvas (183: containable).
+            C.plantSeedOnce = ${planted};
+            const late = "domvec/graph/canvas late " + Date.now().toString(36) + ".md";
+            await d.create("notebook", { path: late, text: "a note made after the seed" + String.fromCharCode(10) });
+            await g?.craft?.fresh?.();
+            await d.openCanvas(); await sleep(800);
+            out.late_joined = (await d.canvas.sections()).some((s) => s.path === late && s.embedded);
+            try { d.panelOf(late)?.leaf.detach(); } catch (e) {}
+            await sleep(500);
+            await app.vault.process(app.vault.getAbstractFileByPath("domvec/ego canvas.md"), (t) => t.split(String.fromCharCode(10)).filter((l) => !l.includes(late.replace(/\.md$/, ""))).join(String.fromCharCode(10)));
+            const lf = app.vault.getAbstractFileByPath(late); if (lf) await app.vault.trash(lf, true);
+            const other = secs.find((s) => s.embedded && s.path !== "domvec/ego.md" && app.vault.getAbstractFileByPath(s.path));
+            if (other) {
+              const head = () => card.querySelector('.domvec-canvas-section[data-path="' + other.path + '"] .domvec-canvas-head');
+              const e0 = d.canvas.stats.mounted_editors;
+              head().click(); await sleep(1500);
+              const b = bodyOf(other.path);
+              out.unfolded = { editor: !!(b && b.querySelector(".cm-editor")), h: b ? b.offsetHeight : 0, mounted: d.canvas.stats.mounted_editors - e0 };
+              head().click(); await sleep(600);
+              out.refolded = !bodyOf(other.path);
+            }
+          } finally { C.plantAutoHeight = false; C.plantSeedOnce = false; await d.canvas.render(); }
+          return out;
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean;
+        return { pass: c.centred && c.first === "domvec/ego.md" && c.embedded === c.sections && c.members > 0 && c.members_contained === c.members
+                       && c.ego_drawn && c.folded_editors === 0 && c.unfolded && c.unfolded.editor && c.unfolded.h > 100 && c.unfolded.mounted === 1 && c.refolded
+                       && c.late_joined === true
+                       && planted.ego_drawn === false && planted.late_joined === false,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-395",
       asks: "ONE interface per python code artifact (PLUGIN_GOAL 182: 'generalized in their interfaces no matter whether or not they are within a markdown panel or their own panel'): the same source as a block in a chat turn (a rendered markdown block) and as a code card of its own draws the SAME typed rows (G-322); editing a row's value under the model's REPEATED block rewrites THAT fence in the note and not the first copy; a click on a row field is the editor's, never a pull; planted plantCardOnly: the block in the chat has no rows",
       async run() {

@@ -31,6 +31,7 @@ import { chunkNoteState, clampToPlane, makeDraggable, type PlaceStats } from "./
 import { edgeResizable } from "./edgeresize";
 import { isSlate, COCKPIT_PATH } from "./cockpit";
 import { ChatUI, type Piece } from "./chatui";
+import { EgoCanvas, CANVAS_PATH } from "./egocanvas";
 
 export interface PlaneHost {
   /** The plane over the 3D view, when a graph is open. */
@@ -370,7 +371,8 @@ export class PlaneDesk {
       this.panels.push(p);
       this.hook(p);
       const mount = opts.mount || (this.isTerminal(file) ? (c: HTMLElement) => this.terminalMount(c, Leaf)
-                                   : this.isChatNote(file) ? (c: HTMLElement) => this.chatMount(c, file) : undefined);
+                                   : this.isChatNote(file) ? (c: HTMLElement) => this.chatMount(c, file)
+                                   : file.path === CANVAS_PATH ? (c: HTMLElement) => this.canvas.mount(c, file) : undefined);
       if (mount) { const pp = p; const undo = await mount(card); if (undo) pp.cleanup = undo; clampToPlane(card, plane); }
       const path = file.path;
       // Ctrl+= / Ctrl+- (and Ctrl+0) resize THIS panel (PLUGIN_GOAL 133),
@@ -737,6 +739,21 @@ export class PlaneDesk {
     return String(this.app.metadataCache.getFileCache(file)?.frontmatter?.domvec || "") === "chat";
   }
   chats = new Map<string, ChatUI>();
+  /** The ego canvas (183, G-396): the cockpit and every ego artifact, contained. */
+  canvas = new EgoCanvas({
+    app: this.app,
+    plane: () => this.host.plane(),
+    members: () => {
+      const g: any = this.app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+      return [...new Set<string>((g?.craft?.nodes || []).filter((n: any) => n.kind === "note" && n.path).map((n: any) => n.path))];
+    },
+  });
+  async openCanvas(): Promise<any> {
+    const f = await this.canvas.ensure();
+    const p = this.panelOf(f.path);
+    if (p) { this.canvas.centre(p.card); await this.canvas.sync(); return p; }
+    return this.open(f, { mount: (c) => this.canvas.mount(c, f) });
+  }
   /** L-1: the chat role of the one model table (`models.ROLES["chat"]`). */
   static CHAT_MODEL = "Nous Hermes 2 Mistral DPO";
   private async chatMount(card: HTMLElement, file: TFile): Promise<() => void> {
