@@ -15,6 +15,18 @@ in each dated series, so every citation below carries its date:
 `(2026-11-01) 62` is not `(2026-10-11) 62`. §12-§14 are the exception: they
 cite the latest series by bare number, under the rule at §13's head.
 
+> **193 (2026-11-24) bears on most of §12-§13 (F-118).** The reader:
+> "you're totally overdoing the work required for the markdown panels". A
+> panel is a plain Obsidian note, rendered natively, and the purple `{ref}`
+> chips go. A Python cell is Obsidian's own code block. One "interface"
+> generalizes every canvas type. Where §12-§13 build a renderer of their own
+> (the slate's chips and field rows, §12b-§12c; litegraph's nodes, ports
+> and widgets, §13d'-§13g), they are suspended until the reader answers
+> one question: are links between plain notes wiki links (over 136 and T-4,
+> and O-7's finding), or compiled links shown only as highlighting? O-1,
+> O-6, O-10, G-401, G-409 and G-411 wait on that answer. The live objects
+> (187: G-408, G-410, G-412, G-413), O-5, O-7 and O-8 stand.
+
 ---
 
 ## 1. The record, by date
@@ -48,8 +60,9 @@ where it was read into a design.
 | **2026-11-22, 187** | Established interactive-object APIs over the in-markdown syntax; the graphical side is an existing permissive node editor for Python modules | §13; G-408..G-413 |
 | 2026-11-22, 188-191 | The cross-check goal, no agents, design docs with fragments only; code tools on canvases scoped as app tools vs workspace code; eleven late-transcribed messages; every session prompt in the check (85 recovered, PLUGIN_GOAL's 2026-11-22 inventory) | §13n, §14 |
 | 2026-11-24, 192 | Hover previews of billboards in 3D; does fly-to still work; "I don't know what these dotted lines are" | G-414; the craft gate (G-405) deployed; F-105 |
+| **2026-11-24, 193** | "you're totally overdoing the work required for the markdown panels": plain Obsidian notes; the purple nodes removed; a `#` query as the retrieval gesture; code blocks as cells; one interface for every canvas type, two query embeddings | the head note; F-118 |
 
-Where the verbatim record ends: 2026-11-24, item 192 (it was 166 when this table was first written). Anything below that
+Where the verbatim record ends: 2026-11-24, item 193 (it was 166 when this table was first written). Anything below that
 line in any design is interpretation.
 
 ## 2. The designs already written, and what 166 does to each
@@ -1554,7 +1567,7 @@ Sources (read 2026-11-22):
 The whole set, re-read at every pass. Scope: this spec, the sibling designs
 (RESERVOIR, GRAPH_WORKBENCH, DESIGN_VISION, SEARCH_GRAPH, NOTEBOOK_PANEL,
 THROUGH_STACK_SYNTHESIS, EGO_CANVAS, CALLABLE_INTERFACE's head), PLUGIN_GOAL
-from 2026-10-29 to 192, mortegon UR §E, §F, §M-§T, the PRD rows they
+from 2026-10-29 to 193, mortegon UR §E, §F, §M-§T, the PRD rows they
 cite, and every prompt the reader sent in this session's transcript
 (2026-09-12 to 2026-11-23 UTC, 238 messages; from F-59). Kinds: **M** a mistake, **I** an inconsistency between documents or
 with the app, **U** an unclear term or step.
@@ -1678,6 +1691,7 @@ with the app, **U** an unclear term or step.
 | F-115 | I | app: G-401 vs its PRD row and §12h | §12h says the separate canvas note is "removed" and the row "read once and retired"; `sync` does trash it, but runs only from `openCanvas`, which only live checks call -- the note is still in the vault and on the plane. F-112's wording also left the trash step out | O-3 and G-401 say so; an entry point is owed (O-3) |
 | F-116 | I | spec §14a (2026-11-08 17:41 row) vs O-3 | "the one decision for the reader is O-5" while O-3 records a second question asked of the reader | the design decision told apart from the layout question |
 | F-117 | I | spec §12c, §12h G-401 vs PRD G-401 and `planepanels.ts` `canvas.members` | the slate's fields are seeded from "the tool space (158)" in the spec, from "the craft membership" in the row and the code; the two sets differ (browsers, chats, tagged chunks), and the craft is retired | O-10 |
+| F-118 | I | spec §12b-§12c, §13d'-§13g, O-1, O-6, O-10; PRD G-401, G-409, G-411 vs 193 | the spec builds its own renderer: chip fields, a vendored node editor, ports and widgets. 193 asks for plain Obsidian notes and code blocks, the purple nodes removed | suspended at the spec's head, pending the reader's answer on links; nothing deleted until then |
 
 **Still open** -- O-1 to O-4 and O-6 to O-10 are work the design names; O-5 is a question for the reader:
 
