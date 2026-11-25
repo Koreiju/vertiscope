@@ -15015,7 +15015,9 @@ export function makeChecks(env) {
           } finally {
             tr.plantOff = false;
             if (was) bv.shown = was;
-            for (const q of [path, other]) { try { pl.desk.closePath(q); } catch {} const g = app.vault.getAbstractFileByPath(q); if (g) await app.vault.delete(g).catch(() => 0); }
+            await sleep(2000);   // a re-run's output still landing would write the note back
+            for (const q of [path, other]) { try { pl.desk.closePath(q); } catch {} }
+            for (let k = 0; k < 2; k++) { for (const q of [path, other]) { const g = app.vault.getAbstractFileByPath(q); if (g) await app.vault.delete(g).catch(() => 0); } await sleep(1200); }
           }
         })()`, { timeout: 60000 });
         const clean = await arm(false), planted = await arm(true);
