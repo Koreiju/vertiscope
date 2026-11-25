@@ -3,7 +3,8 @@
  * §3.1-3.3; UR O.1a, M.6, N.8, S.5, V.5): on any note in the slate class,
  *
  * - right-click a `{ref}`: INTERNALIZE it -- the target's rank-1 lines shown
- *   indented under its line, read-only, the braces dropped (revealed-internal);
+ *   indented under its line, the braces dropped (revealed-internal); a row
+ *   read from a vault note is edited in place (G-402), a web chunk's is read-only;
  *   right-click again: fold it back to the braced token. Only the rank-1
  *   lines: "only rank-1 expansions on clicked ancestor nodes" (item 36).
  * - right-click the title line: COLLAPSE the slate to its circle (the
@@ -130,6 +131,13 @@ export function titleLine(doc: Text): number {
   return i <= doc.lines ? i : -1;
 }
 
+/** G-402 (spec 12h; M.8, 104, 151): a revealed row of a MARKDOWN record is
+ *  edited in place and written to its own record. The cockpit installs the
+ *  hook; a reveal it cannot place in a vault note (a web chunk) has no path
+ *  and stays read-only. Planted `__domvecPlantRevealReadOnly`: nothing edits. */
+export const revealEdit: { pathOf: (name: string) => string | null; write: (el: HTMLElement, owner: string, old: string, next: string) => void } =
+  { pathOf: () => null, write: () => undefined };
+
 class RevealWidget extends WidgetType {
   /** `all`: every reveal of the slate -- a `{ref}` in a revealed row is a node,
    *  and opened (right-click) its own rows nest beneath it: black-box
@@ -152,26 +160,40 @@ class RevealWidget extends WidgetType {
     el.className = "domvec-slate-reveal";
     el.setAttribute("data-ref", this.name);
     const seen = new Set<string>([this.name]);
-    const rows = (lines: string[], depth: number) => {
+    const rows = (lines: string[], depth: number, owner: string) => {
+      const editable = !!lines.length && !(window as any).__domvecPlantRevealReadOnly && !!revealEdit.pathOf(owner);
       for (const l of lines.length ? lines : ["(nothing at rank 1)"]) {
         const row = el.createDiv({ cls: "domvec-slate-reveal-line" });
         row.style.paddingLeft = `${(this.indent + depth) * 3}ch`;
         const text = l.replace(/\t/g, "   ");
         const m = /\{([^}]+)\}/.exec(text);
-        if (!m) { row.setText(text); continue; }
+        if (!m) {
+          row.setText(text);
+          if (editable) {
+            // In place: the row is a field; Enter or leaving it writes the line.
+            row.contentEditable = "true"; row.addClass("is-editable");
+            row.dataset.owner = owner;
+            let sent = false;   // once: a row removed from the page blurs again
+            const done = () => { const next = (row.textContent || "").trim(); if (!sent && row.isConnected && next && next !== text.trim()) { sent = true; revealEdit.write(row, owner, l, next); } };
+            row.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); row.blur(); } });
+            row.addEventListener("blur", done);
+          }
+          continue;
+        }
         row.appendText(text.slice(0, m.index));
         const open = m[1] in this.all;
         const node = row.createSpan({ cls: "domvec-var domvec-slate-reveal-ref" + (open ? " is-revealed" : ""),
                                       text: open ? (m[1].split("#").pop() || m[1]) : m[0] });
         node.setAttribute("data-ref", m[1]);
         row.appendText(text.slice(m.index + m[0].length));
-        if (open && !seen.has(m[1])) { seen.add(m[1]); rows(this.all[m[1]], depth + 1); }
+        if (open && !seen.has(m[1])) { seen.add(m[1]); rows(this.all[m[1]], depth + 1, m[1]); }
       }
     };
-    rows(this.lines, 1);
+    rows(this.lines, 1, this.name);
     return el;
   }
-  ignoreEvent(): boolean { return false; }
+  // An editable row keeps its own keys and clicks; the rest are the editor's.
+  ignoreEvent(e: Event): boolean { return !!(e.target as HTMLElement)?.closest?.(".domvec-slate-reveal-line.is-editable"); }
 }
 
 /** A fold marker's brace, drawn round a folded field's name (not in the text). */

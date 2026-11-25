@@ -328,6 +328,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     for (const e of ((window as any).__domvecExtraExtensions || []) as any[]) this.slots.add(e);
     this.slots.load();
     this.register(watchTabDrags(this.app));
+    // G-403: a slate field held and dropped on the plane opens there, external.
+    this.cockpit.desk = () => this.desk;
+    this.desk.revealIn = async (host, ref) => { const v = this.desk.viewOf(host); return v ? this.cockpit.toggleReveal(v, ref) : "none"; };
+    this.register(this.cockpit.installHold());
     try {
       this.registerMarkdownCodeBlockProcessor(BROWSER_FENCE, browserFence(this.app));
     } catch (e) {

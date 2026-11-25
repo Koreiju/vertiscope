@@ -14871,6 +14871,110 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-402",
+      asks: "a revealed field of a MARKDOWN record is edited in place and written to its own record (spec 12h; M.8, 104): a slate's {ref} to a vault slate revealed, its row 'color blue' typed to 'color green' in place -- the record's own line becomes color<TAB>green, its other line untouched, and the reveal redraws from it; a web/code chunk's reveal stays read-only (151); planted __domvecPlantRevealReadOnly: no row edits, the record unchanged",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const until = async (ok, ms) => { for (let t = 0; t < ms && !(await ok()); t += 200) await sleep(200); return !!(await ok()); };
+          const plugin = app.plugins.getPlugin("domvec-bridge"), d = window.__domvecPlane, cp = plugin.cockpit;
+          const NL = String.fromCharCode(10), T = String.fromCharCode(9);
+          window.__domvecPlantRevealReadOnly = ${planted};
+          const tok = (${planted} ? "p" : "c") + Date.now().toString(36);
+          const rec = "domvec/graph/g402rec " + tok + ".md", host = "domvec/graph/g402 " + tok + ".md";
+          const MOD = "code://repo/search.py";
+          const out = { planted: ${planted} };
+          try {
+            await app.vault.create(rec, ["---", "domvec: slate", "---", "rec", T + "color" + T + "blue", T + "size" + T + "3", ""].join(NL));
+            await d.create("slate", { path: host, text: ["---", "domvec: slate", "---", "host", T + "thing" + T + "{g402rec " + tok + "}", T + "mod" + T + "{" + MOD + "}", ""].join(NL) });
+            const v = d.viewOf(host); await sleep(900);
+            out.revealed = await cp.toggleReveal(v, "g402rec " + tok);
+            out.web_revealed = await cp.toggleReveal(v, MOD);
+            const rows = () => [...v.contentEl.querySelectorAll(".domvec-slate-reveal-line")];
+            await until(() => rows().some((r) => /color/.test(r.textContent)), 6000);
+            const ed = rows().filter((r) => r.classList.contains("is-editable"));
+            out.editable = ed.map((r) => r.textContent);
+            out.web_editable = ed.filter((r) => r.dataset.owner === MOD).length;
+            const row = rows().find((r) => /^color/.test((r.textContent || "").trim()));
+            out.row = row ? row.textContent : null;
+            if (row) { row.focus(); row.textContent = "color   green"; row.dispatchEvent(new FocusEvent("blur")); }
+            await sleep(1200);
+            const txt = await app.vault.read(app.vault.getAbstractFileByPath(rec));
+            out.written = txt.includes(T + "color" + T + "green" + NL); out.other_kept = txt.includes(T + "size" + T + "3");
+            out.redrawn = rows().some((r) => /color[ ]+green/.test(r.textContent));
+            out.stats = { ...cp.revealEdits };
+            return out;
+          } finally {
+            window.__domvecPlantRevealReadOnly = false;
+            for (const q of [host, rec]) { try { d.closePath(q); } catch {} const g = app.vault.getAbstractFileByPath(q); if (g) await app.vault.delete(g).catch(() => 0); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && clean.revealed === "ok" && clean.editable.length >= 2 && clean.web_editable === 0 && clean.written && clean.other_kept && clean.redrawn;
+        return { pass: ok && !!planted && planted.revealed === "ok" && planted.editable.length === 0 && !planted.written, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-403",
+      asks: "resolved-external for markdown records (spec 12h; 182, 184 a, O.1a): a slate field's {ref} HELD past the debounce and dropped on the plane opens its record as a panel at the drop point, joined to the slate by a SOLID line; a quick click opens nothing; held and dropped again it MOVES the one placement (no second card); the panel dropped back on the slate closes and the field is revealed again; planted plantNoExternal: the hold opens nothing",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge"), d = window.__domvecPlane, cp = plugin.cockpit;
+          const NL = String.fromCharCode(10), T = String.fromCharCode(9);
+          cp.plantNoExternal = ${planted};
+          const tok = (${planted} ? "p" : "c") + Date.now().toString(36);
+          const rec = "domvec/graph/g403rec " + tok + ".md", host = "domvec/graph/g403 " + tok + ".md", ref = "g403rec " + tok;
+          const out = { planted: ${planted} };
+          const ev = (type, x, y) => (document.elementFromPoint(x, y) || document.body).dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }));
+          try {
+            await app.vault.create(rec, ["---", "domvec: slate", "---", "rec", T + "color" + T + "blue", ""].join(NL));
+            await d.create("slate", { path: host, text: ["---", "domvec: slate", "---", "host", T + "thing" + T + "{" + ref + "}", ""].join(NL) });
+            await sleep(900);
+            const hv = d.viewOf(host), cm = hv.editor.cm, txt = cm.state.doc.toString();
+            const c = cm.coordsAtPos(txt.indexOf("{" + ref) + 3), tx = (c.left + c.right) / 2, ty = (c.top + c.bottom) / 2;
+            out.ref_under = cp.refAt(tx, ty)?.ref || null;
+            const pr = d.host.plane().getBoundingClientRect(), hr = d.panelOf(host).card.getBoundingClientRect();
+            const dx = Math.min(pr.right - 160, hr.right + 220), dy = pr.top + 160;
+            // A quick click: nothing.
+            ev("mousedown", tx, ty); await sleep(80); ev("mouseup", tx, ty); await sleep(300);
+            out.click_opened = !!d.panelOf(rec);
+            // Held past the debounce, dropped on the plane.
+            const hold = async (x, y) => { ev("mousedown", tx, ty); await sleep(500); ev("mousemove", (tx + x) / 2, (ty + y) / 2); ev("mousemove", x, y); ev("mouseup", x, y); await sleep(1200); };
+            await hold(dx, dy);
+            const pc = d.panelOf(rec);
+            out.placed = !!pc;
+            if (!pc) return out;
+            const r1 = pc.card.getBoundingClientRect();
+            out.near_drop = dx >= r1.left && dx <= r1.right && Math.abs(r1.top - dy) < 60;   // at the drop, kept inside the plane out.drop = [Math.round(dx), Math.round(dy), Math.round(r1.left), Math.round(r1.top)];
+            await sleep(400); d.drawLinks();
+            const line = [...d.host.plane().querySelectorAll(".domvec-plane-links line")].find((l) => [l.dataset.a, l.dataset.b].includes(rec) && [l.dataset.a, l.dataset.b].includes(host));
+            out.line = !!line; out.solid = !!line && line.classList.contains("is-external") && getComputedStyle(line).strokeDasharray === "none";
+            // Again, elsewhere: the one placement moves.
+            await hold(dx, dy + 120);
+            out.cards_of_rec = d.panels.filter((q) => q.path === rec).length;
+            out.moved = Math.abs(d.panelOf(rec).card.getBoundingClientRect().top - r1.top) > 60;
+            // Back on the slate: internal again.
+            const h2 = d.panelOf(host).card.getBoundingClientRect();
+            out.back_taken = d.wireDrop(rec, h2.left + h2.width / 2, h2.top + h2.height / 2);
+            await sleep(900);
+            out.back_closed = !d.panelOf(rec);
+            out.back_revealed = [...hv.contentEl.querySelectorAll(".domvec-slate-reveal-line")].some((r) => /color/.test(r.textContent));
+            out.stats = { ...cp.externalStats };
+            return out;
+          } finally {
+            cp.plantNoExternal = false;
+            for (const q of [rec, host]) { try { d.closePath(q); } catch {} const g = app.vault.getAbstractFileByPath(q); if (g) await app.vault.delete(g).catch(() => 0); }
+            d.externals.clear();
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && clean.ref_under && !clean.click_opened && clean.placed && clean.near_drop && clean.line && clean.solid
+          && clean.cards_of_rec === 1 && clean.moved && clean.back_taken && clean.back_closed && clean.back_revealed;
+        return { pass: ok && !!planted && planted.ref_under && !planted.placed, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-431",
       asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
       async run() {

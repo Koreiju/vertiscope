@@ -1090,6 +1090,17 @@ export class PlaneDesk {
     // Off the plane onto a tab bar: the card becomes a tab (2026-11-25, tabdrag.ts).
     const pc = this.panelOf(from);
     if (pc && toTabs(this.app, pc.card, from, x, y)) { this.closePath(from); return true; }
+    // A record placed EXTERNAL (G-403) dropped back on the slate that holds its
+    // field: the card closes and the field is revealed again, internal.
+    for (const [key, ref] of this.externals) {
+      const [host, rec] = key.split("|");
+      if (rec !== from || !this.revealIn) continue;
+      const c = this.panelOf(host)?.card.getBoundingClientRect();
+      if (c && x >= c.left && x <= c.right && y >= c.top && y <= c.bottom) {
+        this.externals.delete(key); this.closePath(from); void this.revealIn(host, ref); this.drawLinks();
+        return true;
+      }
+    }
     // A pulled cell's card (pullapart.ts) dropped on a panel goes back in.
     const ff = this.app.vault.getAbstractFileByPath(from);
     if (ff instanceof TFile && String(this.app.metadataCache.getFileCache(ff)?.frontmatter?.domvec || "") === "cell" && this.host.pullInto) {
@@ -1199,6 +1210,10 @@ export class PlaneDesk {
   plantNoPlaneLinks = false;
   /** Planted (G-404): the plane's lines follow wiki links as well (T-4 forbids it). */
   plantWikiLines = false;
+  /** G-403: resolved-external placements, "host|record" -> the {ref} name. Their line is solid. */
+  externals = new Map<string, string>();
+  /** Set by the plugin: reveal `ref` in `host`'s slate again (G-403's way back). */
+  revealIn: ((host: string, ref: string) => Promise<any>) | null = null;
   linkStats = { edges: 0, pairs: [] as string[][] };
   private linkSvg: SVGSVGElement | null = null;
   private linkTimer = 0;
@@ -1250,6 +1265,7 @@ export class PlaneDesk {
       l.setAttribute("x1", String(pa.x)); l.setAttribute("y1", String(pa.y));
       l.setAttribute("x2", String(pb.x)); l.setAttribute("y2", String(pb.y));
       l.dataset.a = a; l.dataset.b = b;
+      if (this.externals.has(a + "|" + b) || this.externals.has(b + "|" + a)) l.classList.add("is-external");
       svg.appendChild(l);
     }
     this.linkStats.edges = pairs.length; this.linkStats.pairs = pairs;

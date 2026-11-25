@@ -29,7 +29,8 @@
 import { decorateCard } from "./slots";
 import { edgeResizable } from "./edgeresize";
 import { App, MarkdownView, TFile } from "obsidian";
-import { FoldState, SlateLine, foldsOf, isPlainCockpit, parseSlate, setFolds, titleLine } from "./slatefold";
+import { FoldState, SlateLine, foldsOf, isPlainCockpit, parseSlate, revealEdit, setFolds, titleLine } from "./slatefold";
+import { EditorView } from "@codemirror/view";
 import { makeDraggable, type PlaceStats } from "./planecard";
 import { outline, unfoldedOf, withUnfolded } from "./outline";
 export { parseSlate } from "./slatefold";
@@ -134,7 +135,142 @@ export class Cockpit {
   private frontRow = -1;
   private hooked = new WeakSet<HTMLElement>();
 
+  /** G-402: a revealed row written back to its record. */
+  revealEdits = { written: 0, refused: 0, last: "" };
+  /** The vault note a reveal's name resolves to (as `rank1` resolves it); null for a web chunk or `{keys}`. */
+  revealPath(name: string): string | null {
+    if (name === "keys") return null;
+    const want = name.split("#")[0].trim().toLowerCase();
+    const f = want ? this.app.vault.getMarkdownFiles().find((x) => x.basename.toLowerCase() === want) : undefined;
+    return f && !this.plantRank1FromStore ? f.path : null;
+  }
+  /** The one line of `text` a revealed row `old` was read from, or -1 (none, or more than one). */
+  static sourceLine(lines: string[], old: string): number {
+    const norm = (l: string) => l.trim().replace(/^[#> ]+/, "").replace(/\t/g, " ").slice(0, 120);
+    const hits = lines.map((l, i) => (l.trim() === old || norm(l) === old) ? i : -1).filter((i) => i >= 0);
+    return hits.length === 1 ? hits[0] : -1;
+  }
+  async writeReveal(el: HTMLElement, owner: string, old: string, next: string): Promise<boolean> {
+    const path = this.revealPath(owner);
+    const f = path && this.app.vault.getAbstractFileByPath(path);
+    if (!(f instanceof TFile)) { this.revealEdits.refused++; return false; }
+    // What the reader typed: the row drew a tab as three spaces.
+    const typed = old.includes("\t") ? next.replace(/ {3}/g, "\t") : next;
+    const core = old;
+    // The editor first: the write re-decorates, and the row leaves the page.
+    const edEl = el.closest(".cm-editor") as HTMLElement | null;
+    const cm = edEl ? EditorView.findFromDOM(edEl) : null;
+    let ok = false;
+    await this.app.vault.process(f, (t) => {
+      const ls = t.split("\n");
+      const i = Cockpit.sourceLine(ls, old);
+      if (i < 0) return t;
+      const at = ls[i].indexOf(core);
+      if (at < 0) return t;
+      ls[i] = ls[i].slice(0, at) + typed + ls[i].slice(at + core.length);
+      ok = true;
+      return ls.join("\n");
+    });
+    if (!ok) { this.revealEdits.refused++; return false; }
+    this.revealEdits.written++; this.revealEdits.last = `${path}: ${typed}`;
+    // The reveal redrawn from the record it now reads.
+    const desk = this.desk?.();
+    const v: any = cm && (this.app.workspace.getLeavesOfType("markdown").map((l) => l.view as any).find((x) => x?.editor?.cm === cm)
+      || (desk?.panels || []).map((p: any) => desk.viewOf(p.path)).find((x: any) => x?.editor?.cm === cm));
+    const host = v?.file?.path;
+    if (cm && host) {
+      const st = this.copyFolds(foldsOf(cm));
+      const lines = await this.rank1(host, owner, true);
+      if (lines && owner in st.reveals) { st.reveals[owner] = lines; cm.dispatch({ effects: setFolds.of(st) }); this.saveFolds(host, st); }
+    }
+    return true;
+  }
+
+  /** G-403 (spec 12h; 182, 184 a, O.1a): resolved-external. A slate field's
+   *  `{ref}` HELD past the debounce and dropped on the plane opens its record
+   *  as a panel there; the field's reveal folds, and the plane joins the two
+   *  with a SOLID line. One placement: a record already placed is moved, not
+   *  opened twice. Planted `plantNoExternal`: the hold does nothing. */
+  static HOLD_MS = 350;
+  desk: (() => any) | null = null;
+  externalStats = { held: 0, placed: 0, moved: 0, last: "" };
+  plantNoExternal = false;
+  /** The `{ref}` under a point of a markdown editor, with its view. */
+  refAt(x: number, y: number): { v: any; ref: string } | null {
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    const edEl = el?.closest?.(".cm-editor") as HTMLElement | null;
+    const cm = edEl ? EditorView.findFromDOM(edEl) : null;
+    if (!cm) return null;
+    const pos = cm.posAtCoords({ x, y });
+    if (pos == null) return null;
+    const ln = cm.state.doc.lineAt(pos), off = pos - ln.from;
+    const re = /\{([^{}]+)\}/g; let m: RegExpExecArray | null;
+    while ((m = re.exec(ln.text))) if (off >= m.index && off <= m.index + m[0].length) {
+      const v: any = this.app.workspace.getLeavesOfType("markdown").map((l) => l.view as any).find((q) => q?.editor?.cm === cm)
+        || (this.desk?.()?.panels || []).map((p: any) => this.desk!().viewOf(p.path)).find((q: any) => q?.editor?.cm === cm);
+      return v ? { v, ref: m[1] } : null;
+    }
+    return null;
+  }
+  /** The field `ref` of `v`'s slate placed external at client (x, y). */
+  async placeExternal(v: any, ref: string, x: number, y: number): Promise<string> {
+    const desk = this.desk?.(), host = v?.file?.path, path = this.revealPath(ref);
+    const f = path && this.app.vault.getAbstractFileByPath(path);
+    if (!desk || !host || !(f instanceof TFile) || this.plantNoExternal) return "none";
+    const plane: HTMLElement | null = desk.host?.plane?.();
+    const pr = plane?.getBoundingClientRect();
+    if (!pr || x < pr.left || x > pr.right || y < pr.top || y > pr.bottom) return "off-plane";
+    const at = { x: x - pr.left + (plane!.scrollLeft || 0), y: y - pr.top + (plane!.scrollTop || 0) };
+    const had = desk.panelOf(f.path);
+    await desk.open(f, { at });   // the desk's own placement: a card it holds is moved, never doubled
+    if (had) this.externalStats.moved++; else this.externalStats.placed++;
+    // The field folds: it is drawn outside now, not inside.
+    const cm = v.editor?.cm;
+    if (cm && ref in foldsOf(cm).reveals) await this.toggleReveal(v, ref);
+    desk.externals.set(host + "|" + f.path, ref);
+    desk.drawLinks();
+    this.externalStats.last = host + " -> " + f.path;
+    return had ? "moved" : "placed";
+  }
+  /** The hold-and-drop gesture, on the document (capture). */
+  installHold(): () => void {
+    let st: { x: number; y: number; hit: { v: any; ref: string }; timer: number; held: boolean; ghost: HTMLElement | null } | null = null;
+    const clear = () => { if (st) { window.clearTimeout(st.timer); st.ghost?.remove(); } st = null; document.body.removeClass("domvec-field-holding"); };
+    const down = (e: MouseEvent) => {
+      if (e.button !== 0 || this.plantNoExternal) return;
+      const hit = this.refAt(e.clientX, e.clientY);
+      if (!hit || !this.revealPath(hit.ref)) return;
+      const s = { x: e.clientX, y: e.clientY, hit, held: false, ghost: null as HTMLElement | null, timer: 0 };
+      s.timer = window.setTimeout(() => {
+        s.held = true; this.externalStats.held++;
+        document.body.addClass("domvec-field-holding");
+        s.ghost = document.body.createDiv({ cls: "domvec-field-ghost", text: "{" + hit.ref + "}" });
+        s.ghost.style.left = s.x + 8 + "px"; s.ghost.style.top = s.y + 8 + "px";
+      }, Cockpit.HOLD_MS);
+      st = s;
+    };
+    const move = (e: MouseEvent) => {
+      if (!st) return;
+      if (!st.held) { if (Math.hypot(e.clientX - st.x, e.clientY - st.y) > 4) clear(); return; }
+      e.preventDefault(); e.stopPropagation();
+      if (st.ghost) { st.ghost.style.left = e.clientX + 8 + "px"; st.ghost.style.top = e.clientY + 8 + "px"; }
+    };
+    const up = (e: MouseEvent) => {
+      if (!st) return;
+      const s = st; clear();
+      if (!s.held) return;
+      e.preventDefault(); e.stopPropagation();
+      void this.placeExternal(s.hit.v, s.hit.ref, e.clientX, e.clientY);
+    };
+    document.addEventListener("mousedown", down, true);
+    document.addEventListener("mousemove", move, true);
+    document.addEventListener("mouseup", up, true);
+    return () => { document.removeEventListener("mousedown", down, true); document.removeEventListener("mousemove", move, true); document.removeEventListener("mouseup", up, true); clear(); };
+  }
+
   constructor(private app: App, private host: CockpitHost) {
+    revealEdit.pathOf = (n) => this.revealPath(n);
+    revealEdit.write = (el, owner, old, next) => { void this.writeReveal(el, owner, old, next); };
     try { this.resultsOpen = window.localStorage.getItem(FOLD_KEY) === "1"; } catch { /* a convenience */ }
   }
 
@@ -548,7 +684,7 @@ export class Cockpit {
    *  its own text (the slate's record, through the slate grammar -- the
    *  store's rendered markdown leaked the frontmatter and flattened the tree);
    *  the store the rest (a page by title, else retrieval's top hit). */
-  private async rank1(path: string, name: string): Promise<string[] | null> {
+  private async rank1(path: string, name: string, fresh = false): Promise<string[] | null> {
     const g = this.host.graph();
     // `{keys}` is the cockpit's sample stream, referenced from ANY node
     // (item 22: keys are "computation graph inputs to the sticked
@@ -559,7 +695,8 @@ export class Cockpit {
     const want = name.split("#")[0].trim().toLowerCase();
     const note = want ? this.app.vault.getMarkdownFiles().find((f) => f.basename.toLowerCase() === want) : undefined;
     if (note && !this.plantRank1FromStore) {
-      const text = await this.app.vault.cachedRead(note);
+      // Fresh after a write of our own (G-402): the cache lags it.
+      const text = fresh ? await this.app.vault.read(note) : await this.app.vault.cachedRead(note);
       if (name.includes("#")) {
         const got = outline(text, name);
         if (!got) { this.foldStats.unresolved++; return null; }

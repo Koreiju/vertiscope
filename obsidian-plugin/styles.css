@@ -1560,3 +1560,10 @@ body.domvec-chatui-pulling, body.domvec-chatui-pulling * { user-select: none !im
 /* Each card its own stacking context: a card's +chat (z-index 2) painted
    through the card above it (seen 2026-11-25, the ego's +chat over g409's). */
 .domvec-plane-card { isolation: isolate; }
+
+/* G-402: a revealed row of a markdown record, edited in place. */
+.domvec-slate-reveal-line.is-editable { cursor: text; border-radius: 2px; }
+.domvec-slate-reveal-line.is-editable:hover, .domvec-slate-reveal-line.is-editable:focus { outline: 1px dashed var(--background-modifier-border-hover); }
+.domvec-plane-links line.is-external { stroke-dasharray: none; stroke-opacity: 0.95; stroke-width: 2; }
+.domvec-field-ghost { position: fixed; z-index: 9999; pointer-events: none; padding: 1px 6px; border-radius: var(--radius-s); background: var(--background-primary); border: 1px solid var(--interactive-accent); font-family: var(--font-monospace); font-size: 12px; }
+body.domvec-field-holding, body.domvec-field-holding * { cursor: grabbing !important; user-select: none; }

@@ -7419,3 +7419,7 @@ them when it was written. Their bearing on the 2D editor is assessed in
 **2026-11-25 (while G-238 was being built)**
 
 > please ensure all panels in regular obsidian tabs can be dragged into the 2D editor plane, and from the 2D editor plane to the obsidian tabs
+
+**2026-11-25 (while G-402 was being read)**
+
+> you can likely work on batches of updates rather than one at a time to stay lean
