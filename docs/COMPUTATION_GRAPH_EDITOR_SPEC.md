@@ -1505,7 +1505,7 @@ where it comes from. A term not listed is used in its plain sense.
 | **tool panel** | the canvas form of an APP tool: a tool surface or a governing class shown as a READ-ONLY code artifact, calls visible, bodies never | a regular code artifact (explorable, graph-editable) | 167 c, G-378, F.6 |
 | **app tool** | a capability shipped with the app, shown as calls only, its dependencies never visible (§13n) | workspace code | 167 c, 189, G-378, G-382 |
 | **workspace code** | code made in the project workspace, fully explorable, editable and unfoldable down to base modules (§13n) | an app tool | 167 c, 189, 112 |
-| **hard link** | an edge that exists because code defines a name another cell reads, or a `{ref}` resolves, or two records share one chunk object; drawn undirected | a **temporary link**: magnetism, placement order while nodes touch (142), never drawn or written; a plain or wiki link (never a hard link: 194, compiled from code cells, head note); a retrieval link `[query](results)`, or 193 (b)'s suggested `#` query | 136, 142, T-4, 193 |
+| **hard link** | an edge that exists because code defines a name another cell reads, or a `{ref}` resolves (withdrawn with the slate syntax under 194, my reading; head note), or two records share one chunk object; drawn undirected | a **temporary link**: magnetism, placement order while nodes touch (142), never drawn or written; a plain or wiki link (never a hard link: 194, compiled from code cells, head note); a retrieval link `[query](results)`, or 193 (b)'s suggested `#` query | 136, 142, T-4, 193 |
 | **readout** | a cell's stored output; on the perimeter, a terminal node's rendering placed in 3D | a view | RESERVOIR §4, §5 |
 
 ### 13n. Code tools on canvases -- app tools and workspace code (189)
@@ -1743,6 +1743,7 @@ with the app, **U** an unclear term or step.
 | F-137 | I | PRD head | "128 numbered requirements"; `design_state` counts 579 rows | both counts, dated |
 | F-138 | U | spec §13m vs 195 (d) | "canvas" and "node" were defined, but not where a graph begins and a canvas ends; 195 asks where, why and when | a `canvas / graph` row, marked as my reading |
 | F-139 | M | spec §13m `canvas / graph` (my F-138 row) | named "a result's `{ref}`" as a link kind, the syntax 194 withdraws in the same document's head note | the link named by what it is (a search's link to a result, computed per search); the `{ref}` spelling tied to 194 |
+| F-140 | I | spec §13m `hard link` vs the head note (194) | a resolved `{ref}` still listed as a hard link's source | marked withdrawn with the slate syntax |
 
 **Passes that found nothing new** (2026-11-24; pass 34 then found F-132 in §5 and §11): pass 32 re-read pass 31's edits and every "suspend" left in the docs (only ledger history). Pass 33 read `egocanvas.ts` and `canvasparse.ts` whole against §12c: its disagreements are already F-115 (the migration runs only from `openCanvas`) and O-10 (the comment says tool space, `canvas.members` reads the craft). Field order is join order, appended, which is compile order (142). What remains waits on the reader: 194's reading, O-5, O-11, the covering cards.
 
