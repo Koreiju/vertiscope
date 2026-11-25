@@ -1406,7 +1406,8 @@ Reading: the last standalone `@comfyorg/litegraph`, because it is TypeScript
 like the plugin and carries ComfyUI's widget work, frozen and owned here from
 then on.
 
-Every row above is a download, so each waits for a yes.
+Every row above is a download, so each waits for a yes. The two litegraph
+rows are suspended under 193 (head note).
 
 ### 13k. Build order -- each a live check with a planted arm
 
@@ -1419,7 +1420,9 @@ Every row above is a download, so each waits for a yes.
 | G-412 | `Chat` as a live object (§13h) | tokens stream into the view, gap p50 under 30 ms at the view (G-385-load's bar); a code block runs as a cell; a tool defined in a cell is called by the agent | deltas accumulated in Python: the view gets whole messages |
 | G-413 | the base tools as live objects: Search, Browser, Terminal, Kernel, from their governing classes | each tool panel lists its class read-only; an instance's trait changes re-run its readers | the dataflow event off: readers stay stale |
 
-G-408 and G-409 need no download. G-410 to G-413 wait on §13j.
+G-408 and G-409 need no download. G-410, G-412 and G-413 wait on §13j's
+`anywidget`. Under 193 (head note), G-409 and G-411 are suspended with the
+litegraph rows of §13j, and G-410's host is a plain panel, never a node body.
 
 A slice lands only with the plugin's existing live checks still passing:
 "I need something like this to work with our whole plugin without
@@ -1709,6 +1712,7 @@ with the app, **U** an unclear term or step.
 | F-123 | U | spec §13m vs 193 (d) | "interface", 193's one generalizing term, had no entry | a row |
 | F-124 | I | spec §13m vs 193 (a), G-405, §12f | "panel" was Obsidian's view "extended"; the craft "is" the ego's 3D form while retired | panel cites 193; the craft WAS, until G-400 |
 | F-125 | U | spec §13m hard link vs 193 (b) | the retrieval link named only `[query](results)` | the `#` suggestion named; wiki links point to the open question |
+| F-126 | I | spec §13j, §13k vs the 193 head note | the build order and the packages still put G-409 and G-411 and litegraph on the path, and G-410 "a node body once G-411 lands" | each names its suspension; G-410 in a plain panel |
 
 **Still open** -- O-1 to O-4 and O-6 to O-10 are work the design names; O-5 and O-11 are questions for the reader:
 
