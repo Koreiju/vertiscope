@@ -1727,7 +1727,7 @@ with the app, **U** an unclear term or step.
 | F-129 | I | spec head note, §13j, §13k (F-118, F-126) vs 194 | the node editor was suspended with the markdown syntax; 194 moves compilation into code cells and keeps the graphical code interfaces and the package research | the syntax withdrawn (my reading, to be confirmed); the node editor over code cells stands |
 | F-130 | I | PRD G-38 vs its live check (O-9) | Confirm while its check failed: the planted banner was added only on hover 2 and never measured when hover 2 found no new chunk | the plant moved to the first landed hover; passes both arms (`402c5a2`); O-9 closed |
 
-**Still open** -- O-1 to O-4 and O-6 to O-10 are work the design names; O-5 and O-11 are questions for the reader:
+**Still open** -- O-1 to O-4, O-6 to O-8 and O-10 are work the design names (O-6 and O-10 withdrawn with the slate syntax if the reader confirms 194's reading; O-9 closed); O-5 and O-11 are questions for the reader:
 
 - O-1. The pinned litegraph release's own licence file must be read before
   it is vendored (§13j); only third-party listings say MIT.
