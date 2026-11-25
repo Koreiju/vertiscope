@@ -1727,6 +1727,12 @@ with the app, **U** an unclear term or step.
   cache's resolved links. The plane draws only compiled `{ref}`s (G-404), so
   a `link()` call makes a link that is neither drawn nor compiled. Each
   must write or read compiled links: a fence-line `{ref}` or a def/use.
+- O-8. A 3D hover previews a chunk node's billboard (G-414) and nothing
+  over a page or path node; §12f wants every level billboarded, a higher
+  rank revealing more of the tree (F-106).
+- O-9. Live check G-38's planted arm expects `banner_moves >= 1` and
+  measures 0, while its clean arm rings the hovered chunk's own node on 10
+  of 10 hovers: the check's expectation is stale, not the app.
 - O-10. What seeds the ego slate's fields. §12c and §12h say the tool
   space (158: the cockpit, browsers, the search, notebooks, chats, tagged
   chunks, the reader's notes). PRD G-401 and `planepanels.ts`'s
@@ -1735,12 +1741,6 @@ with the app, **U** an unclear term or step.
   and tagged chunks are not among them, and the craft itself is retired
   (G-405 hides it; its nodes are still computed). G-401 should read the
   tool space's own records (F-117).
-- O-8. A 3D hover previews a chunk node's billboard (G-414) and nothing
-  over a page or path node; §12f wants every level billboarded, a higher
-  rank revealing more of the tree (F-106).
-- O-9. Live check G-38's planted arm expects `banner_moves >= 1` and
-  measures 0, while its clean arm rings the hovered chunk's own node on 10
-  of 10 hovers: the check's expectation is stale, not the app.
 
 ### 14a. The recovered prompts, one by one (F-59)
 
