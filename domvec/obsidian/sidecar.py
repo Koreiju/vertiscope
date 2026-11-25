@@ -2324,6 +2324,43 @@ def _in_ego(stored) -> bool:
     return stored.cid in EGO["cids"] or stored.url in EGO["urls"]
 
 
+#: G-416: the interface types, each described in the words a query would use.
+_INTERFACES = {
+    "web chunk": "a part of a web page with live controls that act in the browser",
+    "code cell": "python code in a notebook cell that runs in a kernel, with an editor and a terminal",
+    "note": "a markdown note of prose, headings and links",
+    "app tool": "a callable tool the app provides, its calls listed with typed parameters",
+    "code": "source code of a module, its functions and classes",
+}
+PLANT_NO_INTERFACE_RANK = [False]
+
+
+def _interface_of(url: str, xpath: str) -> str:
+    if url.startswith("tool://"):
+        return "app tool"
+    if url.startswith("code://"):
+        return "code"
+    if url.startswith("vault://"):
+        return "code cell" if ("/code" in xpath or "/output" in xpath) else "note"
+    return "web chunk"
+
+
+def _rank_interfaces(workspace, query: str) -> list:
+    """The query's second embedding, against the interface types (193 d)."""
+    emb = getattr(workspace, "embedder", None)
+    if emb is None or PLANT_NO_INTERFACE_RANK[0] or not query.strip():
+        return []
+    try:
+        import numpy as np
+        names = list(_INTERFACES)
+        d = np.asarray(emb.embed_texts([_INTERFACES[n] for n in names]), dtype=np.float32)
+        q = np.asarray(emb.embed_query(query), dtype=np.float32).ravel()
+        cos = (d @ q) / ((np.linalg.norm(d, axis=1) + 1e-9) * (np.linalg.norm(q) + 1e-9))
+        return [{"interface": names[i], "score": round(float(cos[i]), 4)} for i in np.argsort(-cos)]
+    except Exception:                               # noqa: BLE001
+        return []
+
+
 def search_payload(workspace, query: str, k: int = 8, *,
                    offset: int = 0, url: str = "",
                    coarse: bool = True, budget: int = 0, where: str = "", trace: int = 0,
@@ -2489,7 +2526,12 @@ def search_payload(workspace, query: str, k: int = 8, *,
             kept.append(row)
             spent += row["tokens"]
         out = kept
-    return {"query": query, "hits": out, "offset": offset,
+    # G-416 (PLUGIN_GOAL 193 d): one interface over every canvas type. Each
+    # hit names its type; a SECOND query embedding ranks the types themselves.
+    for row in out:
+        row["interface"] = _interface_of(str(row.get("url") or ""), str(row.get("xpath") or ""))
+    interfaces = _rank_interfaces(workspace, query)
+    return {"query": query, "hits": out, "offset": offset, "interfaces": interfaces,
             "scope": url or "", "coarse": bool(coarse), "where": where or "",
             #: Which fuse ranked them (PLUGIN_GOAL 85: "additive" by default).
             "fuse": getattr(diag, "fuse", ""),
