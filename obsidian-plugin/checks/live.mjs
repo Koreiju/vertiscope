@@ -15260,6 +15260,90 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-439",
+      asks: "a third slot kind, cell: (G-240, Addendum XI 169 'everything is a plugin'): the cell controls beyond the core's run / terminal / open / unnest are extensions -- pull out in cell:pull-out, complete in cell:complete (on a wireframe only); an extension added while running puts its control on every newly drawn code cell; one that throws is recorded and the cell keeps the rest; a taker for cell:pull-out is refused; planted __domvecPlantNoSlotGuard: the taker wins and cells lose pull out",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10), Q = String.fromCharCode(34).repeat(3);
+          const pl = app.plugins.getPlugin("domvec-bridge"), CS = window.__domvecCardSlot;
+          const keep = CS.cellCtl.get("pull-out");
+          window.__domvecPlantNoSlotGuard = ${planted};
+          const path = "domvec-checks/g439 " + (${planted} ? "p" : "c") + Date.now().toString(36) + ".md";
+          const out = { planted: ${planted}, exts: ["pull-out", "complete"].filter((x) => pl.slots.stats.loaded.includes(x)) };
+          const leaf = app.workspace.getLeaf("tab");
+          try {
+            out.mark = pl.slots.loadOne({ id: "g439-mark", slot: "cell:g439", register: () => CS.registerCellControl("g439", (req, doc) => { const b = doc.createElement("button"); b.className = "g439-mark"; b.textContent = "g439 " + req().lang; return b; }) });
+            out.boom = pl.slots.loadOne({ id: "g439-boom", slot: "cell:g439-boom", register: () => CS.registerCellControl("g439-boom", () => { throw new Error("planted in the check"); }) });
+            out.steal = pl.slots.loadOne({ id: "g439-steal", slot: "cell:pull-out", register: () => CS.registerCellControl("pull-out", () => null) });
+            const failed0 = CS.cardStats.failed.filter((x) => x === "cell:g439-boom").length;
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const wire = "def f(x):" + NL + "    " + Q + "Return x." + Q + NL + "    ...";
+            const f = await app.vault.create(path, F + "python" + NL + "print(1)" + NL + F + NL + NL + F + "python" + NL + wire + NL + F + NL);
+            await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(1200);
+            const pres = [...leaf.view.containerEl.querySelectorAll("pre")].filter((p) => p.querySelector(".domvec-run-fence, button"));
+            const slotsOf = (p) => [...p.querySelectorAll("[data-slot]")].map((b) => b.dataset.slot);
+            out.cells = pres.map(slotsOf);
+            out.core_kept = pres.length === 2 && pres.every((p) => p.textContent.includes("run"));
+            out.boom_recorded = CS.cardStats.failed.filter((x) => x === "cell:g439-boom").length > failed0;
+            return out;
+          } finally {
+            window.__domvecPlantNoSlotGuard = false; leaf.detach();
+            for (const id of ["g439-mark", "g439-boom", "g439-steal"]) pl.slots.unload(id);
+            if (keep) { CS.cellCtl.set("pull-out", keep); pl.slots.taken.set("cell:pull-out", "pull-out"); }
+            await sleep(300);
+            const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const has = (a, x) => (a || []).includes(x);
+        const ok = !!clean && clean.exts.length === 2 && clean.mark === "loaded" && clean.boom === "loaded" && clean.steal === "refused" && clean.core_kept
+          && clean.cells.length === 2 && clean.cells.every((c) => has(c, "cell:pull-out") && has(c, "cell:g439"))
+          && !has(clean.cells[0], "cell:complete") && has(clean.cells[1], "cell:complete") && clean.boom_recorded;
+        return { pass: ok && !!planted && planted.steal === "loaded" && planted.cells.length === 2 && planted.cells.every((c) => !has(c, "cell:pull-out")), evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-440",
+      asks: "the terminal as a live object (G-413; spec 13h, the base tools): Terminal.last() in a kernel is the terminal pane's last command and output; a drawn note's cell that reads it re-runs when the pane runs a command -- with no Run press, its output naming that command; planted toolRun.plantOff: not re-run",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const pl = app.plugins.getPlugin("domvec-bridge"), tr = pl.toolRun, desk = pl.desk;
+          tr.plantOff = ${planted};
+          const tag = (${planted} ? "p" : "c") + Date.now().toString(36);
+          const path = "domvec-checks/g440 " + tag + ".md";
+          const before = new Set(app.workspace.getLeavesOfType("domvec-terminal").concat(app.workspace.getLeavesOfType("domvec-terminal-view")));
+          const out = { planted: ${planted} };
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, "# g440" + NL + NL + F + "python" + NL + "print('LAST', Terminal.last()['command'])" + NL + F + NL);
+            await desk.open(f); await sleep(600);
+            for (let k = 0; k < 20 && !tr.readers.get("terminal")?.has(path); k++) await sleep(200);
+            out.indexed = !!tr.readers.get("terminal")?.has(path);
+            const r0 = tr.stats.reran;
+            await pl.onTerminalFence({ lang: "powershell", code: "echo g440" + tag, line: 0, path: "domvec-checks/x.md", refs: [] });
+            const cur = async () => { const v = desk.viewOf(path); return v && v.editor ? v.editor.getValue() : await app.vault.read(f); };
+            let t = "";
+            for (let k = 0; k < (${planted} ? 12 : 40); k++) { t = await cur(); if (new RegExp("LAST echo g440" + tag).test(t.split("nb-output")[1] || "") && tr.stats.reran > r0) break; await sleep(300); }
+            out.reran = tr.stats.reran - r0;
+            out.names_command = new RegExp("LAST echo g440" + tag).test(t.split("nb-output")[1] || "");
+            return out;
+          } finally {
+            tr.plantOff = false;
+            await sleep(2000);
+            try { desk.closePath(path); } catch {}
+            for (const l of app.workspace.getLeavesOfType("domvec-terminal").concat(app.workspace.getLeavesOfType("domvec-terminal-view"))) if (!before.has(l)) l.detach();
+            for (let k = 0; k < 2; k++) { const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0); await sleep(1000); }
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && clean.indexed && clean.reran >= 1 && clean.names_command;
+        return { pass: ok && !!planted && planted.indexed && planted.reran === 0 && !planted.names_command, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-431",
       asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
       async run() {

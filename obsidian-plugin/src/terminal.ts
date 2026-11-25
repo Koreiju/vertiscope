@@ -186,6 +186,8 @@ export class TerminalView extends ItemView {
     }
     if (reply.shell) this.write(`(${reply.shell})\n`);
     if (reply.output) this.write(reply.output + "\n");
+    // G-413: the terminal's view changed -- the cells reading Terminal.last re-run.
+    window.dispatchEvent(new CustomEvent("domvec-tool-view", { detail: { tool: "terminal", url: this.pane } }));
   }
 
   /**

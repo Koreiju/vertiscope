@@ -68,7 +68,9 @@ import { DataflowRun, noteTextOf } from "./dataflowrun";
 import { AutoRun, CrossRun, ToolRun } from "./autorun";
 import { PullApart } from "./pullapart";
 import { agentBlock } from "./agentblock";
-import { Slots, registerDecorator } from "./slots";
+import { Slots, registerDecorator, registerCellControl } from "./slots";
+import { pullButton, completeButton } from "./runbutton";
+import { isWireframe } from "./wiredefs";
 import { completeCell } from "./complete";
 import { watchTabDrags } from "./tabdrag";
 import { drawDefs, nodeDefs, setDefault, setTraitDefault } from "./nodedefs";
@@ -334,6 +336,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }) });
     // The +chat cell is a decoration in a `card:` slot (G-240's second kind).
     this.slots.add({ id: "plus-chat", slot: "card:plus-chat", register: () => registerDecorator("plus-chat", (card, path) => plusChat(this.app, card, path)) });
+    // The cell controls that are not the core's are a third kind, `cell:` (G-240).
+    this.slots.add({ id: "pull-out", slot: "cell:pull-out", register: () => registerCellControl("pull-out", (req, doc) => pullButton(doc, () => this.onPullFence(req() as any))) });
+    this.slots.add({ id: "complete", slot: "cell:complete", register: () => registerCellControl("complete", (req, doc) => isWireframe(req().code) ? completeButton(doc, () => this.onCompleteFence(req() as any)) : null) });
     for (const e of ((window as any).__domvecExtraExtensions || []) as any[]) this.slots.add(e);
     this.slots.load();
     this.register(watchTabDrags(this.app));

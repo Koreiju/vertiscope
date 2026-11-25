@@ -21,6 +21,7 @@
  * scores against, and a button that lies about being wired is worse.
  */
 
+import { cellControls } from "./slots";
 import { isWireframe } from "./complete";
 import { MarkdownPostProcessorContext } from "obsidian";
 import { Extension, RangeSetBuilder } from "@codemirror/state";
@@ -91,7 +92,7 @@ function unnestButton(doc: Document, onClick: () => void): HTMLButtonElement {
 }
 
 /** `✎ complete` on a wireframe cell (G-238). */
-function completeButton(doc: Document, onClick: () => void): HTMLButtonElement {
+export function completeButton(doc: Document, onClick: () => void): HTMLButtonElement {
   const btn = unnestButton(doc, onClick);
   btn.className = "domvec-open-fence domvec-complete-fence";
   btn.setAttribute("aria-label", "Complete this wireframe from its docstring");
@@ -100,7 +101,7 @@ function completeButton(doc: Document, onClick: () => void): HTMLButtonElement {
 }
 
 /** `⇱ pull out` beside unnest: the cell into a card of its own (pull-apart). */
-function pullButton(doc: Document, onClick: () => void): HTMLButtonElement {
+export function pullButton(doc: Document, onClick: () => void): HTMLButtonElement {
   const btn = unnestButton(doc, onClick);
   btn.className = "domvec-open-fence domvec-pull-fence";
   btn.setAttribute("aria-label", "Pull this cell out into a card of its own");
@@ -204,8 +205,8 @@ export function readingViewRunButtons(host: RunHost) {
       if (term) pre.appendChild(term);
       if (host.onOpenFence) pre.appendChild(openButton(el.ownerDocument, () => host.onOpenFence!(req())));
       if (host.onUnnestFence) pre.appendChild(unnestButton(el.ownerDocument, () => host.onUnnestFence!(req())));
-      if (host.onPullFence) pre.appendChild(pullButton(el.ownerDocument, () => host.onPullFence!(req())));
-      if (host.onCompleteFence && isWireframe(req().code)) pre.appendChild(completeButton(el.ownerDocument, () => host.onCompleteFence!(req())));
+      // The `cell:` slot's extensions (G-240): pull out, complete, any other.
+      for (const b of cellControls(req, el.ownerDocument)) pre.appendChild(b);
       if (host.onRowsFence && /^py(thon3?)?$/.test(lang)) {
         const r = req();
         // After the block is in the document: a chat block is rendered first, attached after.
@@ -255,8 +256,7 @@ class RunWidget extends WidgetType {
     if (term) wrap.appendChild(term);
     if (this.host.onOpenFence) wrap.appendChild(openButton(view.dom.ownerDocument, () => this.host.onOpenFence!(req())));
     if (this.host.onUnnestFence) wrap.appendChild(unnestButton(view.dom.ownerDocument, () => this.host.onUnnestFence!(req())));
-    if (this.host.onPullFence) wrap.appendChild(pullButton(view.dom.ownerDocument, () => this.host.onPullFence!(req())));
-    if (this.host.onCompleteFence && isWireframe(req().code)) wrap.appendChild(completeButton(view.dom.ownerDocument, () => this.host.onCompleteFence!(req())));
+    for (const b of cellControls(req, view.dom.ownerDocument)) wrap.appendChild(b);
     if (this.host.onRolloutFence && (this.fence.refs || []).length) {
       wrap.appendChild(playButton(view.dom.ownerDocument, () => this.host.onRolloutFence!(req())));
     }

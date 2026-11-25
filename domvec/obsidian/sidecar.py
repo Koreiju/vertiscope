@@ -204,6 +204,9 @@ PLANT_NO_BASE_OBJECTS = [False]
 #: Planted (P-N4): no vault facade -- a cell sees neither `Vault` nor its note's folder.
 #: Agent runs started by `POST /agent_run` (G-384), by note: done, steps written, error.
 AGENT_RUNS: dict = {}
+#: G-413: each terminal pane's last command and its output -- the terminal's
+#: VIEW, which a kernel reads as `Terminal.last()` (`GET /shell_last`).
+SHELL_LAST: dict = {}
 PLANT_NO_VAULT = [False]
 #: Planted (PLUGIN_GOAL 62): a note's markdown trees are not compiled into its kernel.
 PLANT_NO_TREES = [False]
@@ -4544,9 +4547,13 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "missing command"})
             return
         try:
-            self._send(200, self.shell_pool.run(
+            got = self.shell_pool.run(
                 pane, command, shell=(body.get("shell") or ""),
-                cwd=(body.get("cwd") or "")))
+                cwd=(body.get("cwd") or ""))
+            if isinstance(got, dict) and not got.get("refused"):
+                SHELL_LAST[pane] = {"pane": pane, "command": command, "output": got.get("output") or "", "at": time.time()}
+                SHELL_LAST["*"] = SHELL_LAST[pane]
+            self._send(200, got)
         except Exception as exc:                    # noqa: BLE001
             self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
 
@@ -6560,6 +6567,13 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, {"enabled": False, "shells": []})
             else:
                 self._send(200, dict(self.shell_pool.status(), enabled=True))
+            return
+
+        if segments[0] == "shell_last":
+            # G-413: the terminal's view -- the last command a pane ran and
+            # what it printed (default: the latest pane). Read-only.
+            pane = (parse_qs(parts.query).get("pane") or ["*"])[0]
+            self._send(200, SHELL_LAST.get(pane) or {"pane": pane, "command": "", "output": ""})
             return
 
         if segments[0] == "tool_panel":

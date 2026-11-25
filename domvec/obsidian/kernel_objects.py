@@ -339,6 +339,21 @@ if "Agent" not in globals():
             return "Agent(ask) -- " + (self.model or "the sidecar's local model") + " at " + self._base
 
     Agent = _Agent(%(base)r)
+
+if "Terminal" not in globals():
+    class _Terminal:
+        """Terminal: the terminal pane as live state (G-413). `last(pane=None)` -- the last command a
+        pane ran and its output, {pane, command, output}. A cell that reads it re-runs when a command runs."""
+        def last(self, pane=None):
+            """The last command run in a terminal pane (default: the latest one) and what it printed."""
+            import json as _tj, urllib.request as _tu, urllib.parse as _tp
+            q = "?pane=" + _tp.quote(pane) if pane else ""
+            with _tu.urlopen(%(base)r + "/shell_last" + q, timeout=5) as r:
+                return _tj.loads(r.read().decode("utf-8"))
+        def __repr__(self):
+            return "Terminal(the terminal pane)"
+    Terminal = _Terminal()
+
 '''
 
 #: Run after each cell: the asks its calls recorded, as the repr of a JSON string.

@@ -1,8 +1,9 @@
 /**
  * Named extension slots over a stable core (G-240; PLUGIN_GOAL Addendum XI
  * (169), a reading of "the 'everything is a plugin' framework"): an extension
- * fills ONE named slot -- `codeblock:<lang>` (a block it draws) or `card:<name>`
- * (a decoration on every plane card: `decorateCard`, below) -- and may
+ * fills ONE named slot -- `codeblock:<lang>` (a block it draws), `card:<name>`
+ * (a decoration on every plane card: `decorateCard`, below) or `cell:<name>`
+ * (a control on every code cell beside run: `cellControls`, below) -- and may
  * only tighten the core: a slot the core owns (`domvec`, `browser`, `python`)
  * is refused, so an extension can add a block but never replace one. Loading
  * is isolated: an extension that throws is recorded and skipped, the rest and
@@ -34,6 +35,22 @@ export function decorateCard(card: HTMLElement, path: string): void {
   }
 }
 
+/** The `cell:` slot kind (G-240): a control a code cell carries beside its core
+ *  ones (run, terminal, open, unnest). Each may decline a cell (null) and runs
+ *  isolated -- one that throws is recorded and the cell keeps the rest. */
+export type CellReq = { lang: string; code: string; line: number; path: string; refs?: string[] };
+const cellCtl = new Map<string, (req: () => CellReq, doc: Document) => HTMLElement | null>();
+export function registerCellControl(name: string, fn: (req: () => CellReq, doc: Document) => HTMLElement | null): void { cellCtl.set(name, fn); }
+export function unregisterCellControl(name: string): void { cellCtl.delete(name); }
+export function cellControls(req: () => CellReq, doc: Document): HTMLElement[] {
+  const out: HTMLElement[] = [];
+  for (const [name, fn] of cellCtl) {
+    try { const el = fn(req, doc); if (el) { el.dataset.slot = "cell:" + name; out.push(el); } }
+    catch (err) { cardStats.failed.push("cell:" + name); console.warn("domvec: cell control " + name + " failed; the cell keeps the rest", err); }
+  }
+  return out;
+}
+
 export class Slots {
   exts: Ext[] = [];
   stats = { loaded: [] as string[], refused: [] as string[], failed: [] as string[], off: [] as string[] };
@@ -62,9 +79,10 @@ export class Slots {
     for (const [slot, who] of this.taken) if (who === id) {
       this.taken.delete(slot);
       if (slot.startsWith("card:")) unregisterDecorator(slot.slice(5));
+      if (slot.startsWith("cell:")) unregisterCellControl(slot.slice(5));
     }
     this.exts = this.exts.filter((e) => e.id !== id);
     this.stats.loaded = this.stats.loaded.filter((x) => x !== id);
   }
 }
-(window as any).__domvecCardSlot = { registerDecorator, unregisterDecorator, decorateCard, cardStats, decorators };
+(window as any).__domvecCardSlot = { registerDecorator, unregisterDecorator, decorateCard, cardStats, decorators, registerCellControl, unregisterCellControl, cellCtl };
