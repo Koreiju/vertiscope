@@ -1660,6 +1660,7 @@ with the app, **U** an unclear term or step.
 | F-98 | I | spec §13n (F-97's wording) vs §13d' | F-97 made the call cell an app tool's only node; §13d' also draws the tool class itself as a node with sockets | both named: the tool panel as a node, and the reader's call cell |
 | F-99 | I | RESERVOIR §1, §3.3, §4, §6, §6b, §8, §8b, §10.1, §10.2, §11.2, §11.4, §12.8 | read line by line: graph form, circles, the old cockpit fields, `Agent` as a download, the browser cockpit slate, three rungs, `+` buttons and soft links, libcst asked, the telescope -- all overridden later and not in its head note | head note extended, each named with what overrides it |
 | F-100 | I | app vs T-4, §12d, §13f: `editorcalls.ts` `link`, `planepanels.ts` `linkedTo`, `magnetized`, the wire drop; RESERVOIR §12.3; spec §11d | wiki links stand in for hard links: `link()` writes one, containment and chat context read them, while the plane draws only `{ref}`s (G-404) | O-7; §11d's comment and §13g's containment row say so |
+| F-101 | I | GRAPH_WORKBENCH §2, §4, §5 | read line by line: a 2026-10-18 "now" column, DeepSeek-Coder as a chat role, llama-cpp-python "needs installing", downloads "under way", through-stack agents still designed -- each overridden later | head note extended |
 
 **Still open** -- O-1 to O-4, O-6 and O-7 are work the design names; O-5 is a question for the reader:
 

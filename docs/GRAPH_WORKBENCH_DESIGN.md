@@ -13,6 +13,15 @@
 >   web code and workspace code only (spec §13n).
 > - §1's card (UR S.4, T) is mortegon's. Here the slate keeps that class,
 >   and code objects follow spec §13.
+> - Read line by line on 2026-11-22 (spec F-101): §2's "in domvec now" column
+>   is as of 2026-10-18. Since then `{ref}` fields and the typed slate
+>   (G-277..G-279), the fold (G-278), the base objects in every kernel
+>   (G-279) and readouts at the perimeter (G-282) have been built. §4's chat
+>   role is Nous Hermes alone (G-393; DeepSeek-Coder is the `coder` role).
+>   §4's "llama-cpp-python ... needs installing": it is installed (spec
+>   §10d). §5's "downloads ... under way": the four files are on disk. §5's
+>   through-stack agents (186i, G-239): deprecated by 179 and synthesised in
+>   `THROUGH_STACK_SYNTHESIS.md`.
 
 *Design for PLUGIN_GOAL items 186a-186n (2026-10-18), with what was
 recovered from the mothership project. Your words are in `PLUGIN_GOAL.md`
