@@ -1466,7 +1466,7 @@ where it comes from. A term not listed is used in its plain sense.
 | **placement** | where a record is drawn: a field (folded or revealed), a panel or node on the plane, a node in 3D, a view of a live object | a second record | §12a, §13d |
 | **field** | one line `name value` of a slate, with the lines indented under it (its sub-fields, as `search`'s in `ego.md`); the value may be a `{ref}` | a widget (below) | 62, UR E.4 |
 | **slate** | a note whose tree is a Python module written in markdown (the cockpit is one) | a code cell | 62, 63' |
-| **panel** | Obsidian's own markdown view, extended, wherever markdown is shown (prose notes, slates, chat) | a node body that is not markdown | 56, 133 c, 140 |
+| **panel** | Obsidian's own markdown view, wherever markdown is shown (prose notes, slates, chat); 193: "regular obsidian panels exactly", so what the app adds on top is suspended (head note) | a node body that is not markdown | 56, 133 c, 140, 193 |
 | **cell** | one fenced code block of a note, or one top-level slate tree: the unit of dataflow, within its note (§13d) | a panel | 49, G-380 |
 | **call cell** | a cell that binds one call of a callable or a class; the editor's typed node | any cell | §13d |
 | **node (2D)** | a cell drawn in the editor: its body the cell's interface, its ports its inputs and outputs; folded to its title it is the fold parameter of 110. Also a slate FIELD resolved external (§12a), drawn as its own node while it is (the search node, §13h) | the retired abstract circle (182, 183) | §13c |
@@ -1474,9 +1474,10 @@ where it comes from. A term not listed is used in its plain sense.
 | **port / widget / socket** | a node's input or output; a WIDGET when its value is a literal edited in place, a SOCKET when it is linked by a name | the comm protocol's "widget" (a live object) | §13d' |
 | **live object** | a Python object with typed, observed state synced to its views over the kernel's comm channel (a Jupyter widget, front end per AFM) | a widget port | §13b, §13e |
 | **view** | one drawing of a live object's model; many views share one model | a placement of a markdown record | §13e |
+| **interface** | 193 (d): ONE interface that generalizes every canvas type -- code (editor tools, a terminal), web chunks (components acting on the live browser), the rest. Retrieval ranks over interface types and over content, two embeddings | a tool surface; a UI widget | 193 |
 | **canvas** | the interactive surface of an artifact (182's "interface canvases"). The EGO canvas is the cockpit's record ordering the ego's components (§12c) | a separate canvas note (retired, §12g) | 182, 183, §12c |
 | **plane** | the 2D surface fixed to the camera, in the 3D view, where nodes and panels sit; the editor's pan and zoom | an Obsidian pane | 50, 159 |
-| **ego / cockpit / craft** | the ego is the reader's tool space; the cockpit is its slate (`ego.md`); the craft is its 3D form, its own UMAP, flown first or third person | -- | 54, 67-69, 146, 158 |
+| **ego / cockpit / craft** | the ego is the reader's tool space; the cockpit is its slate (`ego.md`); the craft WAS its 3D form (circles and dashed edges), retired from view (G-405) until G-400 draws the ego as world nodes on its own UMAP, flown first or third person | -- | 54, 67-69, 146, 158, 186 |
 | **tool space (of the ego)** | the ego's set of tools and attached artifacts: browsers, retrieval, notebooks, chats, tagged chunks | a toolspace | 158 |
 | **toolspace** | one group of the app's capabilities, one per README pane (3D graph, ego, browser cell, panels, notebook/slates, search) | the ego's tool space | 166, 167 b, G-376 |
 | **governing class** | the ~25-line class of one THING whose public methods are its capabilities; an instance is a separate, linked record | a tool surface | 142, T-10, 89 |
@@ -1484,7 +1485,7 @@ where it comes from. A term not listed is used in its plain sense.
 | **tool panel** | the canvas form of an APP tool: a tool surface or a governing class shown as a READ-ONLY code artifact, calls visible, bodies never | a regular code artifact (explorable, graph-editable) | 167 c, G-378, F.6 |
 | **app tool** | a capability shipped with the app, shown as calls only, its dependencies never visible (§13n) | workspace code | 167 c, 189, G-378, G-382 |
 | **workspace code** | code made in the project workspace, fully explorable, editable and unfoldable down to base modules (§13n) | an app tool | 167 c, 189, 112 |
-| **hard link** | an edge that exists because code defines a name another cell reads, or a `{ref}` resolves, or two records share one chunk object; drawn undirected | a **temporary link**: magnetism, placement order while nodes touch (142), never drawn or written; a plain or wiki link; a retrieval link `[query](results)` | 136, 142, T-4 |
+| **hard link** | an edge that exists because code defines a name another cell reads, or a `{ref}` resolves, or two records share one chunk object; drawn undirected | a **temporary link**: magnetism, placement order while nodes touch (142), never drawn or written; a plain or wiki link (193's links question, head note); a retrieval link `[query](results)`, or 193 (b)'s suggested `#` query | 136, 142, T-4, 193 |
 | **readout** | a cell's stored output; on the perimeter, a terminal node's rendering placed in 3D | a view | RESERVOIR §4, §5 |
 
 ### 13n. Code tools on canvases -- app tools and workspace code (189)
@@ -1705,6 +1706,9 @@ with the app, **U** an unclear term or step.
 | F-120 | U | spec §13e | `JupyterKernel.run`; the class is `_JupyterKernel` (`kernel.py`) | named as in the code |
 | F-121 | I | spec head note (F-118) vs §13h | the suspension named §12b-§12c and §13d'-§13g, not §13h's search node, a slate field resolved external and drawn as a node | named |
 | F-122 | I | spec §13n boundary 2 vs 193 (e), 166 | an unfolded installed library is read-only and unindexed in §13n; 193 (e) says it "could" be chunked, vectorized and tooled by the web's stream; 166 projects only browser-scanned code | stated under §13n; O-11 |
+| F-123 | U | spec §13m vs 193 (d) | "interface", 193's one generalizing term, had no entry | a row |
+| F-124 | I | spec §13m vs 193 (a), G-405, §12f | "panel" was Obsidian's view "extended"; the craft "is" the ego's 3D form while retired | panel cites 193; the craft WAS, until G-400 |
+| F-125 | U | spec §13m hard link vs 193 (b) | the retrieval link named only `[query](results)` | the `#` suggestion named; wiki links point to the open question |
 
 **Still open** -- O-1 to O-4 and O-6 to O-10 are work the design names; O-5 and O-11 are questions for the reader:
 
