@@ -6937,13 +6937,16 @@ export function makeChecks(env) {
               const y = Math.round(90 + (i * 131) % Math.max(100, r.height - 160));
               const prev = b.lastHovered ? b.lastHovered.cid : "";
               const beforeText = textOf(), before = beforeText.length;
-              // Non-vacuity for the banner measure: the planted arm adds one.
-              if (${planted} && i === 2 && !plantedBanner) { plantedBanner = wrap.createDiv({ cls: "domvec-check-planted-banner", text: "planted banner: hovered chunk" }); }
               wv.sendInputEvent({ type: "mouseMove", x, y });
               const t0 = performance.now();
               while (performance.now() - t0 < 1500 && !(b.lastHovered && b.lastHovered.cid && b.lastHovered.cid !== prev)) await sleep(10);
               if (!(b.lastHovered && b.lastHovered.cid && b.lastHovered.cid !== prev)) { await sleep(300); continue; }
               await sleep(400);
+              // Non-vacuity for the banner measure: the planted arm adds one on
+              // the first hover that LANDS. Tied to i === 2 it was never
+              // measured whenever hover 2 found no new chunk (run 2026-11-24:
+              // banner_moves 0 with the plant on).
+              if (${planted} && !plantedBanner) { plantedBanner = wrap.createDiv({ cls: "domvec-check-planted-banner", text: "planted banner: hovered chunk" }); }
               const h = b.lastHovered;
               const ringed = v.graph.graphData().nodes.filter((n) => n.hovered);
               const ring = ringed[0] || null;
