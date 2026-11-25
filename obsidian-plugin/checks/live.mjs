@@ -14572,6 +14572,60 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-433",
+      asks: "A note's panel moves between Obsidian's tabs and the 2D plane both ways: a tab dropped on the plane becomes a card at the drop point and the tab closes; a card dropped on a tab bar becomes a tab there and leaves the plane (2026-11-25).",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const pl = app.plugins.getPlugin("domvec-bridge"), desk = pl.desk;
+          window.__domvecPlantNoTabDrag = ${planted};
+          const tag = (${planted} ? "p" : "c") + Date.now().toString(36), path = "domvec-checks/g433 " + tag + ".md";
+          const tabsOf = () => { const a = []; app.workspace.iterateAllLeaves((l) => { if (l.view && l.view.file && l.view.file.path === path && l.tabHeaderEl && !desk.panelOf(path)?.card?.contains(l.containerEl)) a.push(l); }); return a; };
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, "# g433" + String.fromCharCode(10) + "tab and plane" + String.fromCharCode(10));
+            desk.drawLinks();
+            const plane = desk.host.plane();
+            const cb = plane && plane.__domvecTabDropCb;
+            if (!cb) return { error: "plane takes no drops" };
+            // IN: a real tab, its header's dragstart, then the drop on the plane.
+            const leaf = app.workspace.getLeaf("tab"); await leaf.openFile(f); await sleep(500);
+            const hdr = leaf.tabHeaderEl;
+            hdr.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true }));
+            const pr = plane.getBoundingClientRect();
+            const hover = cb({ clientX: pr.left + 220, clientY: pr.top + 160 }, { type: "file", file: f }, true);
+            cb({ clientX: pr.left + 220, clientY: pr.top + 160 }, { type: "file", file: f }, false);
+            for (let k = 0; k < 20 && !desk.panelOf(path); k++) await sleep(200);
+            await sleep(600);
+            const pc = desk.panelOf(path);
+            const res = { planted: ${planted}, hover: !!hover, card_in: !!pc, tab_closed: !tabsOf().length,
+                          at: pc ? Math.round(pc.card.getBoundingClientRect().left - pr.left) : null };
+            if (!pc) return res;
+            // OUT: the card dropped on a tab bar.
+            const bars = [...document.querySelectorAll(".workspace-tab-header-container")].filter((b) => { const r = b.getBoundingClientRect(); return r.width > 40 && r.height > 5; });
+            const bar = bars[0]; if (!bar) return { ...res, error: "no tab bar" };
+            const br = bar.getBoundingClientRect(), x = br.right - 30, y = br.top + br.height / 2;
+            const under = document.elementFromPoint(x, y);
+            res.bar_hit = !!(under && under.closest(".workspace-tab-header-container"));
+            res.drop_taken = desk.wireDrop(path, x, y);
+            for (let k = 0; k < 20 && !tabsOf().length; k++) await sleep(200);
+            await sleep(400);
+            res.tab_out = tabsOf().length === 1; res.card_left = !desk.panelOf(path);
+            res.same_group = res.tab_out && bar.closest(".workspace-tabs").contains(tabsOf()[0].containerEl);
+            return res;
+          } finally {
+            window.__domvecPlantNoTabDrag = false;
+            for (const l of tabsOf()) { try { l.detach(); } catch {} }
+            try { desk.closePath(path); } catch {}
+            const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.hover && clean.card_in && clean.tab_closed && clean.bar_hit && clean.drop_taken && clean.tab_out && clean.card_left && clean.same_group;
+        return { pass: ok && !!planted && !planted.error && !planted.card_in && !planted.hover, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-405",
       asks: "the craft's circles and dashed edges are gone in 2D and 3D (PLUGIN_GOAL 182-186: 'completely do away with the graph view', 'circles gone', 'leftover edge and the deprecated node-based graph view artifacts'; 192 d: the dotted lines): with the graph open the craft group is not drawn and no tether line is on the plane; planted (__domvecPlantCraft) the group is drawn again",
       async run() {

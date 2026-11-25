@@ -1,3 +1,4 @@
+import { acceptTabDrops, toTabs } from "./tabdrag";
 import { plusChat } from "./chatcell";
 import { TERMINAL_VIEW } from "./terminal";
 /**
@@ -1086,6 +1087,9 @@ export class PlaneDesk {
   plantNoWiring = false;
   wireStats = { wired: 0, refused: 0, last: null as any };
   wireDrop(from: string, x: number, y: number): boolean {
+    // Off the plane onto a tab bar: the card becomes a tab (2026-11-25, tabdrag.ts).
+    const pc = this.panelOf(from);
+    if (pc && toTabs(this.app, pc.card, from, x, y)) { this.closePath(from); return true; }
     // A pulled cell's card (pullapart.ts) dropped on a panel goes back in.
     const ff = this.app.vault.getAbstractFileByPath(from);
     if (ff instanceof TFile && String(this.app.metadataCache.getFileCache(ff)?.frontmatter?.domvec || "") === "cell" && this.host.pullInto) {
@@ -1206,6 +1210,8 @@ export class PlaneDesk {
   drawLinks(): void {
     const plane = this.host.plane();
     if (!plane) return;
+    // The plane takes notes dragged from tabs or the file list (tabdrag.ts).
+    acceptTabDrops(this.app, plane, (f, at) => this.open(f, { at }));
     const NS = "http://www.w3.org/2000/svg";
     if (!this.linkSvg || !plane.contains(this.linkSvg)) {
       this.linkSvg?.remove();

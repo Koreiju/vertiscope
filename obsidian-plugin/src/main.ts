@@ -70,6 +70,7 @@ import { PullApart } from "./pullapart";
 import { agentBlock } from "./agentblock";
 import { Slots } from "./slots";
 import { completeCell } from "./complete";
+import { watchTabDrags } from "./tabdrag";
 import { markProblems, problemExtension } from "./dfproblems";
 import { CodeRows } from "./coderows";
 import { BrowserPanel } from "./browserpanel";
@@ -323,6 +324,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }) });
     for (const e of ((window as any).__domvecExtraExtensions || []) as any[]) this.slots.add(e);
     this.slots.load();
+    this.register(watchTabDrags(this.app));
     try {
       this.registerMarkdownCodeBlockProcessor(BROWSER_FENCE, browserFence(this.app));
     } catch (e) {
