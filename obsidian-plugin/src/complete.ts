@@ -16,15 +16,11 @@
  */
 import { TFile, type App } from "obsidian";
 import { findFences } from "./fences";
+import { defsOf, isWireframe, orderDefs, type WDef } from "./wiredefs";
+export { defsOf, isWireframe, orderDefs };
 
 const NL = String.fromCharCode(10);
 const TQ = String.fromCharCode(96).repeat(3);
-
-export function isWireframe(code: string): boolean {
-  return /^\s*def\s+\w+\s*\(.*\)\s*(->\s*[^:]+)?:\s*$/m.test(code)
-    && /("""|''')/.test(code)
-    && /^\s+(\.\.\.|pass)\s*$/m.test(code);
-}
 
 function docstringOf(code: string): string {
   const m = code.match(/("""|''')([\s\S]*?)\1/);
@@ -37,29 +33,52 @@ export function codeOf(reply: string): string {
   return (m ? m[1] : reply).replace(/\s+$/, "");
 }
 
-export const completeStats = { asked: 0, written: 0, refused: 0, last: null as any };
-(window as any).__domvecCompleteStats = completeStats;
+export const completeStats = { asked: 0, written: 0, refused: 0, components: [] as string[], last: null as any };
+if (typeof window !== "undefined") (window as any).__domvecCompleteStats = completeStats;
 
-export async function completeCell(app: App, deps: {
+type Deps = {
   search: (q: string) => Promise<{ url: string; preview: string }[]>;
   stream: (prompt: string, ctx: string[], on: (t: string) => void) => Promise<string>;
   viewOf: (path: string) => any;
-}, path: string, line: number, code: string): Promise<boolean> {
-  if ((window as any).__domvecPlantNoComplete || !isWireframe(code)) { completeStats.refused++; return false; }
-  completeStats.asked++;
-  const hits = (await deps.search(docstringOf(code)).catch(() => [])).slice(0, 4);
+};
+
+/** One component: the completed `def name` from the model, or null. */
+async function completeOne(deps: Deps, cell: string, d: WDef, done: string[]): Promise<string | null> {
+  const hits = (await deps.search(d.doc || docstringOf(d.text)).catch(() => [])).slice(0, 4);
   // The hits go INTO the prompt as reference, the instruction last: sent as
   // chat context they came first and the model answered about them instead.
   const ref = hits.length ? "Reference from the store (use only if relevant):" + NL + hits.map((h) => "- " + h.url + ": " + h.preview.replace(/\s+/g, " ").slice(0, 300)).join(NL) + NL + NL : "";
-  const prompt = ref + TQ + "python" + NL + code + NL + TQ + NL + NL
-    + "Complete the Python function above: replace its `...` body with working code. Keep its signature and docstring exactly. "
-    + "Reply with ONE " + TQ + "python block holding the whole function and nothing else.";
+  const prior = done.length ? "Already written (call these, do not rewrite them):" + NL + TQ + "python" + NL + done.join(NL + NL) + NL + TQ + NL + NL : "";
+  const others = cell !== d.text ? "The module it belongs to:" + NL + TQ + "python" + NL + cell + NL + TQ + NL + NL : "";
+  const prompt = ref + prior + others + TQ + "python" + NL + d.text + NL + TQ + NL + NL
+    + "Complete the Python function `" + d.name + "` above: replace its `...` body with working code. Keep its signature and docstring exactly. "
+    + "Reply with ONE " + TQ + "python block holding the whole function " + d.name + " and nothing else.";
   const reply = await deps.stream(prompt, [], () => undefined);
-  const body = codeOf(reply);
-  const sig = (code.match(/^\s*def\s+(\w+)/m) || [])[1];
-  if (!sig || !new RegExp("def\\s+" + sig + "\\b").test(body) || isWireframe(body)) {
-    completeStats.refused++; completeStats.last = { path, line, reply: reply.slice(0, 300) }; return false;
+  const got = defsOf(codeOf(reply)).find((x) => x.name === d.name);
+  if (!got || got.wire) { completeStats.last = { name: d.name, reply: reply.slice(0, 300) }; return null; }
+  return got.text;
+}
+
+/** Complete every wireframe of the cell, in order (G-238: "then each component
+ *  completed"); each completed component is handed to the next. The cell is
+ *  written once, with what was completed, even if a later component failed. */
+export async function completeCell(app: App, deps: Deps, path: string, line: number, code: string): Promise<boolean> {
+  if ((window as any).__domvecPlantNoComplete || !isWireframe(code)) { completeStats.refused++; return false; }
+  completeStats.asked++;
+  // Planted `__domvecPlantCompleteUnordered`: source order, no prior components handed on.
+  const plantU = !!(window as any).__domvecPlantCompleteUnordered;
+  const order = plantU ? defsOf(code).filter((x) => x.wire) : orderDefs(defsOf(code));
+  let cur = code; const done: string[] = [], names: string[] = [];
+  for (const w of order) {
+    const d = defsOf(cur).find((x) => x.name === w.name && x.wire);
+    if (!d) continue;
+    const body = await completeOne(deps, cur, d, plantU ? [] : done);
+    if (!body) { completeStats.refused++; break; }
+    const ls = cur.split(NL);
+    cur = [...ls.slice(0, d.from), ...body.split(NL), ...ls.slice(d.to)].join(NL);
+    done.push(body); names.push(d.name);
   }
+  if (!names.length) return false;
   const f = app.vault.getAbstractFileByPath(path);
   if (!(f instanceof TFile)) return false;
   // The editor only in source mode (EditorCalls.append's rule): a reading
@@ -69,8 +88,8 @@ export async function completeCell(app: App, deps: {
   const fence = findFences(text).find((x) => x.openLine === line);
   if (!fence) return false;
   const lines = text.split(NL);
-  const next = [...lines.slice(0, fence.openLine + 1), ...body.split(NL), ...lines.slice(fence.closeLine)].join(NL);
+  const next = [...lines.slice(0, fence.openLine + 1), ...cur.replace(/\s+$/, "").split(NL), ...lines.slice(fence.closeLine)].join(NL);
   if (v?.editor) v.editor.setValue(next); else await app.vault.modify(f, next);
-  completeStats.written++; completeStats.last = { path, line, hits: hits.length, body: body.slice(0, 300) };
+  completeStats.written++; completeStats.components = names; completeStats.last = { path, line, order: names };
   return true;
 }

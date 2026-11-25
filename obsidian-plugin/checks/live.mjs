@@ -15144,6 +15144,52 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-435",
+      asks: "a whole multi-component wireframe completed in order (G-238, Addendum XI 167: 'then each component completed'): one python cell holds two wireframes, sum_squares (its docstring names square) above square; complete fills BOTH, square first, then sum_squares with square handed to it as already written; the cell runs and sum_squares([1, 2, 3]) prints 14; planted __domvecPlantCompleteUnordered: source order (sum_squares first, nothing handed on)",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10), Q = String.fromCharCode(34).repeat(3);
+          const pl = app.plugins.getPlugin("domvec-bridge");
+          window.__domvecPlantCompleteUnordered = ${planted};
+          const path = "domvec-checks/g435 " + (${planted} ? "p" : "c") + Date.now().toString(36) + ".md";
+          const wire = ["def sum_squares(xs):", "    " + Q + "Return the sum of square(x) for each x in xs." + Q, "    ...", "",
+                        "def square(x):", "    " + Q + "Return x multiplied by itself." + Q, "    ..."].join(NL);
+          const leaf = app.workspace.getLeaf("tab");
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, F + "python" + NL + wire + NL + F + NL + NL + F + "python" + NL + "print(sum_squares([1, 2, 3]))" + NL + F + NL);
+            await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(900);
+            let btn = null;
+            for (let k = 0; k < 30 && !btn; k++) { btn = [...leaf.view.containerEl.querySelectorAll("pre")].filter((p) => p.textContent.includes("def square"))[0]?.querySelector(".domvec-complete-fence"); if (!btn) await sleep(200); }
+            if (!btn) return { planted: ${planted}, button: false };
+            const w0 = window.__domvecCompleteStats.written;
+            btn.click();
+            for (let k = 0; k < 240 && window.__domvecCompleteStats.written === w0; k++) await sleep(500);
+            await sleep(600);
+            const t = await app.vault.read(f);
+            const order = [...(window.__domvecCompleteStats.components || [])];
+            const both = !t.split(F + "python")[1].includes("    ...") && t.includes("multiplied by itself") && t.includes("for each x in xs");
+            let runs14 = false;
+            if (both) {
+              const first = t.split(F + "python")[1].split(F)[0].replace(/^\\s+|\\s+$/g, "");
+              await pl.onRunFence({ path, lang: "python", code: first, line: 0, refs: [] });
+              const r = await pl.onRunFence({ path, lang: "python", code: "print(sum_squares([1, 2, 3]))", line: t.split(NL).findIndex((l) => l.includes("print(sum_squares")) - 1, refs: [] });
+              runs14 = JSON.stringify(r && (r.stdout || r.output || r)).includes("14");
+            }
+            return { planted: ${planted}, button: true, order, both, runs14, body: t.slice(0, 500) };
+          } finally {
+            window.__domvecPlantCompleteUnordered = false; leaf.detach();
+            await sleep(1500);
+            const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0);
+          }
+        })()`, { timeout: 240000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && clean.button && clean.order.join() === "square,sum_squares" && clean.both && clean.runs14;
+        return { pass: ok && !!planted && planted.button && planted.order[0] === "sum_squares", evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-408",
       asks: "the comm bridge (spec 13e; the live objects of 187 and 194's 'measuring the changes instantly'): a cell run with the plugin's own runCell opens a comm; the plugin's comm() reads its open and its message from the note kernel's log; a comm_msg the plugin sends reaches the object, whose state the next run reads back; planted (__domvecPlantNoComm) the traffic is never seen",
       async run() {
