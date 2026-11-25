@@ -1422,7 +1422,8 @@ rows are suspended under 193 (head note).
 
 G-408 and G-409 need no download. G-410, G-412 and G-413 wait on §13j's
 `anywidget`. Under 193 (head note), G-409 and G-411 are suspended with the
-litegraph rows of §13j, and G-410's host is a plain panel, never a node body.
+litegraph rows of §13j, and G-410's host is a plain panel (my reading of
+193 (a), pending the reader's answer).
 
 A slice lands only with the plugin's existing live checks still passing:
 "I need something like this to work with our whole plugin without
@@ -1712,7 +1713,7 @@ with the app, **U** an unclear term or step.
 | F-123 | U | spec §13m vs 193 (d) | "interface", 193's one generalizing term, had no entry | a row |
 | F-124 | I | spec §13m vs 193 (a), G-405, §12f | "panel" was Obsidian's view "extended"; the craft "is" the ego's 3D form while retired | panel cites 193; the craft WAS, until G-400 |
 | F-125 | U | spec §13m hard link vs 193 (b) | the retrieval link named only `[query](results)` | the `#` suggestion named; wiki links point to the open question |
-| F-126 | I | spec §13j, §13k vs the 193 head note | the build order and the packages still put G-409 and G-411 and litegraph on the path, and G-410 "a node body once G-411 lands" | each names its suspension; G-410 in a plain panel |
+| F-126 | I | spec §13j, §13k vs the 193 head note | the build order and the packages still put G-409 and G-411 and litegraph on the path, and G-410 "a node body once G-411 lands" | each names its suspension; G-410 in a plain panel, as my reading |
 
 **Still open** -- O-1 to O-4 and O-6 to O-10 are work the design names; O-5 and O-11 are questions for the reader:
 
