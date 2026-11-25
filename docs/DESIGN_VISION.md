@@ -1,6 +1,10 @@
 # The whole design vision, read from the verbatim (2026-11-08)
 
 > **Cross-check, 2026-11-22** (COMPUTATION_GRAPH_EDITOR_SPEC §14).
+> - **193 and 194 (2026-11-24)**: panels are plain Obsidian notes; the custom
+>   slate syntax (`{ref}` fields, chips) is withdrawn and its work moves into
+>   code cells -- my reading, awaiting the reader (spec head note, F-134).
+>   Read every slate and `{ref}` passage here against that.
 > - 1.4's "one gesture flips between the panel form and the undirected graph
 >   form": retired by 182 ("completely do away with the 'graph view' form").
 >   The 2D node is the artifact's own interface (spec §13c).

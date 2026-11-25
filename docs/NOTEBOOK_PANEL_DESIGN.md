@@ -1,6 +1,10 @@
 # The notebook kernel panel — design
 
 > **Cross-check, 2026-11-22** (COMPUTATION_GRAPH_EDITOR_SPEC §14).
+> - **193 and 194 (2026-11-24)**: panels are plain Obsidian notes; the custom
+>   slate syntax (`{ref}` fields, chips) is withdrawn and its work moves into
+>   code cells -- my reading, awaiting the reader (spec head note, F-134).
+>   Read every slate and `{ref}` passage here against that.
 > - §1's "kernels are subprocesses first": superseded by 49. Cells run in real
 >   Jupyter kernels, and the subprocess remains the fallback.
 > - §2's bottom `[+ code] [+ terminal] [+ browser cell]` buttons: replaced by

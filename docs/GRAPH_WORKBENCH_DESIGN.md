@@ -1,6 +1,10 @@
 # The graph workbench: code, models and workflows as graph nodes
 
 > **Cross-check, 2026-11-22** (COMPUTATION_GRAPH_EDITOR_SPEC §14).
+> - **193 and 194 (2026-11-24)**: panels are plain Obsidian notes; the custom
+>   slate syntax (`{ref}` fields, chips) is withdrawn and its work moves into
+>   code cells -- my reading, awaiting the reader (spec head note, F-134).
+>   Read every slate and `{ref}` passage here against that.
 > - §6 is answered in full: the 2D editor's host is a plane inside the 3D
 >   view (50); aggregates are a trie-path pattern (DESIGN_VISION T-15, built
 >   as G-388); rank-dominance collapse applies to every node (T-16, built as

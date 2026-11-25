@@ -2,6 +2,10 @@
 
 > **Cross-check, 2026-11-22** (COMPUTATION_GRAPH_EDITOR_SPEC §12-§14). Read
 > with the spec. Parts the later record overrides:
+> - **193 and 194 (2026-11-24)**: panels are plain Obsidian notes; the custom
+>   slate syntax (`{ref}` fields, chips) is withdrawn and its work moves into
+>   code cells -- my reading, awaiting the reader (spec head note, F-134).
+>   Read every slate and `{ref}` passage here against that.
 > - §3.3's double left-click "panel <-> graph form", §8 step 5 and §8b's
 >   G-281 row: the graph-view FORM is retired (182, G-399). The 2D node is
 >   now the artifact's own interface in the node editor (spec §13c).
