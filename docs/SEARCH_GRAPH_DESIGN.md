@@ -1,8 +1,4 @@
 # The search as a computation graph on the 2D plane
->
-> **193 and 194 (2026-11-24)**: the cockpit's `search` field is slate
-> syntax, which 194 withdraws in my reading; whether the cockpit becomes code
-> cells is the reader's to confirm (spec head note, F-133, F-134).
 
 > **Cross-check, 2026-11-22** (COMPUTATION_GRAPH_EDITOR_SPEC §13h). Under 187
 > the one retrieval node of 164 is the cockpit's `search` field (`ego.md`)
@@ -18,6 +14,9 @@
 > - §6 is answered: q1 by 164 (all three factors, keyed by the ref); q2 is
 >   moot, since 164 withdrew the stage panels; q3 by 164 ("Live search
 >   only", nothing kept per search).
+> - **193 and 194 (2026-11-24)**: the cockpit's `search` field is slate
+>   syntax, which 194 withdraws in my reading; whether the cockpit becomes
+>   code cells is the reader's to confirm (spec head note, F-133, F-134).
 
 Design before code, for PLUGIN_GOAL items 163 and 164 (2026-11-15).
 
