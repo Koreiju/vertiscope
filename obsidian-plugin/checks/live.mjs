@@ -14682,8 +14682,9 @@ export function makeChecks(env) {
                      box_area: !!box && box.outputs.some((o) => o.name === "area" && o.type === "float") };
           } finally {
             window.__domvecPlantAllSockets = false; window.__domvecPlantNoWidgetEdit = false; window.__domvecPlantNoEditRerun = false;
+            await sleep(2500);   // an edit's re-run still in flight would write the note back
             try { desk.closePath(path); } catch {}
-            const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0);
+            for (let k = 0; k < 2; k++) { const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0); await sleep(1200); }
           }
         })()`, { timeout: 90000 });
         const clean = await arm(false), planted = await arm(true);
@@ -14972,6 +14973,54 @@ export function makeChecks(env) {
         const ok = !!clean && clean.ref_under && !clean.click_opened && clean.placed && clean.near_drop && clean.line && clean.solid
           && clean.cards_of_rec === 1 && clean.moved && clean.back_taken && clean.back_closed && clean.back_revealed;
         return { pass: ok && !!planted && planted.ref_under && !planted.placed, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-413",
+      asks: "the base tools as live objects -- a view's change re-runs the readers (187, 166, 167 c, T-10; spec 13h): a note whose python cell reads WebBrowser.url is indexed as a reader of the browser; when the browser cell's shown page changes (its own noteShown, as a navigation calls it) the cell re-runs with no Run press and its output is the new run's; a cell that does not read the browser is not re-run; planted toolRun.plantOff: no re-run",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const pl = app.plugins.getPlugin("domvec-bridge"), tr = pl.toolRun;
+          tr.plantOff = ${planted};
+          const tag = (${planted} ? "p" : "c") + Date.now().toString(36);
+          const path = "domvec-checks/g413 " + tag + ".md", other = "domvec-checks/g413 other " + tag + ".md";
+          const out = { planted: ${planted} };
+          const bv = pl.activeBrowser && pl.activeBrowser();
+          if (!bv || typeof bv.noteShown !== "function") return { error: "no browser cell" };
+          const was = bv.shown;
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            await app.vault.create(path, "# g413" + NL + NL + F + "python" + NL + "import time" + NL + "print('SEEN', WebBrowser.url, time.time())" + NL + F + NL);
+            await app.vault.create(other, "# other" + NL + NL + F + "python" + NL + "print('NOT A READER')" + NL + F + NL);
+            // Drawn: a reader re-runs only while it is on screen.
+            await pl.desk.open(app.vault.getAbstractFileByPath(path)); await pl.desk.open(app.vault.getAbstractFileByPath(other)); await sleep(600);
+            for (let k = 0; k < 20 && !tr.readers.get("browser")?.has(path); k++) await sleep(200);
+            out.indexed = !!tr.readers.get("browser")?.has(path);
+            out.other_indexed = !!tr.readers.get("browser")?.has(other);
+            const r0 = tr.stats.reran;
+            bv.noteShown("https://example.org/g413/" + tag);
+            for (let k = 0; k < 40 && tr.stats.reran === r0; k++) await sleep(250);
+            await sleep(800);
+            out.reran = tr.stats.reran - r0;
+            let txt = '';
+            const cur = async () => { const v = pl.desk.viewOf(path); return v && v.editor ? v.editor.getValue() : await app.vault.read(app.vault.getAbstractFileByPath(path)); };
+            for (let k = 0; k < 30; k++) { txt = await cur(); if (/nb-output/.test(txt) || ${planted}) break; await sleep(300); }
+            if (${planted}) { await sleep(3000); txt = await cur(); }
+            out.output = /SEEN/.test(txt.split("nb-output")[1] || "");   // the output block, not the source
+            out.other_output = /NOT A READER/.test((await app.vault.read(app.vault.getAbstractFileByPath(other))).split("nb-output")[1] || "");
+            out.last = tr.stats.last;
+            return out;
+          } finally {
+            tr.plantOff = false;
+            if (was) bv.shown = was;
+            for (const q of [path, other]) { try { pl.desk.closePath(q); } catch {} const g = app.vault.getAbstractFileByPath(q); if (g) await app.vault.delete(g).catch(() => 0); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.indexed && !clean.other_indexed && clean.reran >= 1 && /g413 c/.test(clean.last) && clean.output && !clean.other_output;
+        return { pass: ok && !!planted && !planted.error && planted.indexed && planted.reran === 0 && !planted.output, evidence: { clean, planted } };
       },
     },
     {

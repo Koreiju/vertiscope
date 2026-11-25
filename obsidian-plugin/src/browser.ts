@@ -1790,7 +1790,13 @@ export class BrowserView extends ItemView {
   private shownAt = -Infinity;
   /** Synchronous asks made (the harness reads it). */
   shownAsks = 0;
-  private noteShown(u: string): void { if (u) { this.shown = canonQuery(u); this.shownAt = performance.now(); } }
+  private noteShown(u: string): void {
+    if (!u) return;
+    const was = this.shown;
+    this.shown = canonQuery(u); this.shownAt = performance.now();
+    // G-413: the browser's view changed -- the cells that read it re-run.
+    if (this.shown !== was) window.dispatchEvent(new CustomEvent("domvec-tool-view", { detail: { tool: "browser", url: this.shown } }));
+  }
   currentPage(): string {
     let u = "";
     try { u = this.shownUrl(); } catch { return ""; }

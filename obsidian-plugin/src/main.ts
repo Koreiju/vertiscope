@@ -65,7 +65,7 @@ import { PLANE_FOLDER, PlaneDesk } from "./planepanels";
 import { BrowseCard } from "./browsecard";
 import { EditorCalls } from "./editorcalls";
 import { DataflowRun, noteTextOf } from "./dataflowrun";
-import { AutoRun, CrossRun } from "./autorun";
+import { AutoRun, CrossRun, ToolRun } from "./autorun";
 import { PullApart } from "./pullapart";
 import { agentBlock } from "./agentblock";
 import { Slots, registerDecorator } from "./slots";
@@ -214,6 +214,15 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // Edges between notes: a change to a note re-runs the cells that read it (G-426).
     this.crossRun = new CrossRun(this.app, (req) => this.onRunFence(req));
     this.app.workspace.onLayoutReady(() => void this.crossRun.build());
+    // G-413: a base tool's view change re-runs the cells that read it.
+    this.toolRun = new ToolRun(this.app, (req) => this.onRunFence(req),
+      (p) => !!this.desk.panelOf(p) || this.markdownLeaves().some((l) => (l.view as any)?.file?.path === p));
+    this.app.workspace.onLayoutReady(() => void this.toolRun.build());
+    this.registerEvent(this.app.vault.on("modify", (f: any) => { if (f instanceof TFile) void this.toolRun.onModify(f); }));
+    this.registerEvent(this.app.vault.on("create", (f: any) => { if (f instanceof TFile) void this.toolRun.onModify(f); }));
+    const onView = (e: any) => this.toolRun.onView(String(e?.detail?.tool || ""), String(e?.detail?.url || ""));
+    window.addEventListener("domvec-tool-view", onView);
+    this.register(() => window.removeEventListener("domvec-tool-view", onView));
     this.registerEvent(this.app.vault.on("modify", (f: any) => { if (f instanceof TFile) void this.crossRun.onModify(f); })); this.registerEvent(this.app.vault.on("create", (f: any) => { if (f instanceof TFile) void this.crossRun.onModify(f); }));
     // The kernel's vault facade (P-N4) is rooted at the vault's own folder.
     this.sidecar.vaultRoot = String((this.app.vault.adapter as any).basePath || "");
@@ -1264,6 +1273,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   /** Edits re-run (194): a pause in a python cell runs it and its readers. */
   autoRun!: AutoRun;
   crossRun!: CrossRun;
+  toolRun!: ToolRun;
   /** Named extension slots over the core (G-240). */
   slots: Slots = new Slots(() => ((this as any).settings?.disabledExtensions as string[]) || []);
   async onRunFence(req: RunRequest): Promise<any> {

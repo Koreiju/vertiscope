@@ -125,3 +125,80 @@ export class CrossRun {
     } finally { window.setTimeout(() => this.running.delete(reader), 1500); }
   }
 }
+
+
+/**
+ * G-413 (187, 166, 167 c, T-10; spec 13h): a base tool's VIEW changing re-runs
+ * its READERS. A cell reads a tool when its code reads the tool's state --
+ * `WebBrowser.url`, `.title`, `.chunks(`, `.controls(` for the browser cell.
+ * When that view changes (the browser navigates: `domvec-tool-view` on the
+ * window), every such cell is re-run, debounced, so what it printed follows
+ * what the tool shows. Planted `plantOff`: the readers keep their old output.
+ *
+ * In trie terms: the tool's view is a page address; a reader cell's output is
+ * re-derived from the new address through the same run path as a press.
+ */
+export const TOOL_READS: Record<string, RegExp> = {
+  browser: /\bWebBrowser\s*\.\s*(url|title|chunks|controls)\b/,
+};
+
+export class ToolRun {
+  stats = { indexed: 0, readers: 0, views: 0, reran: 0, last: "" };
+  plantOff = false;
+  delayMs = 900;
+  /** tool -> reader note paths. */
+  readers = new Map<string, Set<string>>();
+  private timer = new Map<string, number>();
+  private running = new Set<string>();
+  /** `isOpen`: a reader re-runs only while it is drawn -- in a tab or on the
+   *  plane. A note nobody is looking at (a design doc quoting `WebBrowser.url`
+   *  as an example, seen 2026-11-25) is never executed by a navigation. */
+  constructor(private app: App, private run: (req: RunRequest) => Promise<any>, private isOpen: (path: string) => boolean = () => true) {}
+
+  reindex(path: string, text: string): void {
+    if (/^docs\//.test(path)) return;
+    for (const [tool, re] of Object.entries(TOOL_READS)) {
+      if (!this.readers.has(tool)) this.readers.set(tool, new Set());
+      const reads = findFences(text).some((c) => PY.test(c.lang) && re.test(c.body));
+      if (reads) this.readers.get(tool)!.add(path); else this.readers.get(tool)!.delete(path);
+    }
+    this.stats.readers = [...this.readers.values()].reduce((n, s) => n + s.size, 0);
+  }
+
+  async build(): Promise<void> {
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      if (SKIP.test(f.path)) continue;
+      const t = await this.app.vault.cachedRead(f);
+      if (t.includes("WebBrowser")) this.reindex(f.path, t);
+      this.stats.indexed++;
+    }
+  }
+
+  async onModify(file: TFile): Promise<void> {
+    if (SKIP.test(file.path) || file.extension !== "md") return;
+    this.reindex(file.path, await this.app.vault.cachedRead(file));
+  }
+
+  /** The tool's view changed: its readers re-run, once per settled change. */
+  onView(tool: string, detail = ""): void {
+    this.stats.views++;
+    if (this.plantOff) return;
+    window.clearTimeout(this.timer.get(tool));
+    this.timer.set(tool, window.setTimeout(() => void this.rerunAll(tool, detail), this.delayMs));
+  }
+
+  private async rerunAll(tool: string, detail: string): Promise<void> {
+    const re = TOOL_READS[tool];
+    for (const reader of [...(this.readers.get(tool) || [])]) {
+      const f = this.app.vault.getAbstractFileByPath(reader) as TFile | null;
+      if (!f || this.running.has(reader) || !this.isOpen(reader)) continue;
+      this.running.add(reader);
+      try {
+        for (const c of findFences(await this.app.vault.read(f)).filter((c) => PY.test(c.lang) && re.test(c.body))) {
+          await this.run({ lang: c.lang, code: cellSource(c.body), line: c.openLine, path: reader, refs: c.refs });
+          this.stats.reran++; this.stats.last = reader + "#" + c.openLine + " <- " + tool + " " + detail;
+        }
+      } finally { this.running.delete(reader); }
+    }
+  }
+}
