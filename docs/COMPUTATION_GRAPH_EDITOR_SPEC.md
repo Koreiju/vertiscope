@@ -28,7 +28,10 @@ cite the latest series by bare number, under the rule at §13's head.
 > - **Withdrawn**: the slate's markdown syntax as the editor's grammar --
 >   chips and field rows (§12b-§12c), §13h's search node as a slate field,
 >   the fence-line `{ref}` across notes (§13d, O-6), G-401's fields and what
->   seeds them (O-10). Kept as found in the code until the reader confirms
+>   seeds them (O-10); and the slate dialect §5, §11b and §11c build on
+>   (mortegon T.5's "in-text ... specialized editor-specific syntaxes",
+>   N.10's `{ref}`, G-379), which 194, the later word, overrides. Kept as
+>   found in the code until the reader confirms
 >   this reading; nothing deleted yet.
 > - **Stands**: the node editor over CODE cells (§13d'-§13g, G-409, G-411,
 >   litegraph, O-1). 194 (g) keeps "our findings on graphical code design
@@ -1727,8 +1730,9 @@ with the app, **U** an unclear term or step.
 | F-129 | I | spec head note, §13j, §13k (F-118, F-126) vs 194 | the node editor was suspended with the markdown syntax; 194 moves compilation into code cells and keeps the graphical code interfaces and the package research | the syntax withdrawn (my reading, to be confirmed); the node editor over code cells stands |
 | F-130 | I | PRD G-38 vs its live check (O-9) | Confirm while its check failed: the planted banner was added only on hover 2 and never measured when hover 2 found no new chunk | the plant moved to the first landed hover; passes both arms (`402c5a2`); O-9 closed |
 | F-131 | I | spec §13m (panel, field, hard link) vs 194 | the glossary still called the links question open and the panel's additions suspended | each cites 194's withdrawal |
+| F-132 | I | spec §5, §11b, §11c vs 194 and the head note | the slate dialect (T.5's in-text editor syntax, N.10's `{ref}`, G-379's compile) was not named among what 194 withdraws, though §11b calls it "mortegon's panel syntax carried over" | named in the head note's withdrawn list; mortegon's words yield to 194, the later word |
 
-**Passes that found nothing new** (2026-11-24): pass 32 re-read pass 31's edits and every "suspend" left in the docs (only ledger history). Pass 33 read `egocanvas.ts` and `canvasparse.ts` whole against §12c: its disagreements are already F-115 (the migration runs only from `openCanvas`) and O-10 (the comment says tool space, `canvas.members` reads the craft). Field order is join order, appended, which is compile order (142). What remains waits on the reader: 194's reading, O-5, O-11, the covering cards.
+**Passes that found nothing new** (2026-11-24; pass 34 then found F-132 in §5 and §11): pass 32 re-read pass 31's edits and every "suspend" left in the docs (only ledger history). Pass 33 read `egocanvas.ts` and `canvasparse.ts` whole against §12c: its disagreements are already F-115 (the migration runs only from `openCanvas`) and O-10 (the comment says tool space, `canvas.members` reads the craft). Field order is join order, appended, which is compile order (142). What remains waits on the reader: 194's reading, O-5, O-11, the covering cards.
 
 **Still open** -- O-1 to O-4, O-6 to O-8 and O-10 are work the design names (O-6 and O-10 withdrawn with the slate syntax if the reader confirms 194's reading; O-9 closed); O-5 and O-11 are questions for the reader:
 
