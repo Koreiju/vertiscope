@@ -14199,6 +14199,68 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-414",
+      asks: "hovering a CHUNK node in the 3D view opens its billboard as a preview (PLUGIN_GOAL 192: 'I should be able to view the panel billboard previews when hovering'): in fly-to mode, a pointer move onto chunk nodes on screen -- through the pane's own pointer handler -- opens THAT node's panel (or its unit's) within the dwell, and a move off onto empty canvas lets it go; planted (plantNo3DHoverPanel) no hover opens anything",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const frame = () => new Promise((r) => requestAnimationFrame(() => r(0)));
+          const v = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!v || !v.graph) return { error: "no graph" };
+          const was = v.panelsOn; v.setPanelsOn("flyto");
+          v.plantNo3DHoverPanel = ${planted};
+          const el = v.graph.renderer().domElement, r = el.getBoundingClientRect(), cam = v.graph.camera();
+          const open0 = new Set(v.billboards.keys());
+          const out = { planted: ${planted}, tried: 0, opened: 0, own: 0, released: 0, skipped: 0, stats0: { ...v.hover3dStats } };
+          // The plane's cards sit over the 3D view and take its pointer where
+          // they are (2026-11-24: the clipboard and a canvas card covered all
+          // 115 chunk nodes on screen). Hidden for the arm, restored after:
+          // this measures the 3D hover, not the cards' layout.
+          const plane = document.querySelector(".domvec-plane");
+          const planeVis = plane ? plane.style.visibility : "";
+          if (plane) plane.style.visibility = "hidden";
+          const ev = (x, y) => new PointerEvent("pointermove", { clientX: x, clientY: y, bubbles: true, pointerId: 1, pointerType: "mouse", buttons: 0 });
+          try {
+            const onScreen = () => v.graph.graphData().nodes.filter((n) => Number.isFinite(n.x) && /^https?:/.test(String(n.url || "")) && n.level !== "page" && n.level !== "path")
+              .map((nd) => { const q = cam.position.clone().set(nd.x, nd.y, nd.z || 0).project(cam); return { nd, x: q.x, y: q.y, z: q.z }; })
+              .filter((o) => Math.abs(o.x) < 0.85 && Math.abs(o.y) < 0.85 && o.z < 1);
+            let pts = onScreen();
+            if (pts.length < 3) {
+              const pg = v.graph.graphData().nodes.find((n) => n.level === "page" && !n.force && (n.members || 0) >= 5 && (n.members || 0) <= 200 && /^https:/.test(String(n.url)));
+              if (pg) { await v.togglePage(pg); await sleep(2500); v.focusOn?.(pg); await sleep(2500); pts = onScreen(); }
+            }
+            const step = Math.max(1, Math.floor(pts.length / 8));
+            for (let i = 0; i < pts.length && out.tried < 8; i += step) {
+              const o = pts[i];
+              const cx = r.left + (o.x + 1) / 2 * r.width, cy = r.top + (1 - o.y) / 2 * r.height;
+              const top = document.elementFromPoint(cx, cy);
+              // Under a card, a billboard or the ego's plane: not the 3D view there.
+              if ((top && top !== el && !top.closest(".is-preview")) || window.__domvecCraft?.nodeAt?.(cx, cy)) { out.skipped++; continue; }
+              out.tried++;
+              el.dispatchEvent(ev(cx, cy)); await frame(); await frame();
+              for (let k = 0; k < 4; k++) { el.dispatchEvent(ev(cx + (k % 2), cy)); await sleep(250); }
+              const meant = v.nodeAtScreen(cx, cy);
+              const now = [...v.billboards.keys()].filter((id) => !open0.has(id));
+              if (now.length) out.opened++;
+              if (meant && now.some((id) => id === String(meant.id) || id.startsWith(String(meant.id) + "|"))) out.own++;
+              // Off the node, onto empty canvas: the preview is let go.
+              el.dispatchEvent(ev(r.left + 4, r.bottom - 4)); await sleep(80); el.dispatchEvent(ev(r.left + 6, r.bottom - 6)); await sleep(500);
+              if (!v.hoverBb) out.released++;
+              for (const id of [...v.billboards.keys()]) if (!open0.has(id)) v.closeBillboard(id);
+              await sleep(120);
+            }
+            out.stats = { ...v.hover3dStats };
+            return out;
+          } finally { v.plantNo3DHoverPanel = false; v.setPanelsOn(was); if (plane) plane.style.visibility = planeVis; }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.tried >= 3 && clean.own >= Math.ceil(clean.tried * 0.75) && clean.released >= Math.ceil(clean.tried * 0.75);
+        const caught = !!planted && !planted.error && planted.tried >= 3 && planted.opened === 0;
+        return { pass: ok && caught, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-336",
       asks: "hover a chunk node, then click it, and ITS panel opens (PLUGIN_GOAL 157: 'hovering the mouse over one of the chunk nodes ... doesn't allow me to click on the hovered node to open the panel'): in chunk view, for chunk nodes on screen, a pointer move onto the node then a press and release at the same point -- through the pane's own pointer handlers -- leaves that node's panel open and not a mere preview, and what is under the pointer at the node is the 3D canvas (or a pass-through preview), never another panel; planted (every pick proxy's raycast disabled AND plantNoClickFallback -- the click resolved as the hover shows it) no click reaches a node",
       async run() {

@@ -6634,6 +6634,29 @@ the work stays on 188's goal.*
 sent in this session, not only the records written from them. Done as the
 inventory below (85 recovered: 84 unrecorded, one in part) and spec §14 F-59 onward, with each prompt's bearing in §14a.*
 
+### 192. (2026-11-24) Hover previews in 3D; does fly-to still work; the dotted lines
+
+*With a screenshot of the 3D graph: a page's chunks drawn as one large glowing
+cluster, a pictured chunk under the pointer and its tooltip ("ayptravels.com",
+a DuckDuckGo results url), and no panel open. Verbatim:*
+
+> I should be able to view the panel billboard previews when hovering. also,
+> not sure if flying to nodes still works, and if hovering on browser chunks
+> flies to nodes with their billboards in the 3D gui
+
+*Then, with a screenshot of the plane: ringed circle nodes and dashed
+lavender lines running from them down off the bottom of the pane:*
+
+> I don't know what these dotted lines are and it really bothers me
+
+*Read as (192): (a) hovering a CHUNK node in the 3D view opens its billboard as
+a preview -- the hover's own path, as a browser hover does, governed by the
+panels toggle; 157's "hover then click opens" stays for keeping it. This also
+carries 183's "hovering ... billboarded in 3D" to the world's nodes; (b) and
+(c) are questions about features already built, answered by measurement;
+(d) the dotted lines are the retired craft's tethers (186's "leftover edge"),
+which must not be drawn.*
+
 ### Recovered verbatim (2026-11-22 inventory)
 
 *Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,

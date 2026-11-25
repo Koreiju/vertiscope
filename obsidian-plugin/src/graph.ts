@@ -7302,6 +7302,44 @@ export class GraphView extends ItemView {
   /** Planted: a click the library's pick misses opens nothing, as before. */
   plantNoClickFallback = false;
   clickFallbackStats = { used: 0, none: 0, presented: 0, glow: 0 };
+  // ---- the 3D hover preview (PLUGIN_GOAL 192) ------------------------------
+  //
+  // "I should be able to view the panel billboard previews when hovering."
+  // A CHUNK node under the pointer in the 3D view opens its billboard as a
+  // preview, by the browser hover's own path (`hoverPanel`: the dwell, the
+  // close on leaving, the panels toggle, the preview that passes the pointer
+  // through, G-243). The node is the one a click would open (`nodeAtScreen`),
+  // so what is previewed is what a click keeps (157). No flight: the camera
+  // would move the node out from under the pointer. Reads the trie address of
+  // the node drawn; writes nothing. Planted `plantNo3DHoverPanel`: no preview.
+  plantNo3DHoverPanel = false;
+  hover3dStats = { asked: 0, chunk: 0, page: 0, none: 0, over_panel: 0, last: "" };
+  private hover3dAt = 0;
+  private hover3dId = "";
+  private hover3d(e: PointerEvent): void {
+    if (this.plantNo3DHoverPanel || e.buttons) return;
+    // Over a card or a billboard, the pointer is not on the 3D view.
+    const over = e.target as HTMLElement | null;
+    if (over?.closest?.(".domvec-plane-card, .domvec-bb, .domvec-graph-bar, .domvec-search3d")) { this.hover3dStats.over_panel++; return; }
+    const now = performance.now();
+    if (now - this.hover3dAt < 60) return;
+    this.hover3dAt = now;
+    this.hover3dStats.asked++;
+    const n = this.nodeAtScreen(e.clientX, e.clientY);
+    const chunk = !!n && n.level !== "page" && n.level !== "path" && !!n.url;
+    if (chunk) {
+      this.hover3dStats.chunk++;
+      this.hover3dStats.last = String(n.id);
+      this.hover3dId = String(n.id);
+      this.hoverPanel(n);
+      return;
+    }
+    if (n) this.hover3dStats.page++; else this.hover3dStats.none++;
+    if (this.hover3dId) { this.hover3dId = ""; this.hoverPanel(null); }
+  }
+  private hover3dLeave(): void {
+    if (this.hover3dId) { this.hover3dId = ""; this.hoverPanel(null); }
+  }
   /**
    * The node a click at (x, y) means, as the HOVER shows it -- not as the
    * pick proxies resolve it. Measured 2026-11-14 with a trusted click on a
@@ -7947,7 +7985,9 @@ export class GraphView extends ItemView {
       // Not a full re-sync per pointer move: the glow pass patches what changed
       // and asks for a sync only when the revealed pictures change.
       if (this.plantSlowGlow) this.batchDirty = true;
+      this.hover3d(e);
     }, { passive: true });
+    host.addEventListener("pointerleave", () => this.hover3dLeave(), { passive: true });
     this.batch = new SceneBatch(graph.scene(), graph.renderer(), (src) => this.decoded(src));
     this.frameGaps = [];
     this.callsPerFrame = [];
