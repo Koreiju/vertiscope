@@ -1547,3 +1547,9 @@ body.domvec-chatui-pulling, body.domvec-chatui-pulling * { user-select: none !im
   :is(.domvec-chunk-outline, .domvec-chunk-struct, .domvec-diff-box, .domvec-chunk-pin)::after { animation: none; opacity: 0.6; } }
 body.domvec-plant-no-sparkle :is(.domvec-chunk-outline, .domvec-chunk-struct, .domvec-diff-box, .domvec-chunk-pin)::before,
 body.domvec-plant-no-sparkle :is(.domvec-chunk-outline, .domvec-chunk-struct, .domvec-diff-box, .domvec-chunk-pin)::after { content: none; }
+/* Only the panel's own markdown is drawn on a plane card: Obsidian's inline
+   title (the file name) doubled a note's own heading (2026-11-24). */
+.domvec-plane-card .inline-title { display: none; }
+
+/* The plain cockpit's prose wraps as any note's does (193-194). */
+.domvec-cockpit-card .cm-line:not(.HyperMD-codeblock) { white-space: break-spaces; }

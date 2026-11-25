@@ -14331,6 +14331,42 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-418",
+      asks: "the cockpit is a PLAIN Obsidian note (PLUGIN_GOAL 193-194: 'the second image is what I would have expected'; the syntax's work offloaded to code cells): domvec/ego.md is a heading, prose and one python cell; its card draws no slate layer (no field rows, no {ref} chips); editing throttle and query IN THE CELL moves the craft's throttle and runs the search; planted (__domvecPlantSlateOnly) the cell is not read and the edits do nothing",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const P = app.plugins.getPlugin("domvec-bridge");
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          window.__domvecPlantSlateOnly = ${planted};
+          const v = await P.cockpit.open(); await sleep(800);
+          if (!v) return { error: "no cockpit" };
+          const ed = v.editor, text0 = ed.getValue();
+          const root = v.containerEl;
+          const out = { planted: ${planted}, heading: /^# ego/m.test(text0), cell: text0.includes(String.fromCharCode(96).repeat(3) + "python"),
+                        slate_layers: root.querySelectorAll(".domvec-var, .domvec-slate-reveal-line, .domvec-slate-graph").length,
+                        titles_drawn: [...root.querySelectorAll(".inline-title")].filter((e) => e.offsetHeight > 0).length };
+          const thr0 = Math.round(g.agent.throttle * 100), want = thr0 === 37 ? 41 : 37;
+          const q = "patricia trie g418 " + Date.now().toString(36).slice(-3);
+          const set = (name, val) => { const n = ed.lineCount(); for (let i = 0; i < n; i++) { const l = ed.getLine(i); const m = new RegExp("^" + name + " = ").exec(l); if (m) { ed.replaceRange(val, { line: i, ch: m[0].length }, { line: i, ch: l.length }); return true; } } return false; };
+          try {
+            out.wrote = set("throttle", String(want)) && set("query", JSON.stringify(q));
+            await sleep(1500);
+            out.throttle = Math.round(g.agent.throttle * 100); out.want = want;
+            out.searched = (g.searchField && g.searchField.query) === q;
+          } finally {
+            window.__domvecPlantSlateOnly = false;
+            ed.setValue(text0); await sleep(600);
+          }
+          return out;
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.heading && clean.cell && clean.slate_layers === 0 && clean.titles_drawn === 0 && clean.wrote && clean.throttle === clean.want && clean.searched;
+        const caught = !!planted && !planted.error && planted.throttle !== planted.want && !planted.searched;
+        return { pass: ok && caught, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-414",
       asks: "hovering a CHUNK node in the 3D view opens its billboard as a preview (PLUGIN_GOAL 192: 'I should be able to view the panel billboard previews when hovering'): in fly-to mode, a pointer move onto chunk nodes on screen -- through the pane's own pointer handler -- opens THAT node's panel (or its unit's) within the dwell, and a move off onto empty canvas lets it go; planted (plantNo3DHoverPanel) no hover opens anything",
       async run() {

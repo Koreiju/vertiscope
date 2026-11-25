@@ -27,7 +27,7 @@
  * true -- typing alone never reaches the web (item 107).
  */
 import { App, MarkdownView, TFile } from "obsidian";
-import { FoldState, SlateLine, foldsOf, parseSlate, setFolds, titleLine } from "./slatefold";
+import { FoldState, SlateLine, foldsOf, isPlainCockpit, parseSlate, setFolds, titleLine } from "./slatefold";
 import { makeDraggable, type PlaceStats } from "./planecard";
 import { outline, unfoldedOf, withUnfolded } from "./outline";
 export { parseSlate } from "./slatefold";
@@ -421,6 +421,8 @@ export class Cockpit {
     window.clearTimeout(this.unfoldTimer);
     const f = this.file();
     if (!f || !this.unfoldPending.size) return false;
+    // The plain cockpit keeps no fold rows in its code cell (193-194).
+    if (isPlainCockpit(await this.app.vault.read(f))) { this.unfoldPending.clear(); return false; }
     const updates = new Map(this.unfoldPending);
     this.unfoldPending.clear();
     let changed = false;
@@ -729,6 +731,8 @@ export class Cockpit {
   private setValue(fl: SlateLine, value: string): void {
     const v = this.view();
     if (!v || fl.value === value) return;
+    // The plain cockpit's cell holds Python: a boolean is written as one.
+    if (isPlainCockpit(v.editor.getValue()) && (value === "true" || value === "false")) value = value === "true" ? "True" : "False";
     this.writing = true;
     try {
       v.editor.replaceRange(value, { line: fl.line, ch: fl.valueFrom }, { line: fl.line, ch: fl.valueFrom + fl.value.length });

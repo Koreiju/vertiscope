@@ -33,7 +33,32 @@ export interface SlateLine { line: number; depth: number; key: string; value: st
  * (or two or more spaces -- a name may hold single spaces). Frontmatter is
  * skipped.
  */
+/** The cockpit as a PLAIN note (PLUGIN_GOAL 193-194): its settings are one
+ *  python cell of `name = literal` lines, read as fields so the cockpit keeps
+ *  its paths (`view`, `search/query`). A string's value is inside its quotes;
+ *  `True`/`False` read as `true`/`false`. */
+const SEARCH_KEYS = new Set(["query", "db", "duckduckgo", "where", "k", "n", "matching", "results"]);
+export function isPlainCockpit(text: string): boolean {
+  if ((window as any).__domvecPlantSlateOnly) return false;   // planted (G-418): the cell form unread
+  const body = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trimStart();
+  return body.startsWith("#") && /^```python\s*$/m.test(text);
+}
+function parseCell(text: string): SlateLine[] {
+  const lines = text.split("\n").map((l) => l.replace(/\r$/, "")), out: SlateLine[] = [];
+  let i = lines.findIndex((l) => /^```python\s*$/.test(l));
+  for (i++; i > 0 && i < lines.length && !/^```/.test(lines[i]); i++) {
+    const m = /^(\w+)\s*=\s*(.*?)\s*$/.exec(lines[i]);
+    if (!m) continue;
+    let value = m[2], from = lines[i].indexOf(m[2], m[1].length);
+    const q = /^(["'])(.*)\1$/.exec(value);
+    if (q) { value = q[2]; from += 1; }
+    else if (value === "True" || value === "False") value = value.toLowerCase();
+    out.push({ line: i, depth: 1, key: m[1], value, valueFrom: from, path: SEARCH_KEYS.has(m[1]) ? ["ego", "search", m[1]] : ["ego", m[1]] });
+  }
+  return out;
+}
 export function parseSlate(text: string): SlateLine[] {
+  if (isPlainCockpit(text)) return parseCell(text);
   const lines = text.split("\n");
   let i = 0;
   if (lines[0] === "---") { i = 1; while (i < lines.length && lines[i] !== "---") i++; i++; }
@@ -440,7 +465,12 @@ export function foldDecorations(doc: Text, st: FoldState): DecorationSet {
   const b = new RangeSetBuilder<Decoration>();
   const t = titleLine(doc);
   if (t < 0) return Decoration.none;
-  if (st.graph && !st.collapsed) {
+  // A plain note draws as Obsidian draws it: no slate layer (193-194).
+  if (isPlainCockpit(doc.toString())) return Decoration.none;
+  // RETIRED by PLUGIN_GOAL 183 ("in the 2D plane, we deal only with the
+  // interface canvases themselves"; 182 "Both"): a stored `graph` flag draws
+  // the panel. Planted `__domvecPlantGraphForm`: the graph form, as before.
+  if (st.graph && !st.collapsed && (window as any).__domvecPlantGraphForm) {
     // Graph form: the slate's fields as nodes and lines, the same record.
     const from = doc.line(t).from, to = doc.line(doc.lines).to;
     b.add(from, to, Decoration.replace({ widget: new GraphWidget(doc.toString(), st), block: true }));
