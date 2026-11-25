@@ -12073,7 +12073,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-399",
-      asks: "no circles in 2D (PLUGIN_GOAL 183 'circles gone in 2D', 182 'Both'): a collapsed panel is its HEADER BAR -- wider than tall, square-ish corners -- not a circle; a slate never enters graph form (a double-click flip is refused) and a slate stored in graph form draws its panel; the ground flip to graph form is refused; a card dropped on another card writes a link between their notes and the plane draws it (G-398) -- the gesture the flip used to host; planted __domvecPlantGraphForm + plantFlipForm: the graph form and the flip come back",
+      asks: "no circles in 2D (PLUGIN_GOAL 183 'circles gone in 2D', 182 'Both'): a collapsed panel is its HEADER BAR -- wider than tall, square-ish corners -- not a circle; a slate never enters graph form (a double-click flip is refused) and a slate stored in graph form draws its panel; the ground flip to graph form is refused; a card dropped on another card is PLACEMENT and writes no link (G-404, 136: 'magnetizing new panels together doesn't create new links'; retargeted 2026-11-25); planted __domvecPlantGraphForm + plantFlipForm: the graph form and the flip come back",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -12117,14 +12117,14 @@ export function makeChecks(env) {
         const c = clean;
         return { pass: c.collapsed.w > c.collapsed.h * 1.5 && c.collapsed.radius < 16
                        && c.slate_flip.returned === false && !c.slate_flip.graph_drawn && c.ground_flip === 0
-                       && c.wire.accepted && c.wire.link_written && c.wire.line
+                       && !c.wire.accepted && !c.wire.link_written   // G-404 (136): a card on a card is placement, never a link
                        && planted.slate_flip.returned === true && planted.slate_flip.graph_drawn && planted.ground_flip > 0,
                  evidence: { clean, planted } };
       },
     },
     {
       id: "G-398",
-      asks: "links between the pulled-apart panels (PLUGIN_GOAL 183 'Links between panels'): two open cards whose notes link (a wiki link written in one) are joined by a line on the plane, border to border -- its ends on the cards' edges, never under a card's middle -- and the line follows a card that moves; a section PULLED OUT of the ego canvas is joined to the canvas the same way (its `[[...]]` line); planted plantNoPlaneLinks: no line",
+      asks: "links between the pulled-apart panels (PLUGIN_GOAL 183 'Links between panels'): two open cards whose notes link (a compiled link, `Vault.read` in a cell of one, G-420 -- retargeted 2026-11-25 from a wiki link) are joined by a line on the plane, border to border -- its ends on the cards' edges, never under a card's middle -- and the line follows a card that moves; the ego canvas half is retired with the canvas (193/194) -- pulling out is G-427; planted plantNoPlaneLinks: no line",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -12134,14 +12134,14 @@ export function makeChecks(env) {
           const out = { planted: ${planted} };
           const cf = app.vault.getAbstractFileByPath(CP), before = cf ? await app.vault.read(cf) : null;
           try {
-            await d.openCanvas(); await sleep(400);
             await d.create("notebook", { path: b, text: "the target" + NL });
-            await d.create("notebook", { path: a, text: "see [[" + b.replace(/\\.md$/, "") + "]]" + NL });
+            await d.create("notebook", { path: a, text: String.fromCharCode(96).repeat(3) + "python" + NL + "t = Vault.read(" + JSON.stringify("/" + b) + ")" + NL + String.fromCharCode(96).repeat(3) + NL });
             const ca = d.panelOf(a).card, cb = d.panelOf(b).card, plane = d.host.plane();
             ca.style.right = "auto"; ca.style.left = "20px"; ca.style.top = "40px";
             cb.style.right = "auto"; cb.style.left = (plane.clientWidth - cb.offsetWidth - 20) + "px"; cb.style.top = (plane.clientHeight - cb.offsetHeight - 20) + "px";
             const line = () => [...plane.querySelectorAll(".domvec-plane-links line")].find((l) => (l.dataset.a === a && l.dataset.b === b) || (l.dataset.a === b && l.dataset.b === a));
             for (let i = 0; i < 40 && !line(); i++) await sleep(150);
+            d.drawLinks(); await sleep(100);   // the cards were placed after a compiled link was already drawn
             const pr = plane.getBoundingClientRect();
             const onEdge = (card, x, y) => { const r = card.getBoundingClientRect(); const px = x + pr.left - plane.scrollLeft, py = y + pr.top - plane.scrollTop;
               const inX = px >= r.left - 2 && px <= r.right + 2, inY = py >= r.top - 2 && py <= r.bottom + 2;
@@ -12156,16 +12156,6 @@ export function makeChecks(env) {
               ca.style.top = "160px"; await sleep(500);
               const l2 = line(); out.follows = !!l2 && (+l2.getAttribute(l2.dataset.a === a ? "y1" : "y2")) !== (l1.dataset.a === a ? y1 : y2);
             }
-            // A section pulled out of the canvas is joined to the canvas.
-            const secs = await d.canvas.sections();
-            const x = secs.find((s, i) => i > 0 && s.embedded && d.panelOf(s.path)?.nested && d.panelOf(s.path).head);
-            if (x) {
-              const cr = d.panelOf(CP).card.getBoundingClientRect();
-              await d.canvas.pullOut(x.path, { x: cr.left + 20, y: cr.bottom - 40 });
-              for (let i = 0; i < 40; i++) { if ([...plane.querySelectorAll(".domvec-plane-links line")].some((l) => [l.dataset.a, l.dataset.b].includes(CP) && [l.dataset.a, l.dataset.b].includes(x.path))) break; await sleep(150); }
-              out.canvas_linked = [...plane.querySelectorAll(".domvec-plane-links line")].some((l) => [l.dataset.a, l.dataset.b].includes(CP) && [l.dataset.a, l.dataset.b].includes(x.path));
-              try { d.panelOf(x.path)?.leaf.detach(); } catch (e) {}
-            }
           } finally {
             d.plantNoPlaneLinks = false;
             if (cf && before !== null) await app.vault.modify(cf, before);
@@ -12174,7 +12164,7 @@ export function makeChecks(env) {
           return out;
         })()`, { timeout: 90000 });
         const clean = await arm(false), planted = await arm(true);
-        return { pass: clean.linked && clean.ends_on_edges && clean.follows && clean.canvas_linked && !planted.linked && !planted.canvas_linked,
+        return { pass: clean.linked && clean.ends_on_edges && clean.follows && !planted.linked,
                  evidence: { clean, planted } };
       },
     },
@@ -14579,6 +14569,27 @@ export function makeChecks(env) {
         const ok = !!clean && !clean.error && clean.button && clean.pulled && clean.link_in_src && clean.cell_left_src && clean.card_on_plane && clean.cell_in_new
           && clean.drop_taken && clean.back_in && clean.in_place && clean.card_gone && clean.note_trashed;
         return { pass: ok && !!planted && !planted.error && planted.button && !planted.pulled, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-405",
+      asks: "the craft's circles and dashed edges are gone in 2D and 3D (PLUGIN_GOAL 182-186: 'completely do away with the graph view', 'circles gone', 'leftover edge and the deprecated node-based graph view artifacts'; 192 d: the dotted lines): with the graph open the craft group is not drawn and no tether line is on the plane; planted (__domvecPlantCraft) the group is drawn again",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const l = app.workspace.getLeavesOfType("domvec-graph-view")[0];
+          if (l && l.loadIfDeferred) await l.loadIfDeferred();
+          const g = l && l.view; if (!g || !g.craft) return { error: "no graph view / craft" };
+          window.__domvecPlantCraft = ${planted};
+          try {
+            await sleep(1500);
+            return { planted: ${planted}, group_visible: !!g.craft.group?.visible, tethers: g.tetherStats.drawn,
+                     tether_lines: document.querySelectorAll(".domvec-tethers line, .domvec-tethers path").length };
+          } finally { window.__domvecPlantCraft = false; }
+        })()`, { timeout: 30000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && !clean.group_visible && clean.tethers === 0;
+        return { pass: ok && !!planted && !planted.error && planted.group_visible, evidence: { clean, planted } };
       },
     },
     {
