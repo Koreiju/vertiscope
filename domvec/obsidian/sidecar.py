@@ -4169,6 +4169,15 @@ class _Handler(BaseHTTPRequestHandler):
                              "note": note})
             return
 
+        if body.get("op") == "comm":
+            # G-408 (spec 13e): the comm bridge. Long-polls the note kernel's
+            # comm log by sequence number, or sends a comm_msg to it. Behind
+            # the same --kernel gate: a comm_msg runs the kernel's handlers.
+            self._send(200, self.kernel_pool.comm(
+                note, since=int(body.get("since") or 0),
+                wait=float(body.get("wait") or 0), send=body.get("send")))
+            return
+
         code = body.get("code")
         if not isinstance(code, str) or not code.strip():
             self._send(400, {"error": "missing code"})

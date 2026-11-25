@@ -14281,6 +14281,38 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-408",
+      asks: "the comm bridge (spec 13e; the live objects of 187 and 194's 'measuring the changes instantly'): a cell run with the plugin's own runCell opens a comm; the plugin's comm() reads its open and its message from the note kernel's log; a comm_msg the plugin sends reaches the object, whose state the next run reads back; planted (__domvecPlantNoComm) the traffic is never seen",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const P = app.plugins.getPlugin("domvec-bridge"), S = P.sidecar;
+          const note = "domvec-checks/g408 comm " + (${planted} ? "planted" : "clean") + ".md";
+          window.__domvecPlantNoComm = ${planted};
+          try {
+            const NL = String.fromCharCode(10);
+            const open = ["from comm import create_comm", "got = {}",
+              "c = create_comm(target_name='domvec.g408', data={'v': 1})",
+              "c.on_msg(lambda m: got.update(m['content']['data']))", "c.send({'v': 2})", "c.comm_id"].join(NL);
+            const r = await S.runCell(note, open);
+            if (!r || !r.ok) return { error: "cell", r };
+            const log = await S.comm(note, { since: 0, wait: 3 });
+            const msgs = (log && log.messages) || [];
+            const cid = String(r.value || "").replace(/'/g, "");
+            await S.comm(note, { send: { comm_id: cid, data: { v: 3 } } });
+            let back = null;
+            for (let i = 0; i < 30 && back !== "3"; i++) { back = (await S.runCell(note, "got.get('v')"))?.value; if (back !== "3") await sleep(100); }
+            return { planted: ${planted}, opened: msgs.some((m) => m.type === "comm_open" && m.target === "domvec.g408"),
+                     msg_v2: msgs.some((m) => m.type === "comm_msg" && m.data && m.data.v === 2), seq: log && log.seq, back };
+          } finally { window.__domvecPlantNoComm = false; }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.opened && clean.msg_v2 && clean.back === "3";
+        const caught = !!planted && !planted.error && !planted.opened && !planted.msg_v2;
+        return { pass: ok && caught, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-414",
       asks: "hovering a CHUNK node in the 3D view opens its billboard as a preview (PLUGIN_GOAL 192: 'I should be able to view the panel billboard previews when hovering'): in fly-to mode, a pointer move onto chunk nodes on screen -- through the pane's own pointer handler -- opens THAT node's panel (or its unit's) within the dwell, and a move off onto empty canvas lets it go; planted (plantNo3DHoverPanel) no hover opens anything",
       async run() {

@@ -199,6 +199,8 @@ class _Kernel:
 
 #: Planted (P-N1): the plain subprocess kernel even where Jupyter is installed.
 PLANT_SUBPROCESS_KERNEL = [False]
+#: Planted (G-408): the iopub pump drops comm traffic -- the log stays empty.
+PLANT_NO_COMM_READER = [False]
 
 _ANSI = __import__("re").compile(r"\x1b\[[0-9;]*m")
 
@@ -237,6 +239,59 @@ class _JupyterKernel:
             self.kc.wait_for_ready(timeout=60)
         except Exception as exc:                # noqa: BLE001
             raise KernelError(f"could not start the {kernel_name} Jupyter kernel: {exc}") from exc
+        # G-408, the comm bridge (spec 13e): ONE reader of iopub, always on.
+        # A run's own messages go to `_iq`; comm traffic (a live object's
+        # open, state deltas, close) goes to a numbered log the plugin
+        # long-polls, whether or not a cell is running.
+        import queue as _queue
+        self._iq: "_queue.Queue" = _queue.Queue()
+        self.comm_log: list = []
+        self.comm_seq = 0
+        self._comm_cv = threading.Condition()
+        self._stopping = False
+        self._pump = threading.Thread(target=self._pump_iopub, daemon=True)
+        self._pump.start()
+
+    def _pump_iopub(self) -> None:
+        import queue as _queue
+        while not self._stopping:
+            try:
+                m = self.kc.get_iopub_msg(timeout=0.5)
+            except _queue.Empty:
+                continue
+            except Exception:                   # noqa: BLE001
+                if self._stopping:
+                    return
+                time.sleep(0.2)
+                continue
+            kind = m.get("msg_type", "")
+            if kind in ("comm_open", "comm_msg", "comm_close"):
+                if PLANT_NO_COMM_READER[0]:
+                    continue
+                c = m.get("content") or {}
+                with self._comm_cv:
+                    self.comm_seq += 1
+                    self.comm_log.append({"seq": self.comm_seq, "type": kind,
+                                          "comm_id": c.get("comm_id"),
+                                          "target": c.get("target_name"),
+                                          "data": c.get("data")})
+                    del self.comm_log[:-500]
+                    self._comm_cv.notify_all()
+            else:
+                self._iq.put(m)
+
+    def comm_since(self, since: int, wait: float) -> dict:
+        """Comm traffic after `since`, waiting up to `wait` s for some."""
+        with self._comm_cv:
+            if self.comm_seq <= since and wait > 0:
+                self._comm_cv.wait(timeout=wait)
+            return {"seq": self.comm_seq,
+                    "messages": [x for x in self.comm_log if x["seq"] > since]}
+
+    def comm_send(self, comm_id: str, data: dict) -> None:
+        """A `comm_msg` from the plugin to the kernel, on the shell channel."""
+        msg = self.kc.session.msg("comm_msg", {"comm_id": comm_id, "data": data})
+        self.kc.shell_channel.send(msg)
 
     @property
     def alive(self) -> bool:
@@ -246,6 +301,7 @@ class _JupyterKernel:
             return False
 
     def _stop_client(self) -> None:
+        self._stopping = True
         try:
             self.kc.stop_channels()
         except Exception:                       # noqa: BLE001
@@ -270,6 +326,11 @@ class _JupyterKernel:
             raise KernelError("kernel exited")
         import queue
         deadline = time.time() + timeout
+        while True:                             # what arrived between runs
+            try:
+                self._iq.get_nowait()
+            except queue.Empty:
+                break
         msg_id = self.kc.execute(code, store_history=True, allow_stdin=False)
         out, err, value, error = [], [], None, None
         try:
@@ -277,7 +338,7 @@ class _JupyterKernel:
                 left = deadline - time.time()
                 if left <= 0:
                     raise queue.Empty
-                m = self.kc.get_iopub_msg(timeout=left)
+                m = self._iq.get(timeout=left)
                 if m.get("parent_header", {}).get("msg_id") != msg_id:
                     continue
                 kind, c = m["msg_type"], m["content"]
@@ -356,6 +417,19 @@ class KernelPool:
                 "max_kernels": self.max_kernels,
                 "timeout_s": self.timeout,
             }
+
+    def comm(self, note: str, since: int = 0, wait: float = 0.0,
+             send: Optional[dict] = None) -> dict:
+        """G-408: a note's kernel's comm log after `since` (long-polled up to
+        `wait` s), or, with `send` ({comm_id, data}), a message to it."""
+        with self._guard:
+            kernel = self._kernels.get(note)
+        if kernel is None or not hasattr(kernel, "comm_since"):
+            return {"error": "no Jupyter kernel for this note", "seq": 0, "messages": []}
+        if send:
+            kernel.comm_send(str(send.get("comm_id") or ""), send.get("data") or {})
+            return {"sent": True}
+        return kernel.comm_since(int(since), max(0.0, min(float(wait), 25.0)))
 
     def restart(self, note: str) -> bool:
         """Drop a note's kernel. The next run starts a fresh one."""

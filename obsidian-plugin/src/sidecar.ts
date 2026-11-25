@@ -874,4 +874,19 @@ export class Sidecar {
       return null;
     }
   }
+
+  /** G-408, the comm bridge (spec 13e): a note kernel's comm log after
+   *  `since`, long-polled up to `wait` s -- or, with `send`, a comm_msg to a
+   *  live object. Behind the sidecar's --kernel gate, as cells are. */
+  async comm(note: string, opts: { since?: number; wait?: number; send?: { comm_id: string; data: any } } = {}): Promise<any> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    // Planted (G-408): the bridge never read -- a live object's traffic unseen.
+    if ((window as any).__domvecPlantNoComm && !opts.send) return { seq: 0, messages: [], planted: true };
+    try {
+      const res = await fetch(`${base}/kernel`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note, op: "comm", since: opts.since || 0, wait: opts.wait || 0, ...(opts.send ? { send: opts.send } : {}) }) });
+      return await res.json();
+    } catch { return null; }
+  }
 }
