@@ -14667,6 +14667,49 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-430",
+      asks: "the editor's five calls are the agent's tools (G-384: 'the editor's five calls (spec 11d) as tools'): an agent step calling create(...) makes that card on the 2D plane by the reader's own gesture method (EditorCalls.carry), while the run goes on; planted (plant_no_editor_tools) the agent has no create and no card appears",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const pl = app.plugins.getPlugin("domvec-bridge"), desk = pl.desk;
+          const tag = (${planted} ? "p" : "c") + Date.now().toString(36), card = "g430 card " + tag, cardPath = "domvec/graph/" + card + ".md";
+          window.__domvecAgentDry = { pace_s: 0.5, plantNoTools: ${planted}, replies: [
+            "Thought: make it." + NL + F + "python" + NL + "create(name=" + JSON.stringify(card) + ", body=" + JSON.stringify("x = 430") + ")" + NL + F,
+            "Thought: done." + NL + F + "python" + NL + "final_answer(1)" + NL + F ] };
+          const path = "domvec-checks/g430 " + tag + ".md";
+          const leaf = app.workspace.getLeaf("tab");
+          let note = "";
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, F + "agent" + NL + "make a card" + NL + F + NL);
+            await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(800);
+            const btn = leaf.view.containerEl.querySelector(".domvec-agent-run");
+            if (!btn) return { planted: ${planted}, button: false };
+            const c0 = pl.editor.stats.create;
+            btn.click();
+            let status = "";
+            for (let k = 0; k < 60; k++) {
+              await sleep(250);
+              status = leaf.view.containerEl.querySelector(".domvec-agent-status")?.textContent || "";
+              const m = status.match(/running into (.+[.]md)$/); if (m) note = m[1];
+              if (status.startsWith("done") || status.startsWith("stopped")) break;
+            }
+            const g = app.vault.getAbstractFileByPath(cardPath);
+            return { planted: ${planted}, button: true, status, created: pl.editor.stats.create - c0, card: !!g,
+                     body: g ? (await app.vault.read(g)).includes("x = 430") : false, on_plane: !!desk.panelOf(cardPath) };
+          } finally {
+            window.__domvecAgentDry = null; leaf.detach();
+            for (const p of [path, note, cardPath]) { const g = p && app.vault.getAbstractFileByPath(p); if (g) { try { desk.closePath(p); } catch {} await app.vault.delete(g).catch(() => 0); } }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && clean.button && clean.created === 1 && clean.card && clean.body && clean.on_plane;
+        return { pass: ok && !!planted && planted.button && planted.created === 0 && !planted.card, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-408",
       asks: "the comm bridge (spec 13e; the live objects of 187 and 194's 'measuring the changes instantly'): a cell run with the plugin's own runCell opens a comm; the plugin's comm() reads its open and its message from the note kernel's log; a comm_msg the plugin sends reaches the object, whose state the next run reads back; planted (__domvecPlantNoComm) the traffic is never seen",
       async run() {

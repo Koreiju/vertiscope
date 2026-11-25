@@ -3898,7 +3898,8 @@ class _Handler(BaseHTTPRequestHandler):
                 pace = float(body.get("pace_s") or 0)
 
                 def _go():
-                    AGENT_RUNS[note] = {"done": False, "steps": 0, "error": ""}
+                    asks: list = []
+                    AGENT_RUNS[note] = {"done": False, "steps": 0, "error": "", "asks": asks}
                     try:
                         from smolagents import CodeAgent
                         from smolagents.monitoring import LogLevel
@@ -3908,7 +3909,12 @@ class _Handler(BaseHTTPRequestHandler):
                         else:
                             from ..agent_model import LlamaCppModel
                             model = LlamaCppModel.for_task("code", max_tokens=256, temperature=0.0)
-                        agent = CodeAgent(tools=_at.tools(base), model=model, code_block_tags="markdown",
+                        _at.PLANT_NO_EDITOR_TOOLS[0] = bool(body.get("plant_no_editor_tools"))
+                        try:
+                            etools = _at.editor_tools(asks)
+                        finally:
+                            _at.PLANT_NO_EDITOR_TOOLS[0] = False
+                        agent = CodeAgent(tools=_at.tools(base) + etools, model=model, code_block_tags="markdown",
                                           max_steps=int(body.get("max_steps") or 6), verbosity_level=LogLevel.OFF)
                         _as.PLANT_WRITE_AT_END[0] = bool(body.get("plant_write_at_end"))
                         try:

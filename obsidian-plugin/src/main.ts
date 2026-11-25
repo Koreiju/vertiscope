@@ -308,7 +308,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // inline and writes the turn into the note above it (chatcell.ts, G-422).
     // G-384: a ```agent block runs a CodeAgent whose steps appear in a note as they land.
     try {
-      this.registerMarkdownCodeBlockProcessor("agent", agentBlock(this.app, () => this.settings.sidecar, (f) => this.desk.open(f)));
+      this.registerMarkdownCodeBlockProcessor("agent", agentBlock(this.app, () => this.settings.sidecar, (f) => this.desk.open(f), (ask) => this.editor.carry(ask)));
     } catch (e) { console.warn("domvec: agent block", e); }
     try {
       this.registerMarkdownCodeBlockProcessor("chat", chatCell(this.app, (p, c, on) => this.sidecar.chatStream(p, c, on)));

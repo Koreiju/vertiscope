@@ -135,3 +135,26 @@ def test_scripted_model_drives_a_real_code_agent(tmp_path):
     m = ag.scripted_model(REPLIES)
     a = CodeAgent(tools=[search], model=m, code_block_tags="markdown", max_steps=4)
     assert ag.run_into(a, "find it", tmp_path / "r.md") == 2
+
+
+def test_editor_calls_are_agent_tools_that_record_asks(tmp_path):
+    """G-384: the editor's five calls as tools -- an agent step calling
+    create and link leaves two asks, in order, for the plugin to carry out.
+    Planted PLANT_NO_EDITOR_TOOLS: the agent has no such tools and its step
+    fails, leaving no asks."""
+    from domvec import agent_tools as at
+    replies = ["Thought: build.\n```python\ncreate(name=\"a\", body=\"x = 1\")\nlink(a=\"a\", b=\"b\")\n```",
+               "Thought: done.\n```python\nfinal_answer(\"ok\")\n```"]
+    for planted in (False, True):
+        at.PLANT_NO_EDITOR_TOOLS[0] = planted
+        asks = []
+        try:
+            a = CodeAgent(tools=[search] + at.editor_tools(asks), model=ag.scripted_model(replies),
+                          code_block_tags="markdown", max_steps=3)
+            ag.run_into(a, "build", tmp_path / "r.md")
+        finally:
+            at.PLANT_NO_EDITOR_TOOLS[0] = False
+        if planted:
+            assert asks == []
+        else:
+            assert asks == [{"create": {"name": "a", "body": "x = 1", "kind": "notebook"}}, {"link": ["a", "b"]}], asks

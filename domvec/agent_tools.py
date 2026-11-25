@@ -72,3 +72,65 @@ class _Chunks(Tool):
 def tools(base: str) -> List[Tool]:
     ns = kernel(base)
     return [_Search(ns), _Cypher(ns), _Chunks(ns)]
+
+
+# The editor's five calls as tools (G-384: "the editor's five calls (spec
+# §11d) as tools"). An agent's code runs in smolagents' executor, not a note's
+# kernel, so a call cannot ride a cell's reply the way a kernel's does
+# (G-386). Each call is recorded as an ASK on the run; `/agent_status` hands
+# the asks to the plugin, which carries them out by `EditorCalls.carry` -- the
+# same methods the reader's gestures use. Planted `PLANT_NO_EDITOR_TOOLS`:
+# the agent gets the read-only tools only.
+PLANT_NO_EDITOR_TOOLS = [False]
+
+
+def _ask_tool(tool_name: str, desc: str, ins: dict, make):
+    class _T(Tool):
+        name = tool_name
+        description = desc
+        inputs = ins
+        output_type = "string"
+
+        def __init__(self, asks):
+            super().__init__()
+            self._asks = asks
+
+        def forward(self, **kw) -> str:
+            self._asks.append({tool_name: make(**kw)})
+            return "asked: %s" % tool_name
+
+    # smolagents validates forward's signature against `inputs`.
+    args = ", ".join(("%s=None" % k) if v.get("nullable") else k for k, v in ins.items())
+    src = "def forward(self, %s):\n    return _T._call(self, %s)\n" % (args, ", ".join("%s=%s" % (k, k) for k in ins))
+    ns = {"_T": _T}
+    exec(src, ns)
+    _T._call = _T.forward
+    _T.forward = ns["forward"]
+    return _T
+
+
+_S = {"type": "string"}
+_EDITOR = [
+    ("create", "Make a card on the 2D plane: a note `name` holding `body` (kind 'notebook' for a python cell, else 'slate').",
+     {"name": dict(_S, description="the card's name"), "body": dict(_S, description="its text or code"),
+      "kind": dict(_S, description="'notebook' or 'slate'", nullable=True)},
+     lambda name, body, kind=None: {"name": name, "body": body, "kind": kind or "notebook"}),
+    ("link", "Link card a to card b with a compiled link (a cell in a reading b).",
+     {"a": dict(_S, description="the reading card"), "b": dict(_S, description="the card read")},
+     lambda a, b: [a, b]),
+    ("invoke", "Run every python cell of a card, in order.",
+     {"name": dict(_S, description="the card")}, lambda name: name),
+    ("commit", "Compose cards into a new card whose one cell reads each member.",
+     {"name": dict(_S, description="the new card"), "members": {"type": "array", "description": "the member cards' names"}},
+     lambda name, members: {"name": name, "members": list(members)}),
+    ("review", "Ask the reader a question on a card; their answer is written under it.",
+     {"name": dict(_S, description="the card"), "question": dict(_S, description="the question")},
+     lambda name, question: [name, question]),
+]
+
+
+def editor_tools(asks: list) -> List[Tool]:
+    """The five editor calls, each recording its ask into `asks`."""
+    if PLANT_NO_EDITOR_TOOLS[0]:
+        return []
+    return [_ask_tool(n, d, i, m)(asks) for n, d, i, m in _EDITOR]
