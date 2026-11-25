@@ -1715,6 +1715,7 @@ with the app, **U** an unclear term or step.
 | F-125 | U | spec §13m hard link vs 193 (b) | the retrieval link named only `[query](results)` | the `#` suggestion named; wiki links point to the open question |
 | F-126 | I | spec §13j, §13k vs the 193 head note | the build order and the packages still put G-409 and G-411 and litegraph on the path, and G-410 "a node body once G-411 lands" | each names its suspension; G-410 in a plain panel, as my reading |
 | F-127 | M | spec §13m `interface` (my pass-27 row) | the second of 193's two query embeddings stated as "over content"; 193 names only the one over interface types | the second marked as my reading |
+| F-128 | I | PRD vs 193 | 193 was transcribed and read, never decomposed into rows | G-415 (a, c), G-416 (b, d); (e) is O-11, (f) a download |
 
 **Still open** -- O-1 to O-4 and O-6 to O-10 are work the design names; O-5 and O-11 are questions for the reader:
 
