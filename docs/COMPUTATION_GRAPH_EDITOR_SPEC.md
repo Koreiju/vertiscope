@@ -1476,9 +1476,9 @@ where it comes from. A term not listed is used in its plain sense.
 |---|---|---|---|
 | **record** | one thing (note, cell, chunk, browser, tool, model, run): its text, its edges, its fold state, its current readout | a copy of it | 37, RESERVOIR §5 |
 | **placement** | where a record is drawn: a field (folded or revealed), a panel or node on the plane, a node in 3D, a view of a live object | a second record | §12a, §13d |
-| **field** | one line `name value` of a slate, with the lines indented under it (its sub-fields, as `search`'s in `ego.md`); the value may be a `{ref}` | a widget (below) | 62, UR E.4 |
+| **field** | (the editor's grammar no longer, 194, head note) one line `name value` of a slate, with the lines indented under it (its sub-fields, as `search`'s in `ego.md`); the value may be a `{ref}` | a widget (below) | 62, UR E.4 |
 | **slate** | a note whose tree is a Python module written in markdown (the cockpit is one) | a code cell | 62, 63' |
-| **panel** | Obsidian's own markdown view, wherever markdown is shown (prose notes, slates, chat); 193: "regular obsidian panels exactly", so what the app adds on top is suspended (head note) | a node body that is not markdown | 56, 133 c, 140, 193 |
+| **panel** | Obsidian's own markdown view, wherever markdown is shown (prose notes, slates, chat); 193: "regular obsidian panels exactly"; the custom syntax the app adds on top is withdrawn by 194 (head note) | a node body that is not markdown | 56, 133 c, 140, 193 |
 | **cell** | one fenced code block of a note, or one top-level slate tree: the unit of dataflow, within its note (§13d) | a panel | 49, G-380 |
 | **call cell** | a cell that binds one call of a callable or a class; the editor's typed node | any cell | §13d |
 | **node (2D)** | a cell drawn in the editor: its body the cell's interface, its ports its inputs and outputs; folded to its title it is the fold parameter of 110. Also a slate FIELD resolved external (§12a), drawn as its own node while it is (the search node, §13h) | the retired abstract circle (182, 183) | §13c |
@@ -1497,7 +1497,7 @@ where it comes from. A term not listed is used in its plain sense.
 | **tool panel** | the canvas form of an APP tool: a tool surface or a governing class shown as a READ-ONLY code artifact, calls visible, bodies never | a regular code artifact (explorable, graph-editable) | 167 c, G-378, F.6 |
 | **app tool** | a capability shipped with the app, shown as calls only, its dependencies never visible (§13n) | workspace code | 167 c, 189, G-378, G-382 |
 | **workspace code** | code made in the project workspace, fully explorable, editable and unfoldable down to base modules (§13n) | an app tool | 167 c, 189, 112 |
-| **hard link** | an edge that exists because code defines a name another cell reads, or a `{ref}` resolves, or two records share one chunk object; drawn undirected | a **temporary link**: magnetism, placement order while nodes touch (142), never drawn or written; a plain or wiki link (193's links question, head note); a retrieval link `[query](results)`, or 193 (b)'s suggested `#` query | 136, 142, T-4, 193 |
+| **hard link** | an edge that exists because code defines a name another cell reads, or a `{ref}` resolves, or two records share one chunk object; drawn undirected | a **temporary link**: magnetism, placement order while nodes touch (142), never drawn or written; a plain or wiki link (never a hard link: 194, compiled from code cells, head note); a retrieval link `[query](results)`, or 193 (b)'s suggested `#` query | 136, 142, T-4, 193 |
 | **readout** | a cell's stored output; on the perimeter, a terminal node's rendering placed in 3D | a view | RESERVOIR §4, §5 |
 
 ### 13n. Code tools on canvases -- app tools and workspace code (189)
@@ -1726,6 +1726,7 @@ with the app, **U** an unclear term or step.
 | F-128 | I | PRD vs 193 | 193 was transcribed and read, never decomposed into rows | G-415 (a, c), G-416 (b, d); (e) is O-11, (f) a download |
 | F-129 | I | spec head note, §13j, §13k (F-118, F-126) vs 194 | the node editor was suspended with the markdown syntax; 194 moves compilation into code cells and keeps the graphical code interfaces and the package research | the syntax withdrawn (my reading, to be confirmed); the node editor over code cells stands |
 | F-130 | I | PRD G-38 vs its live check (O-9) | Confirm while its check failed: the planted banner was added only on hover 2 and never measured when hover 2 found no new chunk | the plant moved to the first landed hover; passes both arms (`402c5a2`); O-9 closed |
+| F-131 | I | spec §13m (panel, field, hard link) vs 194 | the glossary still called the links question open and the panel's additions suspended | each cites 194's withdrawal |
 
 **Still open** -- O-1 to O-4, O-6 to O-8 and O-10 are work the design names (O-6 and O-10 withdrawn with the slate syntax if the reader confirms 194's reading; O-9 closed); O-5 and O-11 are questions for the reader:
 
