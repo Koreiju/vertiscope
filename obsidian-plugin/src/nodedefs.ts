@@ -103,7 +103,7 @@ export function drawDefs(card: HTMLElement | null | undefined, defs: NodeDef[],
         } else {
           const inp = r.createEl("input", { cls: "domvec-node-port", type: typeof p.default === "number" ? "number" : "text" });
           inp.value = String(p.default ?? ""); inp.dataset.port = p.name;
-          inp.size = Math.max(2, Math.min(12, inp.value.length + 1));
+          inp.style.width = Math.max(3, Math.min(14, inp.value.length + 3)) + "ch";   // size does not apply to type=number
           inp.onchange = () => commit(typeof p.default === "number" ? String(Number(inp.value)) : pyLiteral(inp.value));
         }
         r.querySelectorAll("input,select").forEach((el) => el.addEventListener("mousedown", (e) => e.stopPropagation(), true));

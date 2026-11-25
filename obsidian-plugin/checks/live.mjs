@@ -14628,7 +14628,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-409",
-      asks: "node definitions from the live namespace (PLUGIN_GOAL 187, spec 13d'): a python cell that defines a function and a class is run; the note's kernel publishes each with its ports -- a primitive with a default a widget [8], a Literal a choice, an object type a socket, the return an output; an imported name is not a node -- and the card draws one row per node; its widgets and choices are edited in place (B14) and write that one default into the cell; planted __domvecPlantAllSockets + __domvecPlantNoWidgetEdit: every port a socket, nothing editable",
+      asks: "node definitions from the live namespace (PLUGIN_GOAL 187, spec 13d'): a python cell that defines a function and a class is run; the note's kernel publishes each with its ports -- a primitive with a default a widget [8], a Literal a choice, an object type a socket, the return an output; an imported name is not a node -- and the card draws one row per node; its widgets and choices are edited in place (B14) and write that one default into the cell, which re-runs (planted __domvecPlantNoEditRerun: the kernel keeps the old default); planted __domvecPlantAllSockets + __domvecPlantNoWidgetEdit: every port a socket, nothing editable",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -14655,19 +14655,28 @@ export function makeChecks(env) {
             const kIn = card?.querySelector('.domvec-node-def[data-node="scan"] input[data-port="k"]');
             const modeIn = card?.querySelector('.domvec-node-def[data-node="scan"] select[data-port="mode"]');
             const sizeIn = card?.querySelector('.domvec-node-def[data-node="Box"] input[data-port="size"]');
-            if (kIn) { kIn.value = "12"; kIn.dispatchEvent(new Event("change")); await sleep(700); }
-            if (modeIn) { modeIn.value = JSON.stringify("deep"); modeIn.dispatchEvent(new Event("change")); await sleep(700); }
-            if (sizeIn) { sizeIn.value = "2.5"; sizeIn.dispatchEvent(new Event("change")); await sleep(700); }
+            const kdef = () => { const s = ((window.__domvecNodeDefs || {})[path] || []).find((d) => d.name === "scan"); return s && s.inputs.find((p) => p.name === "k").default; };
+            const sdef = () => { const s = ((window.__domvecNodeDefs || {})[path] || []).find((d) => d.name === "Box"); return s && s.inputs.find((p) => p.name === "size").default; };
+            // An edit re-runs the defining cell: first with the re-run planted off (size), then on (k, mode).
+            window.__domvecPlantNoEditRerun = true;
+            if (sizeIn) { sizeIn.value = "2.5"; sizeIn.dispatchEvent(new Event("change")); await sleep(1500); }
+            const size_unrun = sdef();
+            window.__domvecPlantNoEditRerun = false;
+            if (kIn) { kIn.value = "12"; kIn.dispatchEvent(new Event("change")); }
+            for (let q = 0; q < 40 && kdef() !== 12; q++) await sleep(200);
+            const modeNow = card?.querySelector('.domvec-node-def[data-node="scan"] select[data-port="mode"]') || modeIn;
+            if (modeNow) { modeNow.value = JSON.stringify("deep"); modeNow.dispatchEvent(new Event("change")); await sleep(1500); }
+            const rerun = { size_unrun, k_after: kdef(), size_after: sdef() };
             const after = await app.vault.read(app.vault.getAbstractFileByPath(path));
             const edited = { inputs: card ? card.querySelectorAll(".domvec-node-port").length : 0, k12: after.includes("k: int = 12,"),
                              deep: after.includes("= " + JSON.stringify("deep") + ", driver"), size: after.includes("size: float = 2.5)"),
                              rest_kept: after.includes("return [url] * k") && after.includes("driver: object = None") };
-            return { planted: ${planted}, edited, names: defs.map((d) => d.name).sort(), rows,
+            return { planted: ${planted}, edited, rerun, names: defs.map((d) => d.name).sort(), rows,
                      k_widget: !!k && k.kind === "widget" && k.default === 8, mode_choice: !!mode && mode.kind === "choice" && mode.options.join() === "fast,deep",
                      url_socket: !!scan && scan.inputs[0].kind === "socket", out_list: !!scan && scan.output.type === "list",
                      box_area: !!box && box.outputs.some((o) => o.name === "area" && o.type === "float") };
           } finally {
-            window.__domvecPlantAllSockets = false; window.__domvecPlantNoWidgetEdit = false;
+            window.__domvecPlantAllSockets = false; window.__domvecPlantNoWidgetEdit = false; window.__domvecPlantNoEditRerun = false;
             try { desk.closePath(path); } catch {}
             const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0);
           }
@@ -14675,7 +14684,8 @@ export function makeChecks(env) {
         const clean = await arm(false), planted = await arm(true);
         const ok = !!clean && clean.names.join() === "Box,scan" && clean.k_widget && clean.mode_choice && clean.url_socket && clean.out_list && clean.box_area
           && clean.rows.length === 2 && clean.rows.some((r) => r.startsWith("scan(url ●str, k ") && r.includes("→ list"))
-          && clean.edited.inputs === 3 && clean.edited.k12 && clean.edited.deep && clean.edited.size && clean.edited.rest_kept;
+          && clean.edited.inputs === 3 && clean.edited.k12 && clean.edited.deep && clean.edited.size && clean.edited.rest_kept
+          && clean.rerun.size_unrun === 1 && clean.rerun.k_after === 12 && clean.rerun.size_after === 2.5;
         return { pass: ok && !!planted && planted.names.length === 2 && !planted.k_widget && planted.edited.inputs === 0 && !planted.edited.k12, evidence: { clean, planted } };
       },
     },

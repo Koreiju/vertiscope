@@ -982,7 +982,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   }
   /** B14 (G-409): a widget edited in place writes that one default into the
    *  note's own cell -- through the open editor when there is one. */
-  nodeEdits = { written: 0, last: "" };
+  nodeEdits = { written: 0, reran: 0, last: "" };
   async setNodeDefault(note: string, node: string, port: string, lit: string): Promise<boolean> {
     const f = this.app.vault.getAbstractFileByPath(note);
     if (!(f instanceof TFile)) return false;
@@ -993,6 +993,13 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     if (v?.editor && v.getMode() === "source") { v.editor.setValue(next); await v.save(); }
     else await this.app.vault.modify(f, next);
     this.nodeEdits.written++; this.nodeEdits.last = `${node}.${port} = ${lit}`;
+    // The cell that defines the node runs again, so the kernel holds the new
+    // default and the rows are redrawn from it. Planted `__domvecPlantNoEditRerun`.
+    if (!(window as any).__domvecPlantNoEditRerun) {
+      const def = new RegExp("^[ \\t]*(def|class)[ \\t]+" + node + "\\b", "m");
+      const fence = findFences(next).find((c) => /^py/.test(c.lang || "") && def.test(c.body));
+      if (fence) { this.nodeEdits.reran++; await this.onRunFence({ lang: fence.lang, code: fence.body, line: fence.openLine, path: note }); }
+    }
     return true;
   }
 
