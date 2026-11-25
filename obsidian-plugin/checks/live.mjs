@@ -14710,6 +14710,35 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-431",
+      asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const pl = app.plugins.getPlugin("domvec-bridge");
+          window.__domvecPlantNoSlotGuard = ${planted};
+          try {
+            const live = pl.slots.stats;
+            const S = pl.slots.constructor, ran = [];
+            const s = new S(() => ["off1"]);
+            s.add({ id: "evil", slot: "codeblock:python", register: () => ran.push("evil") });
+            s.add({ id: "boom", slot: "codeblock:boom", register: () => { throw new Error("boom"); } });
+            s.add({ id: "off1", slot: "codeblock:off1", register: () => ran.push("off1") });
+            s.add({ id: "good", slot: "codeblock:good", register: () => ran.push("good") });
+            s.load();
+            await pl.cockpit.open(); await sleep(500);
+            return { planted: ${planted}, live_loaded: live.loaded, refused: s.stats.refused, failed: s.stats.failed, off: s.stats.off,
+                     ran, core_runs: !!document.querySelector(".domvec-cockpit-card") };
+          } finally { window.__domvecPlantNoSlotGuard = false; }
+        })()`, { timeout: 30000 });
+        const clean = await arm(false), planted = await arm(true);
+        const has = (xs, x) => Array.isArray(xs) && xs.includes(x);
+        const ok = !!clean && ["agent", "chat", "tool"].every((x) => has(clean.live_loaded, x)) && has(clean.refused, "evil") && !has(clean.ran, "evil")
+          && has(clean.failed, "boom") && has(clean.off, "off1") && !has(clean.ran, "off1") && has(clean.ran, "good") && clean.core_runs;
+        return { pass: ok && !!planted && has(planted.ran, "evil"), evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-408",
       asks: "the comm bridge (spec 13e; the live objects of 187 and 194's 'measuring the changes instantly'): a cell run with the plugin's own runCell opens a comm; the plugin's comm() reads its open and its message from the note kernel's log; a comm_msg the plugin sends reaches the object, whose state the next run reads back; planted (__domvecPlantNoComm) the traffic is never seen",
       async run() {

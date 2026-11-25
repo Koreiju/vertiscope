@@ -68,6 +68,7 @@ import { DataflowRun, noteTextOf } from "./dataflowrun";
 import { AutoRun, CrossRun } from "./autorun";
 import { PullApart } from "./pullapart";
 import { agentBlock } from "./agentblock";
+import { Slots } from "./slots";
 import { markProblems, problemExtension } from "./dfproblems";
 import { CodeRows } from "./coderows";
 import { BrowserPanel } from "./browserpanel";
@@ -301,30 +302,26 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       console.warn("domvec: a stale `domvec` fence processor is still registered; keeping it", e);
     }
     // The browser cell inside a notebook (G-36's second host, `nbbrowser.ts`).
-    // PLUGIN_GOAL 195 (c): a ```tool block names an app tool and draws it in
-    // its base canvas form -- the calls-only string an agent sees -- read-only,
-    // in the same editor as the canvases (G-421). Planted `plantNoToolPanel`.
-    // The chat input cell (2026-11-24): a ```chat block streams its reply
-    // inline and writes the turn into the note above it (chatcell.ts, G-422).
-    // G-384: a ```agent block runs a CodeAgent whose steps appear in a note as they land.
-    try {
-      this.registerMarkdownCodeBlockProcessor("agent", agentBlock(this.app, () => this.settings.sidecar, (f) => this.desk.open(f), (ask) => this.editor.carry(ask)));
-    } catch (e) { console.warn("domvec: agent block", e); }
-    try {
-      this.registerMarkdownCodeBlockProcessor("chat", chatCell(this.app, (p, c, on) => this.sidecar.chatStream(p, c, on)));
-    } catch (e) { console.warn("domvec: chat block", e); }
-    try {
-      this.registerMarkdownCodeBlockProcessor("tool", async (src, el) => {
-        const name = src.trim().split(/\s+/)[0] || "";
-        if ((window as any).__domvecPlantNoToolPanel) { el.createEl("pre", { text: src }); return; }
-        const base = this.settings.sidecar.trim().replace(/[/]+$/, "");
-        let text = "";
-        try { const j = await (await fetch(base + "/tool_panel")).json(); text = (j.panels || {})[name] || ""; } catch { /* sidecar down */ }
-        const box = el.createDiv({ cls: "domvec-tool-panel" });
-        box.createDiv({ cls: "domvec-tool-panel-head", text: "\u{1F512} " + name + " -- app tool, read-only" });
-        box.createEl("pre", { text: text || "no app tool named " + name });
-      });
-    } catch (e) { console.warn("domvec: tool block", e); }
+    // The block features are EXTENSIONS in named slots (G-240, slots.ts):
+    // each may be off or fail and the core runs on; none may take a core slot.
+    // PLUGIN_GOAL 195 (c) ```tool (G-421); the ```chat input cell (G-422);
+    // G-384's ```agent (G-429/G-430).
+    this.slots.add({ id: "agent", slot: "codeblock:agent", register: () => this.registerMarkdownCodeBlockProcessor("agent",
+      agentBlock(this.app, () => this.settings.sidecar, (f) => this.desk.open(f), (ask) => this.editor.carry(ask))) });
+    this.slots.add({ id: "chat", slot: "codeblock:chat", register: () => this.registerMarkdownCodeBlockProcessor("chat",
+      chatCell(this.app, (p, c, on) => this.sidecar.chatStream(p, c, on))) });
+    this.slots.add({ id: "tool", slot: "codeblock:tool", register: () => this.registerMarkdownCodeBlockProcessor("tool", async (src, el) => {
+      const name = src.trim().split(/\s+/)[0] || "";
+      if ((window as any).__domvecPlantNoToolPanel) { el.createEl("pre", { text: src }); return; }
+      const base = this.settings.sidecar.trim().replace(/[/]+$/, "");
+      let text = "";
+      try { const j = await (await fetch(base + "/tool_panel")).json(); text = (j.panels || {})[name] || ""; } catch { /* sidecar down */ }
+      const box = el.createDiv({ cls: "domvec-tool-panel" });
+      box.createDiv({ cls: "domvec-tool-panel-head", text: "\u{1F512} " + name + " -- app tool, read-only" });
+      box.createEl("pre", { text: text || "no app tool named " + name });
+    }) });
+    for (const e of ((window as any).__domvecExtraExtensions || []) as any[]) this.slots.add(e);
+    this.slots.load();
     try {
       this.registerMarkdownCodeBlockProcessor(BROWSER_FENCE, browserFence(this.app));
     } catch (e) {
@@ -1234,6 +1231,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   /** Edits re-run (194): a pause in a python cell runs it and its readers. */
   autoRun!: AutoRun;
   crossRun!: CrossRun;
+  /** Named extension slots over the core (G-240). */
+  slots: Slots = new Slots(() => ((this as any).settings?.disabledExtensions as string[]) || []);
   async onRunFence(req: RunRequest): Promise<any> {
     const note = req.path || this.app.workspace.getActiveFile()?.path || "";
     if (!note) {
