@@ -14787,8 +14787,8 @@ export function makeChecks(env) {
             }
             return { planted: ${planted}, button: true, note, counts: [...new Set(counts)], on_plane: !!(note && desk.panelOf(note)) };
           } finally {
-            for (let q = 0; q < 40 && !/^(done|stopped)/.test(document.querySelector(".domvec-agent-status")?.textContent || ""); q++) await sleep(250); await sleep(600);   // the run writes its note until it ends window.__domvecAgentDry = null; leaf.detach();
-            for (const p of [path, note]) { const g = p && app.vault.getAbstractFileByPath(p); if (g) { try { desk.closePath(p); } catch {} await app.vault.delete(g).catch(() => 0); } }
+            for (let q = 0; q < 40 && !/^(done|stopped)/.test(document.querySelector(".domvec-agent-status")?.textContent || ""); q++) await sleep(250); await sleep(600);   /* the run writes its note until it ends */ window.__domvecAgentDry = null; leaf.detach();
+            for (const p of [path, note]) { const g = p && app.vault.getAbstractFileByPath(p); if (g) { try { desk.closePath(p); } catch {} await app.vault.delete(g).catch(() => 0); } } if (note && await app.vault.adapter.exists(note)) { try { desk.closePath(note); } catch {} await app.vault.adapter.remove(note).catch(() => 0); }
           }
         })()`, { timeout: 60000 });
         const clean = await arm(false), planted = await arm(true);
@@ -14830,8 +14830,8 @@ export function makeChecks(env) {
             return { planted: ${planted}, button: true, status, created: pl.editor.stats.create - c0, card: !!g,
                      body: g ? (await app.vault.read(g)).includes("x = 430") : false, on_plane: !!desk.panelOf(cardPath) };
           } finally {
-            for (let q = 0; q < 40 && !/^(done|stopped)/.test(document.querySelector(".domvec-agent-status")?.textContent || ""); q++) await sleep(250); await sleep(600);   // the run writes its note until it ends window.__domvecAgentDry = null; leaf.detach();
-            for (const p of [path, note, cardPath]) { const g = p && app.vault.getAbstractFileByPath(p); if (g) { try { desk.closePath(p); } catch {} await app.vault.delete(g).catch(() => 0); } }
+            for (let q = 0; q < 40 && !/^(done|stopped)/.test(document.querySelector(".domvec-agent-status")?.textContent || ""); q++) await sleep(250); await sleep(600);   /* the run writes its note until it ends */ window.__domvecAgentDry = null; leaf.detach();
+            for (const p of [path, note, cardPath]) { const g = p && app.vault.getAbstractFileByPath(p); if (g) { try { desk.closePath(p); } catch {} await app.vault.delete(g).catch(() => 0); } } if (note && await app.vault.adapter.exists(note)) { try { desk.closePath(note); } catch {} await app.vault.adapter.remove(note).catch(() => 0); }
           }
         })()`, { timeout: 60000 });
         const clean = await arm(false), planted = await arm(true);
@@ -15161,8 +15161,8 @@ export function makeChecks(env) {
             const st = await (await fetch(String(pl.settings.sidecar).replace(/[/]+$/, "") + "/agent_status", { method: "POST", headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" }, body: JSON.stringify({ note }) })).json();
             return { planted: ${planted}, button: true, status, cell_tools: st.cell_tools || null, tripled_15: /TRIPLED 15/.test(t), name_error: /triple/.test(t) && /(NameError|not defined|Forbidden|InterpreterError)/.test(t) };
           } finally {
-            for (let q = 0; q < 40 && !/^(done|stopped)/.test(document.querySelector(".domvec-agent-status")?.textContent || ""); q++) await sleep(250); await sleep(600);   // the run writes its note until it ends window.__domvecAgentDry = null; leaf.detach(); await sleep(800);
-            for (const p of [path, note]) { const g = p && app.vault.getAbstractFileByPath(p); if (g) { try { desk.closePath(p); } catch {} await app.vault.delete(g).catch(() => 0); } }
+            for (let q = 0; q < 40 && !/^(done|stopped)/.test(document.querySelector(".domvec-agent-status")?.textContent || ""); q++) await sleep(250); await sleep(600);   /* the run writes its note until it ends */ window.__domvecAgentDry = null; leaf.detach(); await sleep(800);
+            for (const p of [path, note]) { const g = p && app.vault.getAbstractFileByPath(p); if (g) { try { desk.closePath(p); } catch {} await app.vault.delete(g).catch(() => 0); } } if (note && await app.vault.adapter.exists(note)) { try { desk.closePath(note); } catch {} await app.vault.adapter.remove(note).catch(() => 0); }
           }
         })()`, { timeout: 90000 });
         const clean = await arm(false), planted = await arm(true);
