@@ -14367,6 +14367,36 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-419",
+      asks: "edits re-run (PLUGIN_GOAL 194: 'measuring the changes instantly ... do away with calling in the terminal'): in a note of two python cells (x = 1; y = x * 2, printed), editing x to 5 and pausing -- no Run press -- runs that cell and its reader, whose output reads Y 10; planted (autoRun.plantOff) the output stays Y 2",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const P = app.plugins.getPlugin("domvec-bridge");
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const path = "domvec-checks/g419 autorun " + (${planted} ? "planted" : "clean") + " " + Date.now().toString(36) + ".md";
+          const text = ["# g419", "", F + "python", "x = 1", F, "", F + "python", "y = x * 2", "print('Y', y)", F, ""].join(NL);
+          const f = await app.vault.create(path, text);
+          const leaf = app.workspace.getLeaf("tab"); await leaf.openFile(f); await sleep(800);
+          const v = leaf.view, ed = v.editor;
+          P.autoRun.plantOff = ${planted};
+          try {
+            for (const nth of [0, 1]) { const fs = ed.getValue().split(NL); const opens = fs.map((l, i) => l === F + "python" ? i : -1).filter((i) => i >= 0); const ln = opens[nth]; let j = ln + 1, body = []; while (j < fs.length && !fs[j].startsWith(F)) body.push(fs[j++]); await P.onRunFence({ lang: "python", code: body.join(NL), line: ln, path, refs: [] }); await sleep(600); }
+            let before = false; for (let i = 0; i < 20 && !before; i++) { before = ed.getValue().includes("Y 2"); if (!before) await sleep(200); }
+            const at = ed.getValue().split(NL).findIndex((l) => l === "x = 1");
+            ed.setCursor({ line: at, ch: 5 });
+            ed.replaceRange("5", { line: at, ch: 4 }, { line: at, ch: 5 });
+            let after = "";
+            for (let i = 0; i < 40; i++) { await sleep(250); after = ed.getValue(); if (after.includes("Y 10")) break; }
+            return { planted: ${planted}, before, y10: after.includes("Y 10"), stats: { ...P.autoRun.stats } };
+          } finally { P.autoRun.plantOff = false; leaf.detach(); }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const pass = !!clean && !clean.error && clean.before && clean.y10 && !!planted && !planted.error && planted.before && !planted.y10;
+        return { pass, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-414",
       asks: "hovering a CHUNK node in the 3D view opens its billboard as a preview (PLUGIN_GOAL 192: 'I should be able to view the panel billboard previews when hovering'): in fly-to mode, a pointer move onto chunk nodes on screen -- through the pane's own pointer handler -- opens THAT node's panel (or its unit's) within the dwell, and a move off onto empty canvas lets it go; planted (plantNo3DHoverPanel) no hover opens anything",
       async run() {

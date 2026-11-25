@@ -65,6 +65,7 @@ import { PLANE_FOLDER, PlaneDesk } from "./planepanels";
 import { BrowseCard } from "./browsecard";
 import { EditorCalls } from "./editorcalls";
 import { DataflowRun, noteTextOf } from "./dataflowrun";
+import { AutoRun } from "./autorun";
 import { CodeRows } from "./coderows";
 import { BrowserPanel } from "./browserpanel";
 import { PlaneHalo } from "./planehalo";
@@ -196,6 +197,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       sw.paint();
     }
     this.sidecar = new Sidecar(() => this.settings.sidecar);
+    this.autoRun = new AutoRun(this.app, (req) => this.onRunFence(req), (p) => p === "domvec/ego.md" || p.startsWith("domvec-checks/g418"));
     // The kernel's vault facade (P-N4) is rooted at the vault's own folder.
     this.sidecar.vaultRoot = String((this.app.vault.adapter as any).basePath || "");
     // The sidecar told where the vault is (G-277): a `{ref}` to a note reads the
@@ -481,7 +483,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // The cockpit (G-280): the `ego` slate's fields bound both ways to the
     // user agent and the search -- the text read on every edit, the agent's
     // own changes written back a few times a second.
-    this.registerEvent(this.app.workspace.on("editor-change", (_e: any, info: any) => { this.cockpit.onEdit(info?.file || null); for (const b of this.browserPanels) b.onEdit(info?.file || null); }));
+    this.registerEvent(this.app.workspace.on("editor-change", (_e: any, info: any) => { this.cockpit.onEdit(info?.file || null); this.autoRun.onEdit(_e, info?.file || null); for (const b of this.browserPanels) b.onEdit(info?.file || null); }));
     this.registerInterval(window.setInterval(() => { this.cockpit.sync(); for (const b of this.browserPanels) b.sync(); }, 250));
     (window as any).__domvecBrowserPanel = this.browserPanel;
     this.browserPanels = [this.browserPanel];
@@ -1182,6 +1184,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   /** Planted (G-279): the kernel's `WebBrowser.go` asks are not carried out. */
   plantNoBrowserAsk = false;
 
+  /** Edits re-run (194): a pause in a python cell runs it and its readers. */
+  autoRun!: AutoRun;
   async onRunFence(req: RunRequest): Promise<any> {
     const note = req.path || this.app.workspace.getActiveFile()?.path || "";
     if (!note) {
