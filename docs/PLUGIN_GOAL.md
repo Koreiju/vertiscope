@@ -6819,6 +6819,25 @@ compiled links shown as highlighting) was open:
 - *(d) An open question, posed by the reader: where a graph begins and a
   canvas ends, why, and when.*
 
+### 196. (2026-11-24) The outlines sparkle
+
+Added to the standing goal while 193-195 were being built:
+
+> Please also add to the current goal: make each of the 'outline' things like
+> text and things 'sparkle' with something like the @sparkle.gif we have at
+> the root of vertiscope.
+
+*Read as (196), mine, to be corrected:*
+- *The "outline things" are the boxes the browser cell draws over a page's
+  chunks: the hover outline, the structure outline, the diff boxes and the
+  pins. Each one sparkles.*
+- *`../vertiscope/sparkle.gif` is four-point stars, yellow-green and lavender,
+  twinkling on a transparent ground (512x288, 150 frames at 40 ms). "Something
+  like" it: drawn as stars in CSS over each box, not the 936 KB gif itself.*
+- *This is the later word over 186's "NO SPECIAL EFFECTS" for these boxes.
+  The boxes still never take the pointer, nothing is written into the page,
+  and a reader asking for reduced motion gets them still.*
+
 ### Recovered verbatim (2026-11-22 inventory)
 
 *Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,
