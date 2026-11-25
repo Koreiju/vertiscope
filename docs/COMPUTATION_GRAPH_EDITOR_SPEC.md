@@ -1677,8 +1677,9 @@ with the app, **U** an unclear term or step.
 | F-114 | U | spec F-109, O-3; PRD G-405 (my wording) | "seen" used for a harness measurement, where this project keeps "seen" for the reader or a `confirm.mjs` check (`CLAUDE.md`, the `Confirm` state) | "measured live", and who has not seen it |
 | F-115 | I | app: G-401 vs its PRD row and §12h | §12h says the separate canvas note is "removed" and the row "read once and retired"; `sync` does trash it, but runs only from `openCanvas`, which only live checks call -- the note is still in the vault and on the plane. F-112's wording also left the trash step out | O-3 and G-401 say so; an entry point is owed (O-3) |
 | F-116 | I | spec §14a (2026-11-08 17:41 row) vs O-3 | "the one decision for the reader is O-5" while O-3 records a second question asked of the reader | the design decision told apart from the layout question |
+| F-117 | I | spec §12c, §12h G-401 vs PRD G-401 and `planepanels.ts` `canvas.members` | the slate's fields are seeded from "the tool space (158)" in the spec, from "the craft membership" in the row and the code; the two sets differ (browsers, chats, tagged chunks), and the craft is retired | O-10 |
 
-**Still open** -- O-1 to O-4 and O-6 to O-9 are work the design names; O-5 is a question for the reader:
+**Still open** -- O-1 to O-4 and O-6 to O-10 are work the design names; O-5 is a question for the reader:
 
 - O-1. The pinned litegraph release's own licence file must be read before
   it is vendored (§13j); only third-party listings say MIT.
@@ -1726,6 +1727,14 @@ with the app, **U** an unclear term or step.
   cache's resolved links. The plane draws only compiled `{ref}`s (G-404), so
   a `link()` call makes a link that is neither drawn nor compiled. Each
   must write or read compiled links: a fence-line `{ref}` or a def/use.
+- O-10. What seeds the ego slate's fields. §12c and §12h say the tool
+  space (158: the cockpit, browsers, the search, notebooks, chats, tagged
+  chunks, the reader's notes). PRD G-401 and `planepanels.ts`'s
+  `canvas.members` say the craft's membership: its `note` nodes, which
+  G-291 makes of slates and of notes whose cell has run. Browsers, chats
+  and tagged chunks are not among them, and the craft itself is retired
+  (G-405 hides it; its nodes are still computed). G-401 should read the
+  tool space's own records (F-117).
 - O-8. A 3D hover previews a chunk node's billboard (G-414) and nothing
   over a page or path node; §12f wants every level billboarded, a higher
   rank revealing more of the tree (F-106).
