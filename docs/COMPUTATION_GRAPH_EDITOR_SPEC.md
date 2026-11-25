@@ -1675,6 +1675,8 @@ with the app, **U** an unclear term or step.
 | F-112 | M | spec O-3, F-109, PRD G-401 (my wording) | the plane's `domvec/ego canvas.md` card was attributed to G-401; `egocanvas.ts` reads that note once as a seed (`OLD_CANVAS_PATH`) and opens only the cockpit (`openCanvas`). The card is a panel left open on the plane from the G-396 era | O-3 and G-401 say so |
 | F-113 | M | NOTEBOOK head note (my pass-19 wording) | "the chat panel and the retrieval bar carry" the hovering SLM bar, citing 133 d: the record never names the bar's fate, and 133 d's retrieval bar is over typed nodes | marked as my reading; the parts named (the chat panel, 84's naked search field) |
 | F-114 | U | spec F-109, O-3; PRD G-405 (my wording) | "seen" used for a harness measurement, where this project keeps "seen" for the reader or a `confirm.mjs` check (`CLAUDE.md`, the `Confirm` state) | "measured live", and who has not seen it |
+| F-115 | I | app: G-401 vs its PRD row and §12h | §12h says the separate canvas note is "removed" and the row "read once and retired"; `sync` does trash it, but runs only from `openCanvas`, which only live checks call -- the note is still in the vault and on the plane. F-112's wording also left the trash step out | O-3 and G-401 say so; an entry point is owed (O-3) |
+| F-116 | I | spec §14a (2026-11-08 17:41 row) vs O-3 | "the one decision for the reader is O-5" while O-3 records a second question asked of the reader | the design decision told apart from the layout question |
 
 **Still open** -- O-1 to O-4 and O-6 to O-9 are work the design names; O-5 is a question for the reader:
 
@@ -1687,9 +1689,13 @@ with the app, **U** an unclear term or step.
 - O-3. G-401, G-404 and G-405 are written, not committed, and deployed
   by the 2026-11-24 rebuild (F-109). G-405 is measured working through the
   harness, not yet seen by the reader (F-114).
-  G-401 reads the old `domvec/ego canvas.md` once, as a seed, and draws no
-  card for it (F-112). That note is still open on the plane as a panel from
-  the G-396 era, the note §12c's "one ego" retires. With the clipboard card
+  G-401's `sync` reads the old `domvec/ego canvas.md` once, as a seed, then
+  moves it to the vault's trash, and draws no card for it (F-112). Nothing in
+  the app calls `openCanvas`, the one caller of `sync`; only live checks do
+  (F-115). So the migration has not run, and the note is still open on the
+  plane as a panel from the G-396 era, the note §12c's "one ego" retires.
+  G-401 needs an entry point the reader reaches (the cockpit's opening, or
+  plugin load). With the clipboard card
   it covers the 3D view's chunk nodes, so hover and click reach none of them
   there. Closing it is the reader's layout, asked 2026-11-24.
 - O-4. The scope ladder: T-9 rules chunk -> group -> page -> browser
@@ -1804,7 +1810,7 @@ characters; the full text is in the inventory. Counts: 10 bear on the editor (tw
 | 2026-11-07 00:22 | conductor we have a problem | none for 2D: operational (session, build, git, process) |
 | 2026-11-07 16:45 | Please continue on all open glitches I had noted to you. There were... | none for 2D: about the record or the process |
 | 2026-11-07 16:50 | Including what you found in transcripts | none for 2D: about the record or the process |
-| 2026-11-08 17:41 | Please clearly and legibly state all decisions needed from me | the process: the one decision for the reader is O-5, stated in §14 |
+| 2026-11-08 17:41 | Please clearly and legibly state all decisions needed from me | the process: the one design decision for the reader is O-5, stated in §14; closing the covering cards (O-3) is the reader's layout, asked 2026-11-24 |
 | 2026-11-08 17:43 | Continuous motion currently in our 3D graph, causing significant an... | editor: F-60, F-64 |
 | 2026-11-08 18:33 | There is still significant jostling when there wasn't before. I thi... | editor: F-60 |
 | 2026-11-08 19:16 | I need something like this to work with our whole plugin without de... | editor: "without degrading the plugin's functions" -- every slice keeps the plugin's checks green (§13k) |
