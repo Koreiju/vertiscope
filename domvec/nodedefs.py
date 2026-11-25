@@ -83,7 +83,7 @@ def __domvec_defs(ns):
                             traits.append({"name": tn, "kind": "widget", "type": type(tr).__name__, "default": tr.default_value if isinstance(tr.default_value, (int, float, str, bool)) else None})
                 except Exception: pass
             out.append({"name": name, "node": "class", "inputs": init["inputs"], "outputs": outs,
-                        "traits": traits, "doc": (inspect.getdoc(obj) or "").split("\n")[0]})
+                        "traits": traits, "doc": inspect.cleandoc(vars(obj).get("__doc__") or "").split("\n")[0]})
     return out
 print(%r + __import__("json").dumps(__domvec_defs(globals()), default=repr))
 del __domvec_defs

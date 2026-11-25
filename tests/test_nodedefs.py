@@ -65,3 +65,17 @@ def test_boot_names_are_not_the_notes():
         exec(compile(nodedefs.SRC, "<cell>", "exec"), ns, ns)
     names = {d["name"] for d in nodedefs.parse({"ok": True, "stdout": out.getvalue()})["defs"]}
     assert "search" not in names and "scan" in names
+
+
+def test_traits_are_widgets_and_the_doc_is_its_own():
+    import pytest
+    pytest.importorskip("traitlets")
+    ns = {"__name__": "__main__"}
+    exec(compile("import traitlets\nclass Knob(traitlets.HasTraits):\n    level = traitlets.Int(3)\n"
+                 "    def bump(self) -> int: return self.level + 1\n", "<cell>", "exec"), ns, ns)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        exec(compile(nodedefs.SRC, "<cell>", "exec"), ns, ns)
+    (k,) = nodedefs.parse({"ok": True, "stdout": out.getvalue()})["defs"]
+    assert k["traits"] == [{"name": "level", "kind": "widget", "type": "Int", "default": 3}]
+    assert k["outputs"] == [{"name": "bump", "type": "int"}] and k["doc"] == ""

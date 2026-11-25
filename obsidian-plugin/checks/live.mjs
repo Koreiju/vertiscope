@@ -14628,7 +14628,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-409",
-      asks: "node definitions from the live namespace (PLUGIN_GOAL 187, spec 13d'): a python cell that defines a function and a class is run; the note's kernel publishes each with its ports -- a primitive with a default a widget [8], a Literal a choice, an object type a socket, the return an output; an imported name is not a node -- and the card draws one row per node; its widgets and choices are edited in place (B14) and write that one default into the cell, which re-runs (planted __domvecPlantNoEditRerun: the kernel keeps the old default); planted __domvecPlantAllSockets + __domvecPlantNoWidgetEdit: every port a socket, nothing editable",
+      asks: "node definitions from the live namespace (PLUGIN_GOAL 187, spec 13d'): a python cell that defines a function and a class is run; the note's kernel publishes each with its ports -- a primitive with a default a widget [8], a Literal a choice, an object type a socket, the return an output; a HasTraits class's traits are widgets (Knob.level [3]); an imported name is not a node -- and the card draws one row per node; its widgets and choices are edited in place (B14) and write that one default into the cell, which re-runs (planted __domvecPlantNoEditRerun: the kernel keeps the old default); planted __domvecPlantAllSockets + __domvecPlantNoWidgetEdit: every port a socket, nothing editable",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -14639,7 +14639,8 @@ export function makeChecks(env) {
           const code = ["from typing import Literal", "from collections import OrderedDict",
             "def scan(url: str, k: int = 8, mode: Literal['fast', 'deep'] = 'fast', driver: object = None) -> list:",
             "    return [url] * k", "class Box:", "    def __init__(self, size: float = 1.0): self.size = size",
-            "    def area(self) -> float: return self.size ** 2"].join(NL);
+            "    def area(self) -> float: return self.size ** 2",
+            "import traitlets", "class Knob(traitlets.HasTraits):", "    level = traitlets.Int(3)", "    def bump(self) -> int: return self.level + 1"].join(NL);
           try {
             if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
             const f = await app.vault.create(path, "# g409" + NL + NL + F + "python" + NL + code + NL + F + NL);
@@ -14649,6 +14650,10 @@ export function makeChecks(env) {
             for (let k = 0; k < 30 && !rows.length; k++) { await sleep(200); rows = [...(desk.panelOf(path)?.card?.querySelectorAll(".domvec-node-def") || [])].map((r) => r.textContent); }
             const defs = (window.__domvecNodeDefs || {})[path] || [];
             const scan = defs.find((d) => d.name === "scan"), box = defs.find((d) => d.name === "Box");
+            const knob = defs.find((d) => d.name === "Knob");
+            const traits = { level: !!knob && knob.traits.some((t) => t.name === "level" && t.kind === "widget" && t.default === 3),
+                             bump: !!knob && knob.outputs.some((o) => o.name === "bump" && o.type === "int"),
+                             row: [...(desk.panelOf(path)?.card?.querySelectorAll('.domvec-node-def[data-node="Knob"]') || [])].map((r) => r.textContent)[0] || "" };
             const k = scan && scan.inputs.find((p) => p.name === "k"), mode = scan && scan.inputs.find((p) => p.name === "mode");
             // B14: the widget edited in place writes its default into the cell.
             const card = desk.panelOf(path)?.card;
@@ -14671,7 +14676,7 @@ export function makeChecks(env) {
             const edited = { inputs: card ? card.querySelectorAll(".domvec-node-port").length : 0, k12: after.includes("k: int = 12,"),
                              deep: after.includes("= " + JSON.stringify("deep") + ", driver"), size: after.includes("size: float = 2.5)"),
                              rest_kept: after.includes("return [url] * k") && after.includes("driver: object = None") };
-            return { planted: ${planted}, edited, rerun, names: defs.map((d) => d.name).sort(), rows,
+            return { planted: ${planted}, edited, rerun, traits, names: defs.map((d) => d.name).sort(), rows,
                      k_widget: !!k && k.kind === "widget" && k.default === 8, mode_choice: !!mode && mode.kind === "choice" && mode.options.join() === "fast,deep",
                      url_socket: !!scan && scan.inputs[0].kind === "socket", out_list: !!scan && scan.output.type === "list",
                      box_area: !!box && box.outputs.some((o) => o.name === "area" && o.type === "float") };
@@ -14682,11 +14687,11 @@ export function makeChecks(env) {
           }
         })()`, { timeout: 90000 });
         const clean = await arm(false), planted = await arm(true);
-        const ok = !!clean && clean.names.join() === "Box,scan" && clean.k_widget && clean.mode_choice && clean.url_socket && clean.out_list && clean.box_area
-          && clean.rows.length === 2 && clean.rows.some((r) => r.startsWith("scan(url ●str, k ") && r.includes("→ list"))
+        const ok = !!clean && clean.names.join() === "Box,Knob,scan" && clean.traits.level && clean.traits.bump && clean.traits.row.includes("level [3]") && clean.k_widget && clean.mode_choice && clean.url_socket && clean.out_list && clean.box_area
+          && clean.rows.length === 3 && clean.rows.some((r) => r.startsWith("scan(url ●str, k ") && r.includes("→ list"))
           && clean.edited.inputs === 3 && clean.edited.k12 && clean.edited.deep && clean.edited.size && clean.edited.rest_kept
           && clean.rerun.size_unrun === 1 && clean.rerun.k_after === 12 && clean.rerun.size_after === 2.5;
-        return { pass: ok && !!planted && planted.names.length === 2 && !planted.k_widget && planted.edited.inputs === 0 && !planted.edited.k12, evidence: { clean, planted } };
+        return { pass: ok && !!planted && planted.names.length === 3 && !planted.k_widget && planted.edited.inputs === 0 && !planted.edited.k12, evidence: { clean, planted } };
       },
     },
     {
