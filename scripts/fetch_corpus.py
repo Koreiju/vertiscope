@@ -41,6 +41,25 @@ MANIFEST = CORPUS / "manifest.json"
 
 UA = "Mozilla/5.0 (compatible; domvec-benchmark/0.1; +offline research corpus)"
 
+# Public web pages routinely inline client-side third-party tokens (Mapbox
+# `pk.eyJ...`, Firebase `AIza...`, etc.) inside `<script>` state blobs. Left
+# verbatim in `tests/corpus/`, they trip repository secret scanners on a public
+# mirror even though none belong to this project. Scrubbing them at fetch time
+# keeps structural markup intact while never committing third-party token text.
+EMBEDDED_TOKEN_RE = re.compile(
+    r"(?:pk|sk|tk)\.eyJ[A-Za-z0-9_.-]{20,}"
+    r"|AKIA[0-9A-Z]{16}"
+    r"|(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}"
+    r"|sk-(?:proj-|ant-)[A-Za-z0-9_-]{20,}"
+    r"|AIza[0-9A-Za-z_-]{35}"
+    r"|xox[baprs]-[0-9A-Za-z-]{10,}"
+    r"|(?:sk|rk)_(?:live|test)_[0-9a-zA-Z]{16,}"
+)
+
+
+def scrub_embedded_tokens(body: str) -> str:
+    return EMBEDDED_TOKEN_RE.sub("REDACTED_TOKEN", body)
+
 # Chosen for structural variety. The label records why each is present, so a
 # later reader can tell whether the corpus still covers a shape.
 URLS: list[tuple[str, str]] = [
@@ -245,9 +264,10 @@ def fetch(item: tuple[str, str]) -> dict:
         else:
             rec["encoding_source"] = "header"
         rec["encoding"] = r.encoding
-        body = r.text
-        rec["bytes"] = len(body.encode("utf-8", "replace"))
-        rec["sha1"] = hashlib.sha1(body.encode("utf-8", "replace")).hexdigest()
+        body = scrub_embedded_tokens(r.text)
+        encoded = body.encode("utf-8", "replace")
+        rec["bytes"] = len(encoded)
+        rec["sha1"] = hashlib.sha1(encoded).hexdigest()
         rec["ok"] = r.status_code == 200 and rec["bytes"] > 200
         if rec["ok"]:
             (CORPUS / f"{rec['slug']}.html").write_text(body, encoding="utf-8",

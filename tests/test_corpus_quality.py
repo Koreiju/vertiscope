@@ -112,6 +112,28 @@ def test_every_ok_page_has_a_file_and_a_hash():
         assert page.get("bytes", 0) > 200, f"{page['slug']}: implausibly small"
 
 
+def test_no_frozen_page_carries_secret_scanner_tokens():
+    """Third-party pages sometimes inline Mapbox/API tokens in `<script>` JSON
+    (`musicbrainz-org-search-query-beatles-type-artist`, `www-abc-net-au-news`),
+    which trips GitHub Secret Scanning on public mirrors."""
+    from scripts.fetch_corpus import EMBEDDED_TOKEN_RE, scrub_embedded_tokens
+
+    # Built dynamically so this test file itself contains no literal `pk.eyJ...` token.
+    synthetic = '{"MAPBOX_ACCESS_TOKEN":"' + "pk." + "eyJ" + ("A" * 32) + "." + ("B" * 22) + '"}'
+    assert EMBEDDED_TOKEN_RE.search(synthetic)
+    assert not EMBEDDED_TOKEN_RE.search(scrub_embedded_tokens(synthetic))
+
+    leaked = {}
+    for page in _pages():
+        text = (CORPUS / f"{page['slug']}.html").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        hits = EMBEDDED_TOKEN_RE.findall(text)
+        if hits:
+            leaked[page["slug"]] = [h[:24] + "..." for h in hits]
+    assert not leaked, f"secret-scanner token pattern(s) in frozen corpus: {leaked}"
+
+
 def test_the_corpus_is_structurally_varied():
     """The claim the corpus exists to support.
 

@@ -772,8 +772,8 @@
       "content_type": "text/html; charset=utf-8",
       "encoding_source": "header",
       "encoding": "utf-8",
-      "bytes": 26093,
-      "sha1": "5a3b51d9de41f1c1f5f87de8cc2782fe33b1acc6",
+      "bytes": 26013,
+      "sha1": "7dd5cfbb85caf75f4b068d0c00eed8ec99c2ef2a",
       "ok": true
     },
     {
@@ -1262,8 +1262,8 @@
       "content_type": "text/html; charset=utf-8",
       "encoding_source": "header",
       "encoding": "utf-8",
-      "bytes": 884229,
-      "sha1": "350bf3bebfe550385147879d3a30c397b15e2c66",
+      "bytes": 884173,
+      "sha1": "d7242fcadfc97ecc5e6676b3c6485927d185c6f6",
       "ok": true
     },
     {
