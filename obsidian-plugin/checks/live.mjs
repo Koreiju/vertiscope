@@ -12073,12 +12073,12 @@ export function makeChecks(env) {
     },
     {
       id: "G-399",
-      asks: "no circles in 2D (PLUGIN_GOAL 183 'circles gone in 2D', 182 'Both'): a collapsed panel is its HEADER BAR -- wider than tall, square-ish corners -- not a circle; a slate never enters graph form (a double-click flip is refused) and a slate stored in graph form draws its panel; the ground flip to graph form is refused; a card dropped on another card is PLACEMENT and writes no link (G-404, 136: 'magnetizing new panels together doesn't create new links'; retargeted 2026-11-25); planted __domvecPlantGraphForm + plantFlipForm: the graph form and the flip come back",
+      asks: "no circles in 2D (PLUGIN_GOAL 183 'circles gone in 2D', 182 'Both'): a collapsed panel is its HEADER BAR -- wider than tall, square-ish corners -- not a circle; a slate never enters graph form (a double-click flip is refused) and a slate stored in graph form draws its panel; the ground flip to graph form is refused; a card dropped on another card is PLACEMENT and writes no link (G-404, 136: 'magnetizing new panels together doesn't create new links'; retargeted 2026-11-25); planted __domvecPlantGraphForm + plantFlipForm: the graph form and the flip come back; planted plantCardLinks: a card on a card writes a link",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           const d = window.__domvecPlane, P = app.plugins.getPlugin("domvec-bridge"), NL = String.fromCharCode(10);
-          window.__domvecPlantGraphForm = ${planted}; d.plantFlipForm = ${planted};
+          window.__domvecPlantGraphForm = ${planted}; d.plantFlipForm = ${planted}; d.plantCardLinks = ${planted};
           const tok = Date.now().toString(36), a = "domvec/graph/g399 a " + tok + ".md", b = "domvec/graph/g399 b " + tok + ".md", s = "domvec/graph/g399 s " + tok + ".md";
           const out = { planted: ${planted} };
           try {
@@ -12107,7 +12107,7 @@ export function makeChecks(env) {
             for (let i = 0; i < 30 && !line; i++) { await sleep(150); line = [...d.host.plane().querySelectorAll(".domvec-plane-links line")].some((l) => [l.dataset.a, l.dataset.b].includes(a) && [l.dataset.a, l.dataset.b].includes(b)); }
             out.wire.line = line;
           } finally {
-            window.__domvecPlantGraphForm = false; d.plantFlipForm = false;
+            window.__domvecPlantGraphForm = false; d.plantFlipForm = false; d.plantCardLinks = false;
             if (d.flipped) d.flip(0, 0);
             for (const q of [a, b, s]) { try { d.panelOf(q)?.leaf.detach(); } catch (e) {} for (let k = 0; k < 3; k++) { await sleep(700); const f = app.vault.getAbstractFileByPath(q); if (!f) break; await app.vault.trash(f, true); } }
           }
@@ -12118,7 +12118,8 @@ export function makeChecks(env) {
         return { pass: c.collapsed.w > c.collapsed.h * 1.5 && c.collapsed.radius < 16
                        && c.slate_flip.returned === false && !c.slate_flip.graph_drawn && c.ground_flip === 0
                        && !c.wire.accepted && !c.wire.link_written   // G-404 (136): a card on a card is placement, never a link
-                       && planted.slate_flip.returned === true && planted.slate_flip.graph_drawn && planted.ground_flip > 0,
+                       && planted.slate_flip.returned === true && planted.slate_flip.graph_drawn && planted.ground_flip > 0
+                       && planted.wire.accepted && planted.wire.link_written,   // the card-on-card clause can fail
                  evidence: { clean, planted } };
       },
     },
