@@ -76,8 +76,9 @@ where it was read into a design.
 | 2026-11-24, 192 | Hover previews of billboards in 3D; does fly-to still work; "I don't know what these dotted lines are" | G-414; the craft gate (G-405) deployed; F-105 |
 | **2026-11-24, 193** | "you're totally overdoing the work required for the markdown panels": plain Obsidian notes; the purple nodes removed; a `#` query as the retrieval gesture; code blocks as cells; one interface for every canvas type, two query embeddings | the head note; F-118 |
 | **2026-11-24, 194** | the suggestions override the custom syntax in markdown panels; it moves to code cells that run and compile on the reservoir; measurements coupled at the code's interface; every output shown for i/o and vectorization, re-indexed by diffs; the terminal a standard interface type; groups of artifacts compose; live objects alongside the graphical code interfaces | the head note; F-129 |
+| 2026-11-24, 195 | retrieval with the ego: results stay in their own canvases, drawn outside the ego's; each rendered canvas and its agent-facing tool interface in one editor, as a callable object whose base form is the string an agent sees; where a graph begins and a canvas ends, why and when | §13m (canvas / graph); F-138 |
 
-Where the verbatim record ends: 2026-11-24, item 194 (it was 166 when this table was first written). Anything below that
+Where the verbatim record ends: 2026-11-24, item 195 (it was 166 when this table was first written). Anything below that
 line in any design is interpretation.
 
 ## 2. The designs already written, and what 166 does to each
@@ -1494,6 +1495,7 @@ where it comes from. A term not listed is used in its plain sense.
 | **view** | one drawing of a live object's model; many views share one model | a placement of a markdown record | §13e |
 | **interface** | 193 (d): ONE interface that generalizes every canvas type -- code (editor tools, a terminal), web chunks (components acting on the live browser), the rest. A query makes two embeddings; 193 names one, natural language over the interface types, and the other (over content) is my reading | a tool surface; a UI widget | 193 |
 | **canvas** | the interactive surface of an artifact (182's "interface canvases"). The EGO canvas is the cockpit's record ordering the ego's components (§12c) | a separate canvas note (retired, §12g) | 182, 183, §12c |
+| **canvas / graph** (195 d; my reading, to be corrected) | WHERE: a canvas is ONE record drawn whole -- its text, its controls, its string form -- and ends at that record's edge. A graph begins at the first link between two records: a compiled def/use, a call of a tool, a result's `{ref}` to its chunk. No graph lies inside one canvas. WHY: a canvas is what the reader acts on in place (the REPL is a browser); a graph is what moves between records (dataflow, retrieval, an agent's calls). WHEN: a canvas becomes graph when it is unnested into its records (a note into its cells, a page into its chunks, a tool into its calls); folding returns it to one canvas. A retrieval result therefore stays a node in its OWN canvas, outside the ego's (195 a) | a canvas drawn as a graph form (182 retired the flip) | 195, 182, 112 |
 | **plane** | the 2D surface fixed to the camera, in the 3D view, where nodes and panels sit; the editor's pan and zoom | an Obsidian pane | 50, 159 |
 | **ego / cockpit / craft** | the ego is the reader's tool space; the cockpit is its slate (`ego.md`); the craft WAS its 3D form (circles and dashed edges), retired from view (G-405) until G-400 draws the ego as world nodes on its own UMAP, flown first or third person | -- | 54, 67-69, 146, 158, 186 |
 | **tool space (of the ego)** | the ego's set of tools and attached artifacts: browsers, retrieval, notebooks, chats, tagged chunks | a toolspace | 158 |
@@ -1595,7 +1597,7 @@ Sources (read 2026-11-22):
 The whole set, re-read at every pass. Scope: this spec, the sibling designs
 (RESERVOIR, GRAPH_WORKBENCH, DESIGN_VISION, SEARCH_GRAPH, NOTEBOOK_PANEL,
 THROUGH_STACK_SYNTHESIS, EGO_CANVAS, CALLABLE_INTERFACE's head), PLUGIN_GOAL
-from 2026-10-29 to 194, mortegon UR §E, §F, §M-§T, the PRD rows they
+from 2026-10-29 to 195, mortegon UR §E, §F, §M-§T, the PRD rows they
 cite, and every prompt the reader sent in this session's transcript
 (2026-09-12 to 2026-11-23 UTC, 238 messages; from F-59). Kinds: **M** a mistake, **I** an inconsistency between documents or
 with the app, **U** an unclear term or step.
@@ -1739,6 +1741,7 @@ with the app, **U** an unclear term or step.
 | F-135 | I | PRD head vs 193-194 | the PRD's head did not name the slate-syntax withdrawal its G-372, G-379, G-401, G-403 rows sit under | a paragraph pointing to the spec head note |
 | F-136 | U | PRD status vocabulary vs its rows and `CLAUDE.md` | four states defined (`Done`, `Partial`, `Open`, `Defect`); the rows use `Confirm`, `Partly` (32) beside `Partial` (19), `Superseded`, `Standing` | all defined; `Partial` as the older spelling |
 | F-137 | I | PRD head | "128 numbered requirements"; `design_state` counts 579 rows | both counts, dated |
+| F-138 | U | spec §13m vs 195 (d) | "canvas" and "node" were defined, but not where a graph begins and a canvas ends; 195 asks where, why and when | a `canvas / graph` row, marked as my reading |
 
 **Passes that found nothing new** (2026-11-24; pass 34 then found F-132 in §5 and §11): pass 32 re-read pass 31's edits and every "suspend" left in the docs (only ledger history). Pass 33 read `egocanvas.ts` and `canvasparse.ts` whole against §12c: its disagreements are already F-115 (the migration runs only from `openCanvas`) and O-10 (the comment says tool space, `canvas.members` reads the craft). Field order is join order, appended, which is compile order (142). What remains waits on the reader: 194's reading, O-5, O-11, the covering cards.
 
