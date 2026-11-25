@@ -771,6 +771,7 @@ export class GraphView extends ItemView {
     canvas.addEventListener("pointerleave", () => this.egoHover(-1, -1), { passive: true });
     const planeChanged = () => { if (this.egoUrls.size) { this.batchDirty = true; this.graph?.nodeColor(this.graph.nodeColor()); } };
     window.addEventListener("domvec-plane-changed", planeChanged);
+    this.registerInterval(window.setInterval(() => { if (this.egoUrls.size) void this.drawEgoLinks(); }, 300));
     this.register(() => window.removeEventListener("domvec-plane-changed", planeChanged));
     // A RIGHT-CLICK ON A LINK toggles it as a memory link (PLUGIN_GOAL
     // 135(d)): solid (on) or translucent (off). Only within 6 px of a drawn
@@ -7216,7 +7217,53 @@ export class GraphView extends ItemView {
   plantEgoInWorld = false;
   /** G-400: planted -- item 76's rule back: ego notes never drawn in the world. */
   plantEgoHidden = false;
-  egoWorldStats = { included: 0, last: "" };
+  egoWorldStats = { included: 0, last: "", edges: 0 };
+  /** G-400 ("the full graph structure of the ego's artifacts"): the ego's
+   *  compiled links -- a `{ref}` naming another ego note, a `Vault.read` of
+   *  one -- drawn as lines between their glowing world nodes, each frame's
+   *  positions. Planted `plantNoEgoLinks`: no lines. */
+  plantNoEgoLinks = false;
+  private egoLinkGroup: any = null;
+  private egoRefs = new Map<string, { at: number; to: string[] }>();
+  /** Ego note path -> the ego note paths it links to (by its own text). */
+  async egoLinksOf(path: string): Promise<string[]> {
+    const f: any = this.app.vault.getAbstractFileByPath(path);
+    if (!f || !f.stat || this.plantNoEgoLinks) return [];
+    const hit = this.egoRefs.get(path);
+    if (hit && hit.at === f.stat.mtime) return hit.to;
+    const text: string = await this.app.vault.cachedRead(f);
+    const egoPaths = [...this.egoUrls].map((u) => GraphView.egoPath(u));
+    const byBase = new Map(egoPaths.map((p) => [p.split("/").pop()!.replace(/[.]md$/, "").toLowerCase(), p]));
+    const to = new Set<string>();
+    for (const m of text.matchAll(/\{([^{}\n]+)\}/g)) { const p = byBase.get(m[1].split("#")[0].trim().toLowerCase()); if (p && p !== path) to.add(p); }
+    for (const m of text.matchAll(/Vault[.]read\(\s*["']\/?([^"'\n]+)["']/g)) { const p = m[1].endsWith(".md") ? m[1] : m[1] + ".md"; if (egoPaths.includes(p) && p !== path) to.add(p); }
+    this.egoRefs.set(path, { at: f.stat.mtime, to: [...to] });
+    return [...to];
+  }
+  /** The drawn ego pairs: both ends glowing (relegated to 3D), by url. */
+  async egoPairs(): Promise<[any, any][]> {
+    const g: any = this.graph; if (!g || this.plantEgoHidden || this.plantNoEgoLinks) return [];
+    const byPath = new Map<string, any>();
+    for (const n of g.graphData().nodes) if (n.url && n.level === "page" && this.egoUrls.has(String(n.url)) && !this.egoOnPlane(String(n.url)) && n.x != null) byPath.set(GraphView.egoPath(String(n.url)), n);
+    const out: [any, any][] = [];
+    for (const [p, n] of byPath) for (const q of await this.egoLinksOf(p)) { const m = byPath.get(q); if (m) out.push([n, m]); }
+    return out;
+  }
+  async drawEgoLinks(): Promise<void> {
+    const g: any = this.graph; if (!g) return;
+    const pairs = await this.egoPairs();
+    if (!this.egoLinkGroup) {
+      const geo = new THREE.BufferGeometry();
+      this.egoLinkGroup = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: EGO_GLOW, transparent: true, opacity: 0.8 }));
+      this.egoLinkGroup.name = "domvec-ego-links";
+    }
+    if (this.egoLinkGroup.parent !== g.scene()) g.scene().add(this.egoLinkGroup);
+    const pos = new Float32Array(pairs.length * 6);
+    pairs.forEach(([a, b], i) => pos.set([a.x, a.y, a.z, b.x, b.y, b.z], i * 6));
+    this.egoLinkGroup.geometry.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    this.egoLinkGroup.geometry.computeBoundingSphere();
+    this.egoWorldStats.edges = pairs.length;
+  }
   /** `vault://<vault>/<path>` -> the note's vault path. */
   static egoPath(url: string): string { return url.replace(/^vault:\/\/[^/]+\//, ""); }
   egoOnPlane(url: string): boolean { return !!(window as any).__domvecPlane?.panelOf?.(GraphView.egoPath(url)); }

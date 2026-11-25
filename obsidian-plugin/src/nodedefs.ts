@@ -71,6 +71,19 @@ export function setDefault(text: string, node: string, port: string, lit: string
   return null;
 }
 
+/** A trait's default in a class body: `name = traitlets.Int(3)` -> `Int(lit)`;
+ *  null when the class or the trait line is not found. */
+export function setTraitDefault(text: string, cls: string, trait: string, lit: string): string | null {
+  const head = new RegExp("(^|\\n)class[ \\t]+" + cls + "\\b[^\\n]*:").exec(text);
+  if (!head) return null;
+  const re = new RegExp("(\\n[ \\t]+" + trait + "[ \\t]*=[ \\t]*[\\w.]+\\()([^,)]*)", "g");
+  re.lastIndex = head.index + head[0].length;
+  const m = re.exec(text);
+  if (!m) return null;
+  const at = m.index + m[1].length;
+  return text.slice(0, at) + lit + text.slice(at + m[2].length);
+}
+
 export function drawDefs(card: HTMLElement | null | undefined, defs: NodeDef[],
                          edit?: (node: string, port: string, lit: string) => void): void {
   if (!card) return;
@@ -87,9 +100,11 @@ export function drawDefs(card: HTMLElement | null | undefined, defs: NodeDef[],
       if (i) r.appendText(", ");
       // B14: a widget is edited in place; a choice is picked in place. Planted
       // `__domvecPlantNoWidgetEdit`: text only, as G-409 first drew it.
-      if (edit && !(window as any).__domvecPlantNoWidgetEdit && (p.kind === "widget" || p.kind === "choice") && !(d.traits || []).includes(p)) {
+      const isTrait = (d.traits || []).includes(p);
+      if (edit && !(window as any).__domvecPlantNoWidgetEdit && (p.kind === "widget" || p.kind === "choice")) {
         r.appendText(p.name + " ");
-        const commit = (lit: string) => edit(d.name, p.name, lit);
+        // A trait's widget writes the trait's own default (`level = Int(3)`).
+        const commit = (lit: string) => edit(d.name, (isTrait ? "trait:" : "") + p.name, lit);
         if (p.kind === "choice") {
           const sel = r.createEl("select", { cls: "domvec-node-port" });
           for (const o of p.options || []) sel.createEl("option", { text: String(o), value: JSON.stringify(o) });

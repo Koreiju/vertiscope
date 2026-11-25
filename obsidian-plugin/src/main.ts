@@ -71,7 +71,7 @@ import { agentBlock } from "./agentblock";
 import { Slots, registerDecorator } from "./slots";
 import { completeCell } from "./complete";
 import { watchTabDrags } from "./tabdrag";
-import { drawDefs, nodeDefs, setDefault } from "./nodedefs";
+import { drawDefs, nodeDefs, setDefault, setTraitDefault } from "./nodedefs";
 import { markProblems, problemExtension } from "./dfproblems";
 import { CodeRows } from "./coderows";
 import { BrowserPanel } from "./browserpanel";
@@ -1003,7 +1003,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     if (!(f instanceof TFile)) return false;
     const v = this.markdownLeaves().map((l) => l.view as MarkdownView).find((x) => x?.file?.path === note);
     const text = v?.editor ? v.editor.getValue() : await this.app.vault.read(f);
-    const next = setDefault(text, node, port, lit);
+    const next = port.startsWith("trait:") ? setTraitDefault(text, node, port.slice(6), lit) : setDefault(text, node, port, lit);
     if (next === null || next === text) return false;
     if (v?.editor && v.getMode() === "source") { v.editor.setValue(next); await v.save(); }
     else await this.app.vault.modify(f, next);

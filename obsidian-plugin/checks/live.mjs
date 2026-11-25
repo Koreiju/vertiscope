@@ -14672,11 +14672,16 @@ export function makeChecks(env) {
             const modeNow = card?.querySelector('.domvec-node-def[data-node="scan"] select[data-port="mode"]') || modeIn;
             if (modeNow) { modeNow.value = JSON.stringify("deep"); modeNow.dispatchEvent(new Event("change")); await sleep(1500); }
             const rerun = { size_unrun, k_after: kdef(), size_after: sdef() };
+            const lvIn = card?.querySelector('.domvec-node-def[data-node="Knob"] input[data-port="level"]');
+            if (lvIn) { lvIn.value = "5"; lvIn.dispatchEvent(new Event("change")); }
+            let lv = null;
+            for (let q = 0; q < 30; q++) { const kn = ((window.__domvecNodeDefs || {})[path] || []).find((d) => d.name === "Knob"); lv = kn && kn.traits.find((t) => t.name === "level").default; if (lv === 5) break; await sleep(200); }
+            const trait_edit = { input: !!lvIn, written: (await app.vault.read(app.vault.getAbstractFileByPath(path))).includes("level = traitlets.Int(5)"), kernel: lv };
             const after = await app.vault.read(app.vault.getAbstractFileByPath(path));
             const edited = { inputs: card ? card.querySelectorAll(".domvec-node-port").length : 0, k12: after.includes("k: int = 12,"),
                              deep: after.includes("= " + JSON.stringify("deep") + ", driver"), size: after.includes("size: float = 2.5)"),
                              rest_kept: after.includes("return [url] * k") && after.includes("driver: object = None") };
-            return { planted: ${planted}, edited, rerun, traits, names: defs.map((d) => d.name).sort(), rows,
+            return { planted: ${planted}, edited, rerun, traits, trait_edit, names: defs.map((d) => d.name).sort(), rows,
                      k_widget: !!k && k.kind === "widget" && k.default === 8, mode_choice: !!mode && mode.kind === "choice" && mode.options.join() === "fast,deep",
                      url_socket: !!scan && scan.inputs[0].kind === "socket", out_list: !!scan && scan.output.type === "list",
                      box_area: !!box && box.outputs.some((o) => o.name === "area" && o.type === "float") };
@@ -14688,10 +14693,11 @@ export function makeChecks(env) {
           }
         })()`, { timeout: 90000 });
         const clean = await arm(false), planted = await arm(true);
-        const ok = !!clean && clean.names.join() === "Box,Knob,scan" && clean.traits.level && clean.traits.bump && clean.traits.row.includes("level [3]") && clean.k_widget && clean.mode_choice && clean.url_socket && clean.out_list && clean.box_area
+        const ok = !!clean && clean.names.join() === "Box,Knob,scan" && clean.traits.level && clean.traits.bump && planted.traits.row.includes("level [3]") && clean.k_widget && clean.mode_choice && clean.url_socket && clean.out_list && clean.box_area
           && clean.rows.length === 3 && clean.rows.some((r) => r.startsWith("scan(url ●str, k ") && r.includes("→ list"))
-          && clean.edited.inputs === 3 && clean.edited.k12 && clean.edited.deep && clean.edited.size && clean.edited.rest_kept
-          && clean.rerun.size_unrun === 1 && clean.rerun.k_after === 12 && clean.rerun.size_after === 2.5;
+          && clean.edited.inputs === 4 && clean.edited.k12 && clean.edited.deep && clean.edited.size && clean.edited.rest_kept
+          && clean.rerun.size_unrun === 1 && clean.rerun.k_after === 12 && clean.rerun.size_after === 2.5
+          && clean.trait_edit.input && clean.trait_edit.written && clean.trait_edit.kernel === 5;
         return { pass: ok && !!planted && planted.names.length === 3 && !planted.k_widget && planted.edited.inputs === 0 && !planted.edited.k12, evidence: { clean, planted } };
       },
     },
@@ -14781,7 +14787,7 @@ export function makeChecks(env) {
             }
             return { planted: ${planted}, button: true, note, counts: [...new Set(counts)], on_plane: !!(note && desk.panelOf(note)) };
           } finally {
-            window.__domvecAgentDry = null; leaf.detach();
+            for (let q = 0; q < 40 && !/^(done|stopped)/.test(document.querySelector(".domvec-agent-status")?.textContent || ""); q++) await sleep(250); await sleep(600);   // the run writes its note until it ends window.__domvecAgentDry = null; leaf.detach();
             for (const p of [path, note]) { const g = p && app.vault.getAbstractFileByPath(p); if (g) { try { desk.closePath(p); } catch {} await app.vault.delete(g).catch(() => 0); } }
           }
         })()`, { timeout: 60000 });
@@ -14824,7 +14830,7 @@ export function makeChecks(env) {
             return { planted: ${planted}, button: true, status, created: pl.editor.stats.create - c0, card: !!g,
                      body: g ? (await app.vault.read(g)).includes("x = 430") : false, on_plane: !!desk.panelOf(cardPath) };
           } finally {
-            window.__domvecAgentDry = null; leaf.detach();
+            for (let q = 0; q < 40 && !/^(done|stopped)/.test(document.querySelector(".domvec-agent-status")?.textContent || ""); q++) await sleep(250); await sleep(600);   // the run writes its note until it ends window.__domvecAgentDry = null; leaf.detach();
             for (const p of [path, note, cardPath]) { const g = p && app.vault.getAbstractFileByPath(p); if (g) { try { desk.closePath(p); } catch {} await app.vault.delete(g).catch(() => 0); } }
           }
         })()`, { timeout: 60000 });
@@ -15155,7 +15161,7 @@ export function makeChecks(env) {
             const st = await (await fetch(String(pl.settings.sidecar).replace(/[/]+$/, "") + "/agent_status", { method: "POST", headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" }, body: JSON.stringify({ note }) })).json();
             return { planted: ${planted}, button: true, status, cell_tools: st.cell_tools || null, tripled_15: /TRIPLED 15/.test(t), name_error: /triple/.test(t) && /(NameError|not defined|Forbidden|InterpreterError)/.test(t) };
           } finally {
-            window.__domvecAgentDry = null; leaf.detach(); await sleep(800);
+            for (let q = 0; q < 40 && !/^(done|stopped)/.test(document.querySelector(".domvec-agent-status")?.textContent || ""); q++) await sleep(250); await sleep(600);   // the run writes its note until it ends window.__domvecAgentDry = null; leaf.detach(); await sleep(800);
             for (const p of [path, note]) { const g = p && app.vault.getAbstractFileByPath(p); if (g) { try { desk.closePath(p); } catch {} await app.vault.delete(g).catch(() => 0); } }
           }
         })()`, { timeout: 90000 });
@@ -15211,6 +15217,46 @@ export function makeChecks(env) {
         const ok = !!clean && !clean.error && clean.free > 0 && clean.glowing === clean.free && clean.colour === "#ffc857"
           && clean.board && clean.board.level >= 2 && clean.ego_level === 3 && clean.ego_lines > clean.board.lines - 1 && clean.included && clean.left_3d && clean.relegated;
         return { pass: ok && !!planted && !planted.error && planted.glowing === 0 && !planted.board, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-438",
+      asks: "the ego's artifacts' graph structure as links in 3D (G-400; PLUGIN_GOAL 183: 'glowing 3D nodes for chunks and the full graph structure of the ego's artifacts'): an ego note whose text names another ego note -- a {ref} or a Vault.read -- is linked to it; the lines drawn between the glowing world nodes are exactly the drawn pairs (two vertices each, in the ego's colour); planted plantNoEgoLinks: no pairs, no lines",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, d = window.__domvecPlane;
+          if (!g || !g.graph) return { error: "no graph" };
+          const NL = String.fromCharCode(10), T = String.fromCharCode(9);
+          const tok = (${planted} ? "p" : "c") + Date.now().toString(36);
+          const a = "domvec/graph/g438 a " + tok + ".md", b = "domvec/graph/g438 b " + tok + ".md", c = "domvec/graph/g438 c " + tok + ".md";
+          const out = { planted: ${planted} };
+          g.plantNoEgoLinks = ${planted};
+          try {
+            await app.vault.create(b, ["---", "domvec: slate", "---", "b", T + "x" + T + "1", ""].join(NL));
+            await app.vault.create(c, "# c" + NL);
+            await app.vault.create(a, ["---", "domvec: slate", "---", "a", T + "uses" + T + "{g438 b " + tok + "}", ""].join(NL) + "x = Vault.read(" + JSON.stringify("/" + c) + ")" + NL);
+            const has = (p) => g.egoUrls.has("vault://" + app.vault.getName() + "/" + p);
+            for (let k = 0; k < 40 && !(has(a) && has(b) && has(c)); k++) await sleep(250);
+            out.in_ego = has(a) && has(b) && has(c);
+            out.links_a = (await g.egoLinksOf(a)).sort();
+            const pairs = await g.egoPairs();
+            await g.drawEgoLinks(); await sleep(100);
+            const grp = g.graph.scene().getObjectByName("domvec-ego-links");
+            out.pairs = pairs.length;
+            out.vertices = grp ? grp.geometry.getAttribute("position").count : -1;
+            out.colour = grp ? "#" + grp.material.color.getHexString() : null;
+            out.edges_stat = g.egoWorldStats.edges;
+            return out;
+          } finally {
+            g.plantNoEgoLinks = false;
+            for (const p of [a, b, c]) { try { d.closePath(p); } catch {} const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.delete(f).catch(() => 0); }
+          }
+        })()`, { timeout: 30000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.in_ego && clean.links_a.length === 2 && clean.links_a.every((p) => /g438 [bc] /.test(p))
+          && clean.vertices === clean.pairs * 2 && clean.colour === "#ffc857" && clean.edges_stat === clean.pairs;
+        return { pass: ok && !!planted && !planted.error && planted.links_a.length === 0 && planted.pairs === 0 && planted.vertices === 0, evidence: { clean, planted } };
       },
     },
     {

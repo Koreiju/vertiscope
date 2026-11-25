@@ -21,3 +21,11 @@ test("a parameter with no default, or no such def, is refused", () => {
   assert.equal(setDefault(NOTE, "scan", "url", "1"), null);
   assert.equal(setDefault(NOTE, "nope", "k", "1"), null);
 });
+
+test("a trait's default: the first argument of its trait call", async () => {
+  const { setTraitDefault } = await import("../src/nodedefs.ts");
+  const T = "import traitlets\nclass Knob(traitlets.HasTraits):\n    level = traitlets.Int(3)\n    name = traitlets.Unicode('a', help='x')\n";
+  assert.ok(setTraitDefault(T, "Knob", "level", "5").includes("level = traitlets.Int(5)\n"));
+  assert.ok(setTraitDefault(T, "Knob", "name", '"b"').includes(`name = traitlets.Unicode("b", help='x')`));
+  assert.equal(setTraitDefault(T, "Nope", "level", "5"), null);
+});
