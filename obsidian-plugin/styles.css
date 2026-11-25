@@ -1526,3 +1526,24 @@ body.domvec-chatui-pulling, body.domvec-chatui-pulling * { user-select: none !im
 /* Links between panels (183, G-398): the only graph mark on the plane. */
 .domvec-plane-links { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 0; overflow: visible; }
 .domvec-plane-links line { stroke: #b48ef0; stroke-width: 1.5; stroke-opacity: 0.7; stroke-dasharray: 5 4; }
+
+/* PLUGIN_GOAL 196: "make each of the 'outline' things like text and things
+   'sparkle' with something like the @sparkle.gif" -- four-point stars,
+   yellow-green and lavender, twinkling out of phase over every box the cell
+   draws on a page (hover, structure, diff, pin). The later word over 186's
+   "NO SPECIAL EFFECTS" for these boxes. Opacity only, so the compositor does
+   the work; never the pointer; nothing written into the page. Reduced motion:
+   the stars hold still. Planted `body.domvec-plant-no-sparkle`: none. */
+:is(.domvec-chunk-outline, .domvec-chunk-struct, .domvec-diff-box, .domvec-chunk-pin)::before,
+:is(.domvec-chunk-outline, .domvec-chunk-struct, .domvec-diff-box, .domvec-chunk-pin)::after {
+  content: ""; position: absolute; inset: -6px; pointer-events: none;
+  background-repeat: repeat; animation: domvec-sparkle 1.7s ease-in-out infinite; }
+:is(.domvec-chunk-outline, .domvec-chunk-struct, .domvec-diff-box, .domvec-chunk-pin)::before { background-image: url("data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2296%22 height=%2272%22><path fill=%22%23e3f03a%22 d=%22M14 5 L15.120000000000001 10.879999999999999 L21 12 L15.120000000000001 13.120000000000001 L14 19 L12.879999999999999 13.120000000000001 L7 12 L12.879999999999999 10.879999999999999 Z%22/><path fill=%22%23e3f03a%22 d=%22M70 16 L70.64 19.36 L74 20 L70.64 20.64 L70 24 L69.36 20.64 L66 20 L69.36 19.36 Z%22/><path fill=%22%23e3f03a%22 d=%22M40 41 L41.44 48.56 L49 50 L41.44 51.44 L40 59 L38.56 51.44 L31 50 L38.56 48.56 Z%22/><path fill=%22%23e3f03a%22 d=%22M86 59 L86.48 61.52 L89 62 L86.48 62.48 L86 65 L85.52 62.48 L83 62 L85.52 61.52 Z%22/><path fill=%22%23e3f03a%22 d=%22M22 55 L22.48 57.52 L25 58 L22.48 58.48 L22 61 L21.52 58.48 L19 58 L21.52 57.52 Z%22/></svg>"); }
+:is(.domvec-chunk-outline, .domvec-chunk-struct, .domvec-diff-box, .domvec-chunk-pin)::after { background-image: url("data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2296%22 height=%2272%22><path fill=%22%23b8a6ff%22 d=%22M56 3 L56.8 7.2 L61 8 L56.8 8.8 L56 13 L55.2 8.8 L51 8 L55.2 7.2 Z%22/><path fill=%22%23b8a6ff%22 d=%22M8 33 L8.48 35.52 L11 36 L8.48 36.48 L8 39 L7.52 36.48 L5 36 L7.52 35.52 Z%22/><path fill=%22%23b8a6ff%22 d=%22M78 32 L79.28 38.72 L86 40 L79.28 41.28 L78 48 L76.72 41.28 L70 40 L76.72 38.72 Z%22/><path fill=%22%23b8a6ff%22 d=%22M34 21 L34.48 23.52 L37 24 L34.48 24.48 L34 27 L33.52 24.48 L31 24 L33.52 23.52 Z%22/><path fill=%22%23b8a6ff%22 d=%22M60 60 L60.64 63.36 L64 64 L60.64 64.64 L60 68 L59.36 64.64 L56 64 L59.36 63.36 Z%22/></svg>");
+  background-position: 31px 17px; animation-duration: 2.3s; animation-delay: -0.9s; }
+@keyframes domvec-sparkle { 0%, 100% { opacity: 0.12; } 45% { opacity: 0.95; } 60% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) {
+  :is(.domvec-chunk-outline, .domvec-chunk-struct, .domvec-diff-box, .domvec-chunk-pin)::before,
+  :is(.domvec-chunk-outline, .domvec-chunk-struct, .domvec-diff-box, .domvec-chunk-pin)::after { animation: none; opacity: 0.6; } }
+body.domvec-plant-no-sparkle :is(.domvec-chunk-outline, .domvec-chunk-struct, .domvec-diff-box, .domvec-chunk-pin)::before,
+body.domvec-plant-no-sparkle :is(.domvec-chunk-outline, .domvec-chunk-struct, .domvec-diff-box, .domvec-chunk-pin)::after { content: none; }

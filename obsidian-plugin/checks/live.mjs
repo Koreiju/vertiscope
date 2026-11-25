@@ -14237,6 +14237,50 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-417",
+      asks: "the outlines sparkle (PLUGIN_GOAL 196: 'make each of the outline things ... sparkle with something like the @sparkle.gif'): a real hover over a page's chunk shows its outline with two star layers (yellow-green and lavender four-point stars) whose opacity twinkles over time, never taking the pointer; every box class (hover, structure, diff, pin) carries them; planted (body.domvec-plant-no-sparkle) no stars",
+      async run() {
+        const PAGE = "https://en.wikipedia.org/wiki/Trie";
+        const arm = (planted) => evaluate(`(async () => {
+          ${PREP}
+          document.body.classList.toggle("domvec-plant-no-sparkle", ${planted});
+          try {
+            if (!(await land(${JSON.stringify(PAGE)}, 30000))) return { error: "did not land" };
+            await sleep(2500);
+            const wv = b.webview, r = wv.getBoundingClientRect(), wrap = wv.parentElement;
+            const ol = wrap.querySelector(".domvec-chunk-outline");
+            let shown = false;
+            for (let i = 0; i < 12 && !shown; i++) {
+              wv.sendInputEvent({ type: "mouseMove", x: Math.round(200 + i * 37), y: Math.round(160 + i * 41) });
+              const t0 = performance.now();
+              while (performance.now() - t0 < 900) { if (ol && ol.offsetWidth > 0 && ol.offsetHeight > 0) { shown = true; break; } await sleep(40); }
+            }
+            if (!shown) return { error: "no outline shown", planted: ${planted} };
+            const layer = (el, which) => { const st = getComputedStyle(el, which); return { content: st.content, anim: st.animationName, svg: st.backgroundImage.includes("svg"), pe: st.pointerEvents }; };
+            const before = layer(ol, "::before"), after = layer(ol, "::after");
+            const ops = [];
+            for (let i = 0; i < 14; i++) { ops.push(+getComputedStyle(ol, "::before").opacity); await sleep(120); }
+            // Every box class: the same layers, read from a probe of each class.
+            const classes = {};
+            for (const c of ["domvec-chunk-outline", "domvec-chunk-struct", "domvec-diff-box", "domvec-chunk-pin"]) {
+              const pr = wrap.createDiv({ cls: c }); pr.style.left = "-9999px";
+              const bf = getComputedStyle(pr, "::before"), af = getComputedStyle(pr, "::after");
+              classes[c] = bf.content !== "none" && af.content !== "none" && bf.animationName === "domvec-sparkle" && af.backgroundImage.includes("svg");
+              pr.remove();
+            }
+            return { planted: ${planted}, shown, before, after,
+                     twinkle: Math.round((Math.max(...ops) - Math.min(...ops)) * 100) / 100,
+                     classes: Object.values(classes).filter(Boolean).length, class_detail: classes };
+          } finally { document.body.classList.remove("domvec-plant-no-sparkle"); }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const has = (x) => !!x && !x.error && x.before.anim === "domvec-sparkle" && x.before.svg && x.after.svg && x.before.pe === "none";
+        const ok = has(clean) && clean.twinkle >= 0.25 && clean.classes === 4;
+        const caught = !!planted && !planted.error && planted.before.content === "none" && planted.classes === 0;
+        return { pass: ok && caught, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-414",
       asks: "hovering a CHUNK node in the 3D view opens its billboard as a preview (PLUGIN_GOAL 192: 'I should be able to view the panel billboard previews when hovering'): in fly-to mode, a pointer move onto chunk nodes on screen -- through the pane's own pointer handler -- opens THAT node's panel (or its unit's) within the dwell, and a move off onto empty canvas lets it go; planted (plantNo3DHoverPanel) no hover opens anything",
       async run() {
