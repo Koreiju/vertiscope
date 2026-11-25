@@ -1151,6 +1151,10 @@ button.domvec-run-fence:hover {
   display: flex; flex-direction: column; overflow: hidden; }
 .domvec-plane-card > .workspace-leaf { position: relative; height: min(360px, 55vh); }
 .domvec-plane-card > .workspace-leaf > .workspace-leaf-content { height: 100%; }
+/* The ego card resizes from its edges (cockpit.ts): the card holds the size,
+   the editor fills it. */
+.domvec-cockpit-card { height: min(420px, 60vh); min-width: 180px; min-height: 120px; }
+.domvec-cockpit-card > .workspace-leaf { height: auto; flex: 1 1 auto; min-height: 0; }
 /* A slate has no chrome (G-278): the hosted note's view header goes. */
 .domvec-plane-card .view-header { display: none; }
 .domvec-plane-card .markdown-source-view.mod-cm6 .cm-scroller { padding-top: 6px; }

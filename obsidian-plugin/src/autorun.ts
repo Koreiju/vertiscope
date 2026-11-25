@@ -48,3 +48,80 @@ export class AutoRun {
     } finally { this.busy.delete(key); }
   }
 }
+
+/**
+ * Edges BETWEEN notes (2026-11-25: "I also doubt we have any completeness on
+ * our dependency graph"). A compiled link is a cell `b = Vault.read("/b.md")`
+ * (G-420), which the per-note dataflow (G-380) can only list as an outside
+ * ref. This keeps the reverse index -- each note to the notes whose cells read
+ * it -- and when a note changes, re-runs exactly those reading cells, so an
+ * edit in b reaches a. Planted `plantNoCross`: nothing re-runs across notes.
+ *
+ * In trie terms: an edge is vault://a#cell n -> vault://b, read from a's text;
+ * a change to page b re-writes each reading cell's output block in page a.
+ */
+const READ = /Vault\.read\(\s*["']([^"'\n]+)["']/g;
+const SKIP = /^(build|\.trash|domvec\/chunks|\.obsidian)\//;
+
+export class CrossRun {
+  stats = { indexed: 0, edges: 0, reran: 0, last: "" };
+  plantOff = false;
+  delayMs = 900;
+  /** target path -> reader paths. */
+  readers = new Map<string, Set<string>>();
+  private reads = new Map<string, Set<string>>();
+  private timers = new Map<string, number>();
+  private running = new Set<string>();
+
+  constructor(private app: App, private run: (req: RunRequest) => Promise<any>) {}
+
+  static targetOf(reader: string, ref: string): string {
+    const p = ref.startsWith("/") ? ref.slice(1) : (reader.includes("/") ? reader.replace(/\/[^/]*$/, "/") : "") + ref;
+    return p.endsWith(".md") ? p : p + ".md";
+  }
+
+  private reindex(path: string, text: string): void {
+    for (const t of this.reads.get(path) || []) this.readers.get(t)?.delete(path);
+    const ts = new Set<string>();
+    for (const m of text.matchAll(READ)) ts.add(CrossRun.targetOf(path, m[1]));
+    if (ts.size) this.reads.set(path, ts); else this.reads.delete(path);
+    for (const t of ts) { if (!this.readers.has(t)) this.readers.set(t, new Set()); this.readers.get(t)!.add(path); }
+    this.stats.edges = [...this.readers.values()].reduce((n, s) => n + s.size, 0);
+  }
+
+  async build(): Promise<void> {
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      if (SKIP.test(f.path)) continue;
+      const t = await this.app.vault.cachedRead(f);
+      if (t.includes("Vault.read(")) this.reindex(f.path, t);
+      this.stats.indexed++;
+    }
+  }
+
+  /** A note was written: re-index it, then re-run the cells that read it. */
+  async onModify(file: TFile): Promise<void> {
+    if (SKIP.test(file.path) || file.extension !== "md") return;
+    this.reindex(file.path, await this.app.vault.cachedRead(file));
+    if (this.plantOff || this.running.has(file.path)) return;
+    for (const reader of this.readers.get(file.path) || []) {
+      if (reader === file.path) continue;
+      window.clearTimeout(this.timers.get(reader));
+      this.timers.set(reader, window.setTimeout(() => void this.rerun(reader, file.path), this.delayMs));
+    }
+  }
+
+  private async rerun(reader: string, target: string): Promise<void> {
+    this.timers.delete(reader);
+    const f = this.app.vault.getAbstractFileByPath(reader) as TFile | null;
+    if (!f || this.running.has(reader)) return;
+    const cells = findFences(await this.app.vault.read(f)).filter((c) => PY.test(c.lang)
+      && [...c.body.matchAll(READ)].some((m) => CrossRun.targetOf(reader, m[1]) === target));
+    this.running.add(reader);
+    try {
+      for (const c of cells) {
+        await this.run({ lang: c.lang, code: cellSource(c.body), line: c.openLine, path: reader, refs: c.refs });
+        this.stats.reran++; this.stats.last = reader + "#" + c.openLine + " <- " + target;
+      }
+    } finally { window.setTimeout(() => this.running.delete(reader), 1500); }
+  }
+}

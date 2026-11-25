@@ -6875,6 +6875,18 @@ heading is the title). A press that moves 3px drags; a still click edits. Every
 plane card carries a +chat cell in its corner that gives its note a ```chat
 cell (once) and puts the cursor in it.*
 
+2026-11-25:
+
+> I can't resize the ego markdown panel, I also doubt we have any completeness
+> on our dependency graph and pull-apart with our clear slate
+
+*Read as (199), mine: the ego card resizes from any edge, as every other panel
+does. The dependency graph stopped at the note's edge: a compiled link
+(`Vault.read`, G-420) was drawn but never re-ran its reader, so editing one
+note now re-runs the cells in other notes that read it. Pull-apart -- a
+panel's cells dragged out into cards of their own and back -- is not built;
+it is the item deferred on 2026-11-24 and stays open.*
+
 ### Recovered verbatim (2026-11-22 inventory)
 
 *Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,

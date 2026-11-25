@@ -26,6 +26,7 @@
  * query line asks the web (through the browser cell) when `duckduckgo` is
  * true -- typing alone never reaches the web (item 107).
  */
+import { edgeResizable } from "./edgeresize";
 import { plusChat } from "./chatcell";
 import { App, MarkdownView, TFile } from "obsidian";
 import { FoldState, SlateLine, foldsOf, isPlainCockpit, parseSlate, setFolds, titleLine } from "./slatefold";
@@ -34,6 +35,7 @@ import { outline, unfoldedOf, withUnfolded } from "./outline";
 export { parseSlate } from "./slatefold";
 export type { SlateLine } from "./slatefold";
 
+const SIZE_KEY = "domvec-plane-card:ego:size";
 export const COCKPIT_PATH = "domvec/ego.md";
 /** Remembered: the cockpit lives on the plane (items 52-53). */
 const DOCKED_KEY = "domvec-cockpit-on-plane";
@@ -214,6 +216,17 @@ export class Cockpit {
     // Draggable by its header node, contained in the plane (item 57).
     this.undrag = makeDraggable(card, plane, "domvec-plane-card:ego", this.placeStats);
     plusChat(this.app, card, f.path);
+    // Any edge or corner resizes it (PLUGIN_GOAL 159; 2026-11-25: "I can't
+    // resize the ego markdown panel"), the size remembered like its place.
+    try {
+      const sz = JSON.parse(window.localStorage.getItem(SIZE_KEY) || "null");
+      if (sz && sz.w > 0 && sz.h > 0) { card.style.width = `${sz.w}px`; card.style.height = `${sz.h}px`; }
+    } catch { /* a convenience only */ }
+    const unedge = edgeResizable(card, { onEnd: () => {
+      try { window.localStorage.setItem(SIZE_KEY, JSON.stringify({ w: card.offsetWidth, h: card.offsetHeight })); } catch { /* a convenience */ }
+    } });
+    const undragOnly = this.undrag;
+    this.undrag = () => { unedge(); undragOnly?.(); };
     // One cockpit: the sidebar's copy goes.
     for (const l of this.app.workspace.getLeavesOfType("markdown")) {
       if ((l.view as any)?.file?.path === COCKPIT_PATH) { l.detach(); this.dockStats.undocked_sidebar++; }

@@ -14408,6 +14408,8 @@ export function makeChecks(env) {
             await app.plugins.getPlugin("domvec-bridge").cockpit.open(); await sleep(800);
             const card = [...document.querySelectorAll(".domvec-plane-card")].find((c) => c.querySelector(".cm-content > .HyperMD-header-1"));
             if (!card) return { error: "no card with a heading" };
+            const keepPos = { l: card.style.left, t: card.style.top, r: card.style.right };
+            card.style.right = "auto"; card.style.left = "200px"; card.style.top = "120px"; await sleep(100);   // mid-plane: no edge clamps the drag
             const h = card.querySelector(".cm-content > .HyperMD-header-1"), r = h.getBoundingClientRect();
             const x = r.left + 20, y = r.top + r.height / 2;
             const at = () => card.getBoundingClientRect().left;
@@ -14417,6 +14419,7 @@ export function makeChecks(env) {
             const l1 = at(); ev("mousedown", h, 0); for (const d of [-10, -30, -60]) { ev("mousemove", window, d); await sleep(30); } ev("mouseup", window, -60); await sleep(150);
             const moved = Math.round(at() - l1);
             if (moved) { ev("mousedown", card.querySelector(".cm-content > .HyperMD-header-1"), 0); for (const d of [10, 30, 60]) { ev("mousemove", window, d); await sleep(30); } ev("mouseup", window, 60); await sleep(150); }
+            Object.assign(card.style, { left: keepPos.l, top: keepPos.t, right: keepPos.r });
             const titles = [...document.querySelectorAll(".domvec-plane-card")].map((c) => ({ h1: !!c.querySelector(".cm-content > .HyperMD-header-1:first-child"),
               shown: !!c.querySelector(".inline-title") && getComputedStyle(c.querySelector(".inline-title")).display !== "none" }));
             return { planted: ${planted}, still_dx: still, drag_dx: moved, editable: h.closest("[contenteditable=true]") != null,
@@ -14461,6 +14464,71 @@ export function makeChecks(env) {
         const clean = await arm(false), planted = await arm(true);
         const ok = !!clean && clean.plus && clean.cells_in_note === 1 && clean.at_foot && clean.drawn && clean.focused;
         return { pass: ok && !!planted && planted.plus === false, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-425",
+      asks: "the ego card resizes from its edges (2026-11-25: 'I can't resize the ego markdown panel'): dragging its top-left corner 60px left and 50px up grows the card by that much, the editor inside grows with it, and the size is remembered; planted (__domvecPlantNoEdgeResize) the drag changes nothing",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          window.__domvecPlantNoEdgeResize = ${planted};
+          const cp = app.plugins.getPlugin("domvec-bridge").cockpit;
+          const K = "domvec-plane-card:ego:size", keepK = localStorage.getItem(K);
+          try {
+            cp.undock(); await cp.open(); await sleep(800);
+            const card = document.querySelector(".domvec-cockpit-card");
+            if (!card) return { error: "no card" };
+            const keep = { w: card.style.width, h: card.style.height, l: card.style.left, t: card.style.top, r: card.style.right };
+            card.style.right = "auto"; card.style.left = "200px"; card.style.top = "120px"; await sleep(100);
+            const leaf = card.querySelector(":scope > .workspace-leaf");
+            const r = card.getBoundingClientRect(), l0 = leaf.getBoundingClientRect().height;
+            const pe = (t, el, x, y) => el.dispatchEvent(new PointerEvent(t, { bubbles: true, cancelable: true, button: 0, buttons: t === "pointerup" ? 0 : 1, clientX: x, clientY: y, pointerId: 1 }));
+            const x = r.left + 2, y = r.top + 2;
+            pe("pointerdown", card, x, y); for (const d of [10, 30, 60]) { pe("pointermove", window, x - d, y - d * 50 / 60); await sleep(30); } pe("pointerup", window, x - 60, y - 50); await sleep(200);
+            const r2 = card.getBoundingClientRect(), l1 = leaf.getBoundingClientRect().height;
+            const saved = localStorage.getItem(K);
+            Object.assign(card.style, { width: keep.w, height: keep.h, left: keep.l, top: keep.t, right: keep.r });
+            return { planted: ${planted}, dw: Math.round(r2.width - r.width), dh: Math.round(r2.height - r.height), leaf_dh: Math.round(l1 - l0), saved: !!saved && saved !== keepK };
+          } finally {
+            window.__domvecPlantNoEdgeResize = false;
+            if (keepK == null) localStorage.removeItem(K); else localStorage.setItem(K, keepK);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && Math.abs(clean.dw - 60) <= 3 && Math.abs(clean.dh - 50) <= 3 && clean.leaf_dh >= 40 && clean.saved;
+        return { pass: ok && !!planted && !planted.error && planted.dw === 0 && planted.dh === 0, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-426",
+      asks: "edges between notes are live (2026-11-25: 'I also doubt we have any completeness on our dependency graph'): note a has a cell reading note b (b = Vault.read(...), a compiled link, G-420); editing b -- no Run press in a -- re-runs that cell, whose output then shows b's new text; planted (crossRun.plantOff) a's cell is not re-run and never sees the edit",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const pl = app.plugins.getPlugin("domvec-bridge"), cr = pl.crossRun;
+          cr.plantOff = ${planted};
+          const tag = (${planted} ? "p" : "c") + Date.now().toString(36);
+          const dir = "domvec-checks", pb = dir + "/g426 b " + tag + ".md", pa = dir + "/g426 a " + tag + ".md";
+          try {
+            if (!app.vault.getAbstractFileByPath(dir)) await app.vault.createFolder(dir).catch(() => 0);
+            const b = await app.vault.create(pb, "before");
+            await app.vault.create(pa, F + "python" + NL + "b = Vault.read(" + JSON.stringify("/" + pb) + ")" + NL + "print('SEES', 'AFTER426' in b)" + NL + F + NL);
+            await sleep(600);
+            const edges = cr.readers.get(pb) ? cr.readers.get(pb).size : 0, ran0 = cr.stats.reran;
+            await app.vault.modify(b, "after AFTER426");
+            let a = "";
+            for (let k = 0; k < 60; k++) { await sleep(250); a = await app.vault.read(app.vault.getAbstractFileByPath(pa)); if (a.includes("SEES True")) break; }
+            return { planted: ${planted}, edge_indexed: edges, reran: cr.stats.reran - ran0, sees_after: a.includes("SEES True"), last: cr.stats.last };
+          } finally {
+            cr.plantOff = false;
+            for (const p of [pa, pb]) { const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.delete(f).catch(() => 0); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && clean.edge_indexed === 1 && clean.reran >= 1 && clean.sees_after;
+        return { pass: ok && !!planted && planted.edge_indexed === 1 && planted.reran === 0 && !planted.sees_after, evidence: { clean, planted } };
       },
     },
     {

@@ -65,7 +65,7 @@ import { PLANE_FOLDER, PlaneDesk } from "./planepanels";
 import { BrowseCard } from "./browsecard";
 import { EditorCalls } from "./editorcalls";
 import { DataflowRun, noteTextOf } from "./dataflowrun";
-import { AutoRun } from "./autorun";
+import { AutoRun, CrossRun } from "./autorun";
 import { CodeRows } from "./coderows";
 import { BrowserPanel } from "./browserpanel";
 import { PlaneHalo } from "./planehalo";
@@ -204,6 +204,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }
     this.sidecar = new Sidecar(() => this.settings.sidecar);
     this.autoRun = new AutoRun(this.app, (req) => this.onRunFence(req), (p) => p === "domvec/ego.md" || p.startsWith("domvec-checks/g418"));
+    // Edges between notes: a change to a note re-runs the cells that read it (G-426).
+    this.crossRun = new CrossRun(this.app, (req) => this.onRunFence(req));
+    this.app.workspace.onLayoutReady(() => void this.crossRun.build());
+    this.registerEvent(this.app.vault.on("modify", (f: any) => { if (f instanceof TFile) void this.crossRun.onModify(f); })); this.registerEvent(this.app.vault.on("create", (f: any) => { if (f instanceof TFile) void this.crossRun.onModify(f); }));
     // The kernel's vault facade (P-N4) is rooted at the vault's own folder.
     this.sidecar.vaultRoot = String((this.app.vault.adapter as any).basePath || "");
     // The sidecar told where the vault is (G-277): a `{ref}` to a note reads the
@@ -1220,6 +1224,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
   /** Edits re-run (194): a pause in a python cell runs it and its readers. */
   autoRun!: AutoRun;
+  crossRun!: CrossRun;
   async onRunFence(req: RunRequest): Promise<any> {
     const note = req.path || this.app.workspace.getActiveFile()?.path || "";
     if (!note) {
