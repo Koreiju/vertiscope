@@ -41,6 +41,18 @@ cite the latest series by bare number, under the rule at §13's head.
 >   interfaces with our package research" beside the live objects (187:
 >   G-408, G-410, G-412, G-413). O-5, O-7, O-8 and O-11 stand.
 
+>
+> **Calls made 2026-11-24 on the reader's leave ("use your best judgement"):**
+> 194 as read: new compile and link work lives in code cells (G-380's
+> dataflow); the cockpit stays a slate, drawn plain (G-415), so search and
+> view keep working. 193 (b)'s `#` query is not adopted: an Obsidian tag
+> stops at the first space, so only one word would be highlighted, and
+> every real tag would fire a search; `[query]()` stays the gesture. O-5:
+> records and readouts cross notes, live values stay per note. O-11: an
+> unnest stays read-only; 166 holds until an unnest is built. G-416 (two
+> embeddings, one over interface types) and 194 (f) (composing groups) are
+> the next builds. Done in this pivot: G-415 (plain panels), G-408 (comm
+> bridge), G-417 (sparkle), G-38's check repaired.
 ---
 
 ## 1. The record, by date
