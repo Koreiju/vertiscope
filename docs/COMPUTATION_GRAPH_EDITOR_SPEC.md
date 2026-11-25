@@ -1370,7 +1370,7 @@ only", 164).
 | 12d links from compilation | **stands**, made concrete by §13f |
 | 12e governing class, tool panels, agents, chat | **stands**, each made a live object (§13h) |
 | 12f 3D | **stands**: a 3D billboard is one more `render` of the same model |
-| 12h G-401 (fields in the ego slate) | written, not yet seen live (PRD Partly); stands for the cockpit |
+| 12h G-401 (fields in the ego slate) | written, uncommitted, deployed 2026-11-24 (PRD Partly; O-3); stands for the cockpit |
 | 12h G-402/403 (reveal editable; resolved-external drop) | **superseded for code objects** by the object canvas and the editor's nodes; stands for markdown records, prose notes and slates alike (B10), so for the cockpit's fields too (the search node, §13h) |
 | 12h G-404 (links only from compilation) | **stands** |
 | 12h G-405 (the craft's circles hidden) | **stands** |
@@ -1669,7 +1669,10 @@ with the app, **U** an unclear term or step.
 | F-106 | I | app (G-414 `hover3d`) vs §12f | §12f: "a hovered node billboards its record revealed to its level: higher rank, more of the tree"; G-414 previews chunk nodes and does nothing over a page or path node | O-8 |
 | F-107 | M | PRD G-414 | status "Open" for a row built and passed by its live check with a planted arm; that state is `Confirm` | Confirm |
 | F-108 | U | spec O-5 | three ways a live value could cross, then "Either ... or" offering two of them again | the repeated sentence removed |
-| F-109 | I | spec O-3 vs the app | O-3 said G-401, G-404, G-405 were not seen live; the 2026-11-24 rebuild deployed them. G-405's craft gate is seen working (192: the dotted lines gone); G-401's separate `domvec/ego canvas.md` card shows on the plane, which §12c ("one ego") and §12g retire | O-3 restated |
+| F-109 | I | spec O-3 vs the app | O-3 said G-401, G-404, G-405 were not seen live; the 2026-11-24 rebuild deployed them. G-405's craft gate is seen working (192: the dotted lines gone); a `domvec/ego canvas.md` card shows on the plane, the note §12c ("one ego") and §12g retire | O-3 restated (its first wording blamed G-401: F-112) |
+| F-110 | I | PRD G-401, G-404, G-405 vs O-3 (F-109) | the rows still said "not seen live" after the rebuild deployed them | each row says deployed, and what was seen |
+| F-111 | U | PLUGIN_GOAL 192 "Read as" (a) | "the hover's own path, as a browser hover does": a browser hover flies the camera (G-215), the 3D hover (G-414) does not | the billboard path named (`hoverPanel`), the flight excluded, the reason marked as my reading |
+| F-112 | M | spec O-3, F-109, PRD G-401 (my wording) | the plane's `domvec/ego canvas.md` card was attributed to G-401; `egocanvas.ts` reads that note once as a seed (`OLD_CANVAS_PATH`) and opens only the cockpit (`openCanvas`). The card is a panel left open on the plane from the G-396 era | O-3 and G-401 say so |
 
 **Still open** -- O-1 to O-4 and O-6 to O-9 are work the design names; O-5 is a question for the reader:
 
@@ -1680,10 +1683,12 @@ with the app, **U** an unclear term or step.
   The app and its checks disagree until those checks follow the PRD's
   superseded rows.
 - O-3. G-401, G-404 and G-405 are written, not committed, and deployed
-  by the 2026-11-24 rebuild (F-109). G-405 is seen working. G-401 draws a
-  separate `domvec/ego canvas.md` card on the plane, the note §12c's "one
-  ego" retires; with the clipboard card it covers the 3D view's chunk nodes,
-  so hover and click reach none of them there.
+  by the 2026-11-24 rebuild (F-109). G-405 is seen working.
+  G-401 reads the old `domvec/ego canvas.md` once, as a seed, and draws no
+  card for it (F-112). That note is still open on the plane as a panel from
+  the G-396 era, the note §12c's "one ego" retires. With the clipboard card
+  it covers the 3D view's chunk nodes, so hover and click reach none of them
+  there. Closing it is the reader's layout, asked 2026-11-24.
 - O-4. The scope ladder: T-9 rules chunk -> group -> page -> browser
   (from 137.4, "chunk groups"); the governing browser class and
   G-301 step chunk -> page -> live. The ruling is the later word: the class

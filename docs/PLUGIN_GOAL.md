@@ -6650,8 +6650,10 @@ lavender lines running from them down off the bottom of the pane:*
 > I don't know what these dotted lines are and it really bothers me
 
 *Read as (192): (a) hovering a CHUNK node in the 3D view opens its billboard as
-a preview -- the hover's own path, as a browser hover does, governed by the
-panels toggle; 157's "hover then click opens" stays for keeping it. This also
+a preview -- the browser hover's billboard path (`hoverPanel`), governed by the
+panels toggle, but WITHOUT its flight: a browser hover flies the camera to the
+node (G-215), and a 3D hover that flew would move the node from under the
+pointer (my reading, not the reader's words); 157's "hover then click opens" stays for keeping it. This also
 carries 183's "hovering ... billboarded in 3D" to the world's nodes; (b) and
 (c) are questions about features already built, answered by measurement;
 (d) the dotted lines are the retired craft's tethers (186's "leftover edge"),
