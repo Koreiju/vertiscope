@@ -6659,6 +6659,89 @@ carries 183's "hovering ... billboarded in 3D" to the world's nodes; (b) and
 (d) the dotted lines are the retired craft's tethers (186's "leftover edge"),
 which must not be drawn.*
 
+### 193. (2026-11-24) The markdown panels are overdone; plain Obsidian panels, the hashtag query, one interface
+
+Sent with three screenshots. The first is the ego slate as the plane draws it
+today (the `ego canvas` and `web` pills; `ego {unfolded} {view}`, its fields
+as purple `{ref}` chips with red wavy underlines; `outline_note` and
+`g394 look` folded below). The second and third are a plain Obsidian note the
+reader wrote, rendered natively, as what was expected.
+
+> Also you're totally overdoing the work required for the markdown panels.
+> The second image is what I would have expected and hoped for, with some
+> extensions and suggestions compactly described and illustrated in the
+> third.
+
+The note in the second image, transcribed:
+
+> # Here's the panel's header field
+>
+> ## Here's the first subheading
+> Look at how smooth and easy this is to see. We can likely remove the purple
+> nodes and simply keep the highlighting [link] as regular obsidian panels
+> exactly. All of this basic essences is extremely strong and well-built
+> information as-is. #since highlighting works the same for regular markdown
+> hyperlinks and that's the real link to our basic retrieval gesture in the
+> first place, perhaps instead we prepend the entire query to our database
+> with a hashtag
+>
+> ## here's an example of how we over-engineered
+> ```python
+> # The same should go for python code, which is already supported by the
+> base obsidian panels, and we may have been over-engineering the whole time.
+> because this is where were really also draw our link to instantiating what
+> is contained in a specific artifact to its interactive canvas interface
+> component
+> ```
+
+The third image adds, under the same code block:
+
+> ## Another good point on interoperable interaces
+> Here is some guides on how we make interactive canvases with hard types
+> dynamic and interoperable per user and code/agent decisions on navigations
+> and interactions with tools.
+> ```#this is also how we can enable the retrieval-gesture to operate on
+> types of artifacts we currently have, no matter their specificities or
+> generalities, either base-interface code tools that we use as the code-side
+> control equivalent for regular UI interactions and gestures, where retrieval
+> results include both types and what the closest matching artifact is, so we
+> generate two query embeddings; one for natural language to query over the
+> types of artifacts/canvas interfaces which we shall assume to be one
+> singular 'interface' that generalizes to the full set of interface canvas
+> types we'll deal with i.e. code artifacts have equivalent editor tools and
+> terminal interfaces, retrieved web chunks have interactive components that
+> link to the live browser when an action is taken on the tool component or
+> interactive interface for the human user. general pypi packages could be
+> recursively chunked, vectorized, and tooled as interfaces if we assume the
+> unnesting on dependencies action is taken on the code canvas interface
+> which then instantiates a similar web stream dynamic but for code
+> dependency chunking and vectorization. there are some good code retrieval
+> and embedding quantized models on huggingface with permissive GGUF.
+> ```
+
+*Read as (193), mine, to be corrected:*
+- *(a) A panel is a plain Obsidian markdown note, rendered natively:
+  headings, prose, links, code blocks. The purple `{ref}` chips go. What
+  stays is Obsidian's own link highlighting.*
+- *(b) The retrieval gesture rides on that highlighting. A link is already
+  the gesture (R-1's `[query]()`); the suggestion is a `#` before the query,
+  so a hashtag is a query to the database. "Perhaps": a suggestion, not a
+  ruling.*
+- *(c) A Python cell is Obsidian's own code block. The fence is where an
+  artifact links to its interactive canvas component; nothing more is drawn
+  around it.*
+- *(d) One "interface" generalizes every canvas type: code (editor tools, a
+  terminal), web chunks (components that act on the live browser), and the
+  rest. A query makes two embeddings: one natural-language embedding over
+  the interface types, one over content. Results give both the type and
+  the closest artifact.*
+- *(e) Unnesting a code canvas's dependencies could chunk, vectorize and
+  tool a PyPI package, by the same stream the web uses. This bears on 166
+  (the codebase leaves the 3D layout) and 189 (an app tool's dependencies
+  hidden).*
+- *(f) Quantized permissive GGUF code models are suggested for code
+  retrieval and embedding. Any download waits for the reader's yes.*
+
 ### Recovered verbatim (2026-11-22 inventory)
 
 *Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,
