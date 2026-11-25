@@ -207,6 +207,9 @@ AGENT_RUNS: dict = {}
 #: G-413: each terminal pane's last command and its output -- the terminal's
 #: VIEW, which a kernel reads as `Terminal.last()` (`GET /shell_last`).
 SHELL_LAST: dict = {}
+#: G-413: the 3D search field's last query and its first hits -- the search
+#: tool's VIEW, which a kernel reads as `Search.last()` (`GET /search_last`).
+SEARCH_LAST: dict = {"query": "", "hits": [], "at": 0}
 PLANT_NO_VAULT = [False]
 #: Planted (PLUGIN_GOAL 62): a note's markdown trees are not compiled into its kernel.
 PLANT_NO_TREES = [False]
@@ -3942,6 +3945,18 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
+        if route == "search_view":
+            # G-413: the search field says what it shows (its query, its first
+            # hits); nothing is searched here.
+            try:
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+            except Exception:                       # noqa: BLE001
+                body = {}
+            SEARCH_LAST.update({"query": str(body.get("query") or ""),
+                                "hits": [h for h in (body.get("hits") or [])][:20], "at": time.time()})
+            self._send(200, {"ok": True})
+            return
+
         if route == "agent_status":
             try:
                 length = int(self.headers.get("Content-Length") or 0)
@@ -6567,6 +6582,10 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, {"enabled": False, "shells": []})
             else:
                 self._send(200, dict(self.shell_pool.status(), enabled=True))
+            return
+
+        if segments[0] == "search_last":
+            self._send(200, SEARCH_LAST)
             return
 
         if segments[0] == "shell_last":

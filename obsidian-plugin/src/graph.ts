@@ -6862,6 +6862,12 @@ export class GraphView extends ItemView {
     if (ref) this.similarEncoderCalls = Number(got.encoder_calls ?? -1);
     const hits: FieldHit[] = (got.hits || []).map((h: any) => ({ cid: String(h.cid), url: String(h.url || "") }));
     this.searchStats.last_ms = Math.round(performance.now() - t0);
+    // G-413: the search field's view -- its query and what it shows -- to the
+    // sidecar for `Search.last()`, and the cells reading it re-run.
+    if (!ref) {
+      void this.sidecar.searchView(query, hits.slice(0, 20)).then(() =>
+        window.dispatchEvent(new CustomEvent("domvec-tool-view", { detail: { tool: "search", url: query } })));
+    }
     return { hits, n: Number(got.n || hits.length) };
   }
 

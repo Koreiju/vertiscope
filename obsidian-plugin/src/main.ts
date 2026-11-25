@@ -323,7 +323,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.slots.add({ id: "agent", slot: "codeblock:agent", register: () => this.registerMarkdownCodeBlockProcessor("agent",
       agentBlock(this.app, () => this.settings.sidecar, (f) => this.desk.open(f), (ask) => this.editor.carry(ask))) });
     this.slots.add({ id: "chat", slot: "codeblock:chat", register: () => this.registerMarkdownCodeBlockProcessor("chat",
-      chatCell(this.app, (p, c, on) => this.sidecar.chatStream(p, c, on))) });
+      chatCell(this.app, (p, c, on, sig) => this.sidecar.chatStream(p, c, on, sig))) });
     this.slots.add({ id: "tool", slot: "codeblock:tool", register: () => this.registerMarkdownCodeBlockProcessor("tool", async (src, el) => {
       const name = src.trim().split(/\s+/)[0] || "";
       if ((window as any).__domvecPlantNoToolPanel) { el.createEl("pre", { text: src }); return; }

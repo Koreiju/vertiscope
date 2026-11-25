@@ -22,10 +22,10 @@ const NL = String.fromCharCode(10);
 /** Context sent with a turn, from the foot of the note above the cell. */
 const CONTEXT_CHARS = 8000;
 
-export const chatCellStats = { turns: 0, last: null as null | { prompt: string; context_chars: number; tokens: number; ms: number; written: boolean } };
+export const chatCellStats = { turns: 0, stopped: 0, last: null as null | { prompt: string; context_chars: number; tokens: number; ms: number; written: boolean } };
 (window as any).__domvecChatCell = chatCellStats;
 
-export function chatCell(app: App, stream: (prompt: string, ctx: string[], on: (t: string) => void) => Promise<string>) {
+export function chatCell(app: App, stream: (prompt: string, ctx: string[], on: (t: string) => void, signal?: AbortSignal) => Promise<string>) {
   return (src: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
     if ((window as any).__domvecPlantChatStrip) { el.createEl("pre", { text: src }); return; }
     const box = el.createDiv({ cls: "domvec-chat-cell" });
@@ -33,13 +33,21 @@ export function chatCell(app: App, stream: (prompt: string, ctx: string[], on: (
     const input = box.createEl("textarea", { cls: "domvec-chat-cell-input" });
     input.rows = 2;
     input.placeholder = "Ask about this note -- Enter sends, Shift+Enter for a new line";
-    let busy = false;
+    let busy = false, stopper: AbortController | null = null;
+    // G-412 (spec 13h: "a Stop cancels it"): while a reply streams, ■ stop ends
+    // it; what streamed is kept as the turn, marked stopped. Planted
+    // `__domvecPlantNoStop`: no stop control.
+    const stop = box.createEl("button", { cls: "domvec-chat-stop", text: "■ stop" });
+    stop.hide();
+    stop.onclick = () => { stopper?.abort(); };
     input.addEventListener("keydown", async (e: KeyboardEvent) => {
       if (e.key !== "Enter" || e.shiftKey) return;
       e.preventDefault(); e.stopPropagation();
       const prompt = input.value.trim();
       if (!prompt || busy) return;
       busy = true; input.disabled = true; out.setText("");
+      stopper = new AbortController();
+      if (!(window as any).__domvecPlantNoStop) stop.show();
       const f = app.vault.getAbstractFileByPath(ctx.sourcePath) as TFile | null;
       const info = ctx.getSectionInfo(el);
       const text = f ? await app.vault.read(f) : "";
@@ -47,7 +55,8 @@ export function chatCell(app: App, stream: (prompt: string, ctx: string[], on: (
       const context = above.trim() ? [above.slice(-CONTEXT_CHARS)] : [];
       const t0 = performance.now(); let tokens = 0, reply = "";
       try {
-        reply = await stream(prompt, context, (t) => { tokens++; out.appendText(t); });
+        reply = await stream(prompt, context, (t) => { tokens++; out.appendText(t); }, stopper.signal);
+        if (stopper.signal.aborted) { reply = reply.trimEnd() + " *(stopped)*"; chatCellStats.stopped++; }
       } catch (err) { reply = "*the chat did not answer: " + String((err as Error).message || err) + "*"; out.setText(reply); }
       // The turn into the note, above the cell: it stays at the foot.
       let written = false;
@@ -70,7 +79,7 @@ export function chatCell(app: App, stream: (prompt: string, ctx: string[], on: (
       // G-412: the chat's state changed -- the cells reading Chat.messages re-run.
       if (written) window.dispatchEvent(new CustomEvent("domvec-tool-view", { detail: { tool: "chat", url: ctx.sourcePath } }));
       chatCellStats.last = { prompt, context_chars: context.join("").length, tokens, ms: Math.round(performance.now() - t0), written };
-      busy = false; input.disabled = false; input.value = "";
+      busy = false; input.disabled = false; input.value = ""; stop.hide(); stopper = null;
     });
   };
 }

@@ -15344,6 +15344,92 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-441",
+      asks: "the search field as a live object (G-413; spec 13h, the base tools): Search.last() in a kernel is the 3D search field's query and the hits it shows; a drawn note's cell that reads it re-runs when the field searches -- with no Run press, its output naming the query; planted toolRun.plantOff: not re-run",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const pl = app.plugins.getPlugin("domvec-bridge"), tr = pl.toolRun, desk = pl.desk;
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
+          if (!g) return { error: "no graph" };
+          tr.plantOff = ${planted};
+          const tag = (${planted} ? "p" : "c") + Date.now().toString(36), q = "trie g441" + tag;
+          const path = "domvec-checks/g441 " + tag + ".md";
+          const out = { planted: ${planted} };
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, "# g441" + NL + NL + F + "python" + NL + "s = Search.last(); print('Q', s['query'], len(s['hits']))" + NL + F + NL);
+            await desk.open(f); await sleep(600);
+            for (let k = 0; k < 20 && !tr.readers.get("search")?.has(path); k++) await sleep(200);
+            out.indexed = !!tr.readers.get("search")?.has(path);
+            const r0 = tr.stats.reran;
+            const ans = await g.searchAsk(q, 8);
+            out.field_hits = ans ? ans.hits.length : -1;
+            const cur = async () => { const v = desk.viewOf(path); return v && v.editor ? v.editor.getValue() : await app.vault.read(f); };
+            let t = "";
+            for (let k = 0; k < (${planted} ? 12 : 40); k++) { t = await cur(); if ((t.split("nb-output")[1] || "").includes("Q " + q) && tr.stats.reran > r0) break; await sleep(300); }
+            out.reran = tr.stats.reran - r0;
+            out.names_query = (t.split("nb-output")[1] || "").includes("Q " + q);
+            return out;
+          } finally {
+            tr.plantOff = false;
+            await sleep(2000);
+            try { desk.closePath(path); } catch {}
+            for (let k = 0; k < 2; k++) { const x = app.vault.getAbstractFileByPath(path); if (x) await app.vault.delete(x).catch(() => 0); await sleep(1000); }
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.indexed && clean.field_hits >= 0 && clean.reran >= 1 && clean.names_query;
+        return { pass: ok && !!planted && !planted.error && planted.indexed && planted.reran === 0 && !planted.names_query, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-442",
+      asks: "a Stop cancels the chat's stream (G-412; spec 13h: 'a Stop cancels it'): while a reply streams, the chat cell shows a stop control; pressed, the stream ends at once, what streamed is kept as the turn, marked (stopped), and the input is free again; planted __domvecPlantNoStop: no stop control -- the reply runs to its end",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          window.__domvecChatDryMs = ${planted} ? 2500 : 6000; window.__domvecPlantNoStop = ${planted};
+          const path = "domvec-checks/g442 " + (${planted} ? "p" : "c") + Date.now().toString(36) + ".md";
+          if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+          const f = await app.vault.create(path, "# g442" + NL + NL + F + "chat" + NL + F + NL);
+          const leaf = app.workspace.getLeaf("tab");
+          const out = { planted: ${planted} };
+          try {
+            await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(900);
+            // The DRAWN cell: a reading view keeps a second, hidden copy of a block.
+            const ta = [...leaf.view.containerEl.querySelectorAll(".domvec-chat-cell textarea")].find((t) => t.offsetParent !== null);
+            if (!ta) return { ...out, error: "no chat cell" };
+            const stop = ta.closest(".domvec-chat-cell").querySelector(".domvec-chat-stop");
+            const t0 = window.__domvecChatCell.turns, s0 = window.__domvecChatCell.stopped, at = performance.now();
+            ta.value = "Count slowly";
+            ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+            await sleep(700);
+            out.stop_shown = !!stop && stop.offsetParent !== null;
+            if (out.stop_shown) stop.click();
+            for (let k = 0; k < 100 && window.__domvecChatCell.turns === t0; k++) await sleep(100);
+            out.ms = Math.round(performance.now() - at);
+            await sleep(600);
+            const body = await app.vault.read(f);
+            out.turn_written = body.includes("> **You** Count slowly");
+            out.marked = body.includes("*(stopped)*");
+            out.stopped = window.__domvecChatCell.stopped - s0;
+            out.input_free = !ta.disabled; out.stop_hidden = !stop || stop.offsetParent === null;
+            return out;
+          } finally {
+            window.__domvecChatDryMs = 0; window.__domvecPlantNoStop = false;
+            leaf.detach(); await sleep(800);
+            const x = app.vault.getAbstractFileByPath(path); if (x) await app.vault.delete(x).catch(() => 0);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.stop_shown && clean.ms < 3000 && clean.turn_written && clean.marked && clean.stopped === 1 && clean.input_free && clean.stop_hidden;
+        return { pass: ok && !!planted && !planted.error && !planted.stop_shown && planted.ms >= 2400 && !planted.marked, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-431",
       asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
       async run() {

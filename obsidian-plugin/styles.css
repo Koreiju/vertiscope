@@ -1579,3 +1579,6 @@ body.domvec-field-holding, body.domvec-field-holding * { cursor: grabbing !impor
 
 /* G-403: a field whose record is placed external, braces kept, a solid underline like its line. */
 .domvec-var.is-external { text-decoration: underline solid var(--interactive-accent) 2px; text-underline-offset: 3px; }
+
+/* G-412: the chat cell's stop, shown only while a reply streams. */
+.domvec-chat-stop { margin-top: 4px; font-size: var(--font-ui-smaller); }

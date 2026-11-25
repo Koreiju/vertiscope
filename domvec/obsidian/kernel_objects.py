@@ -340,6 +340,19 @@ if "Agent" not in globals():
 
     Agent = _Agent(%(base)r)
 
+if "Search" not in globals():
+    class _Search:
+        """Search: the 3D search field as live state (G-413). `last()` -- its query and first hits,
+        {query, hits: [{cid, url}]}. A cell that reads it re-runs when the field searches."""
+        def last(self):
+            """The search field's last query and the hits it shows."""
+            import json as _sj, urllib.request as _su
+            with _su.urlopen(%(base)r + "/search_last", timeout=5) as r:
+                return _sj.loads(r.read().decode("utf-8"))
+        def __repr__(self):
+            return "Search(the search field)"
+    Search = _Search()
+
 if "Terminal" not in globals():
     class _Terminal:
         """Terminal: the terminal pane as live state (G-413). `last(pane=None)` -- the last command a

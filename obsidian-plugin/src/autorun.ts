@@ -144,6 +144,8 @@ export const TOOL_READS: Record<string, RegExp> = {
   chat: /\bChat\s*\.\s*messages\b/,
   // G-413: the terminal pane's last command and output.
   terminal: /\bTerminal\s*\.\s*last\b/,
+  // G-413: the 3D search field's query and hits.
+  search: /\bSearch\s*\.\s*last\b/,
 };
 
 export class ToolRun {
@@ -173,7 +175,7 @@ export class ToolRun {
     for (const f of this.app.vault.getMarkdownFiles()) {
       if (SKIP.test(f.path)) continue;
       const t = await this.app.vault.cachedRead(f);
-      if (t.includes("WebBrowser") || t.includes("Chat.") || t.includes("Terminal.")) this.reindex(f.path, t);
+      if (t.includes("WebBrowser") || t.includes("Chat.") || t.includes("Terminal.") || t.includes("Search.")) this.reindex(f.path, t);
       this.stats.indexed++;
     }
   }

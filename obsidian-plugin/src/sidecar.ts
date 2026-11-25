@@ -27,16 +27,27 @@ export class Sidecar {
     return (got && Array.isArray(got.nodes)) ? got.nodes : [];
   }
 
-  async chatStream(prompt: string, context: string[], onToken: (t: string) => void): Promise<string> {
+  /** G-413: the search field's view, recorded for `Search.last()`. */
+  async searchView(query: string, hits: { cid: string; url: string }[]): Promise<void> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return;
+    try { await fetch(base + "/search_view", { method: "POST", headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" }, body: JSON.stringify({ query, hits }) }); } catch { /* sidecar down */ }
+  }
+
+  async chatStream(prompt: string, context: string[], onToken: (t: string) => void, signal?: AbortSignal): Promise<string> {
     const base = this.base().trim().replace(/\/+$/, "");
     const r = await fetch(base + "/chat_stream", { method: "POST",
       headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
       body: JSON.stringify({ prompt, context, ...((window as any).__domvecChatDryMs ? { dry_ms: (window as any).__domvecChatDryMs } : {}),
-        ...((window as any).__domvecChatDryText ? { dry_text: (window as any).__domvecChatDryText } : {}) }) });
+        ...((window as any).__domvecChatDryText ? { dry_text: (window as any).__domvecChatDryText } : {}) }), signal });
     if (!r.ok || !r.body) throw new Error("chat_stream " + r.status);
     const rd = r.body.getReader(), dec = new TextDecoder();
     let all = "";
-    for (;;) { const { done, value } = await rd.read(); if (done) break; const t = dec.decode(value, { stream: true }); if (t) { all += t; onToken(t); } }
+    // A Stop (G-412) aborts the read: what streamed so far is the reply, and the
+    // sidecar's generator is closed when its socket goes.
+    try {
+      for (;;) { const { done, value } = await rd.read(); if (done) break; const t = dec.decode(value, { stream: true }); if (t) { all += t; onToken(t); } }
+    } catch (e) { if (!signal?.aborted) throw e; }
     return all;
   }
 
