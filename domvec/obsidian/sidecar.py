@@ -4302,6 +4302,18 @@ class _Handler(BaseHTTPRequestHandler):
                              "note": note})
             return
 
+        if body.get("op") == "defs":
+            # G-409 (spec 13d'): node definitions from the live namespace --
+            # every function and class this note's cells define, with ports.
+            # Behind the same --kernel gate: it runs in the note's kernel.
+            from .. import nodedefs as _nd
+            if body.get("plant_all_sockets"):
+                reply = _nd.parse(self.kernel_pool.run(note, _nd.SRC.replace('d["kind"] = "widget" if', 'd["kind"] = "socket" if')))
+            else:
+                reply = _nd.parse(self.kernel_pool.run(note, _nd.SRC))
+            self._send(200, dict(reply, note=note))
+            return
+
         if body.get("op") == "comm":
             # G-408 (spec 13e): the comm bridge. Long-polls the note kernel's
             # comm log by sequence number, or sends a comm_msg to it. Behind
@@ -4351,6 +4363,9 @@ class _Handler(BaseHTTPRequestHandler):
             if in_vault:
                 from . import kernel_objects as _ko
                 self.kernel_pool.run(note, _ko.vault_boot(root, note))
+            # G-409: what the boot defined, once, so the node definitions are
+            # the note's own and not the kernel's base objects.
+            self.kernel_pool.run(note, 'if "_domvec_boot" not in globals(): _domvec_boot = {k: id(v) for k, v in globals().items()}')
             if names and not PLANT_NO_REF_BINDING[0]:
                 from . import refs as _refs
                 sample = body.get("sample")

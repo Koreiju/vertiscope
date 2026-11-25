@@ -875,6 +875,17 @@ export class Sidecar {
     }
   }
 
+  /** G-409 (spec 13d'): every function and class the note's cells define, with ports. */
+  async nodeDefs(note: string): Promise<any> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const res = await fetch(`${base}/kernel`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note, op: "defs", ...((window as any).__domvecPlantAllSockets ? { plant_all_sockets: true } : {}) }) });
+      return await res.json();
+    } catch { return null; }
+  }
+
   /** G-408, the comm bridge (spec 13e): a note kernel's comm log after
    *  `since`, long-polled up to `wait` s -- or, with `send`, a comm_msg to a
    *  live object. Behind the sidecar's --kernel gate, as cells are. */

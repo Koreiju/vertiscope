@@ -14627,6 +14627,46 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-409",
+      asks: "node definitions from the live namespace (PLUGIN_GOAL 187, spec 13d'): a python cell that defines a function and a class is run; the note's kernel publishes each with its ports -- a primitive with a default a widget [8], a Literal a choice, an object type a socket, the return an output; an imported name is not a node -- and the card draws one row per node; planted __domvecPlantAllSockets: every port a socket",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const pl = app.plugins.getPlugin("domvec-bridge"), desk = pl.desk;
+          window.__domvecPlantAllSockets = ${planted};
+          const path = "domvec-checks/g409 " + (${planted} ? "p" : "c") + Date.now().toString(36) + ".md";
+          const code = ["from typing import Literal", "from collections import OrderedDict",
+            "def scan(url: str, k: int = 8, mode: Literal['fast', 'deep'] = 'fast', driver: object = None) -> list:",
+            "    return [url] * k", "class Box:", "    def __init__(self, size: float = 1.0): self.size = size",
+            "    def area(self) -> float: return self.size ** 2"].join(NL);
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, "# g409" + NL + NL + F + "python" + NL + code + NL + F + NL);
+            await desk.open(f); await sleep(800);
+            await pl.onRunFence({ lang: "python", code, line: 2, path });
+            let rows = [];
+            for (let k = 0; k < 30 && !rows.length; k++) { await sleep(200); rows = [...(desk.panelOf(path)?.card?.querySelectorAll(".domvec-node-def") || [])].map((r) => r.textContent); }
+            const defs = (window.__domvecNodeDefs || {})[path] || [];
+            const scan = defs.find((d) => d.name === "scan"), box = defs.find((d) => d.name === "Box");
+            const k = scan && scan.inputs.find((p) => p.name === "k"), mode = scan && scan.inputs.find((p) => p.name === "mode");
+            return { planted: ${planted}, names: defs.map((d) => d.name).sort(), rows,
+                     k_widget: !!k && k.kind === "widget" && k.default === 8, mode_choice: !!mode && mode.kind === "choice" && mode.options.join() === "fast,deep",
+                     url_socket: !!scan && scan.inputs[0].kind === "socket", out_list: !!scan && scan.output.type === "list",
+                     box_area: !!box && box.outputs.some((o) => o.name === "area" && o.type === "float") };
+          } finally {
+            window.__domvecPlantAllSockets = false;
+            try { desk.closePath(path); } catch {}
+            const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0);
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && clean.names.join() === "Box,scan" && clean.k_widget && clean.mode_choice && clean.url_socket && clean.out_list && clean.box_area
+          && clean.rows.length === 2 && clean.rows.some((r) => r.includes("k [8]") && r.includes("‹fast|deep›") && r.includes("→ list"));
+        return { pass: ok && !!planted && planted.names.length === 2 && !planted.k_widget, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-405",
       asks: "the craft's circles and dashed edges are gone in 2D and 3D (PLUGIN_GOAL 182-186: 'completely do away with the graph view', 'circles gone', 'leftover edge and the deprecated node-based graph view artifacts'; 192 d: the dotted lines): with the graph open the craft group is not drawn and no tether line is on the plane; planted (__domvecPlantCraft) the group is drawn again",
       async run() {

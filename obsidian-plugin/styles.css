@@ -1551,3 +1551,8 @@ body.domvec-chatui-pulling, body.domvec-chatui-pulling * { user-select: none !im
 /* The dataflow's problems drawn in the editor (dfproblems.ts, G-380). */
 .cm-line.domvec-df-problem { box-shadow: inset 3px 0 0 var(--text-error); }
 .domvec-df-problem-msg { color: var(--text-error); font-size: var(--font-ui-smaller); }
+
+/* G-409: the nodes a note's kernel defines, lo-fi, at its card's foot. */
+.domvec-node-defs { font-family: var(--font-monospace); font-size: 11px; color: var(--text-muted);
+  border-top: 1px dashed var(--background-modifier-border); padding: 3px 8px; max-height: 6em; overflow: auto; }
+.domvec-node-def { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

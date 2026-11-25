@@ -71,6 +71,7 @@ import { agentBlock } from "./agentblock";
 import { Slots } from "./slots";
 import { completeCell } from "./complete";
 import { watchTabDrags } from "./tabdrag";
+import { drawDefs, nodeDefs } from "./nodedefs";
 import { markProblems, problemExtension } from "./dfproblems";
 import { CodeRows } from "./coderows";
 import { BrowserPanel } from "./browserpanel";
@@ -1291,6 +1292,14 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     if (reply.evicted) notes.push(`retired ${reply.evicted}'s kernel`);
 
     const stored = await this.storeOutput(note, req, reply);
+    // G-409: the nodes this note now defines, with their ports, at its card's foot.
+    if (/^py/.test(req.lang || "python")) {
+      void this.sidecar.nodeDefs(note).then((r) => {
+        if (!r || !Array.isArray(r.defs)) return;
+        nodeDefs[note] = r.defs;
+        drawDefs((this as any).desk?.panelOf?.(note)?.card, r.defs);
+      });
+    }
     if (stored) notes.push(stored);
     // The run's signal flow drawn in 3D as it fires (G-292): its recorded
     // inputs -> this cell's note, pulsing.
