@@ -227,6 +227,12 @@ export class Cockpit {
     // The field folds: it is drawn outside now, not inside.
     const cm = v.editor?.cm;
     if (cm && ref in foldsOf(cm).reveals) await this.toggleReveal(v, ref);
+    // The field's braces marked external in the slate (one state with its reveals).
+    if (cm) {
+      const st = this.copyFolds(foldsOf(cm));
+      if (!st.externals!.includes(ref)) st.externals!.push(ref);
+      cm.dispatch({ effects: setFolds.of(st) }); this.saveFolds(host, st);
+    }
     desk.externals.set(host + "|" + f.path, ref);
     desk.drawLinks();
     this.externalStats.last = host + " -> " + f.path;
@@ -469,7 +475,7 @@ export class Cockpit {
   /** A fold state copied whole -- every gesture starts from all of it (a
    *  right-click once rebuilt it from two fields and dropped the graph flag). */
   private copyFolds(cur: FoldState): FoldState {
-    return { collapsed: cur.collapsed, graph: cur.graph, reveals: { ...cur.reveals }, folds: [...(cur.folds || [])] };
+    return { collapsed: cur.collapsed, graph: cur.graph, reveals: { ...cur.reveals }, folds: [...(cur.folds || [])], externals: [...(cur.externals || [])] };
   }
 
   /** Fold or unfold a field's rank-1 children (mortegon 7.3.4, M.6): its name
@@ -521,6 +527,7 @@ export class Cockpit {
     const cm = v?.editor?.cm, path = v?.file?.path;
     if (!cm || !path || this.plantNoFolds) return "none";
     const st = this.copyFolds(foldsOf(cm));
+    st.externals = (st.externals || []).filter((x) => x !== name);   // internal again (G-403)
     if (name in st.reveals) { delete st.reveals[name]; this.foldStats.folds++; }
     else {
       const lines = await this.rank1(path, name);

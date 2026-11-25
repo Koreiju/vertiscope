@@ -14917,7 +14917,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-403",
-      asks: "resolved-external for markdown records (spec 12h; 182, 184 a, O.1a): a slate field's {ref} HELD past the debounce and dropped on the plane opens its record as a panel at the drop point, joined to the slate by a SOLID line; a quick click opens nothing; held and dropped again it MOVES the one placement (no second card); the panel dropped back on the slate closes and the field is revealed again; planted plantNoExternal: the hold opens nothing",
+      asks: "resolved-external for markdown records (spec 12h; 182, 184 a, O.1a): a slate field's {ref} HELD past the debounce and dropped on the plane opens its record as a panel at the drop point, joined to the slate by a SOLID line; a quick click opens nothing; held and dropped again it MOVES the one placement (no second card); the field's braces are kept and marked external while it is out; the panel dropped back on the slate closes and the field is revealed again, unmarked; planted plantNoExternal: the hold opens nothing",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -14951,6 +14951,7 @@ export function makeChecks(env) {
             await sleep(400); d.drawLinks();
             const line = [...d.host.plane().querySelectorAll(".domvec-plane-links line")].find((l) => [l.dataset.a, l.dataset.b].includes(rec) && [l.dataset.a, l.dataset.b].includes(host));
             out.line = !!line; out.solid = !!line && line.classList.contains("is-external") && getComputedStyle(line).strokeDasharray === "none";
+            out.braces_external = !!hv.contentEl.querySelector('.domvec-var.is-external[data-ref="' + ref + '"]') && hv.editor.getValue().includes("{" + ref + "}");
             // Again, elsewhere: the one placement moves.
             await hold(dx, dy + 120);
             out.cards_of_rec = d.panels.filter((q) => q.path === rec).length;
@@ -14961,6 +14962,7 @@ export function makeChecks(env) {
             await sleep(900);
             out.back_closed = !d.panelOf(rec);
             out.back_revealed = [...hv.contentEl.querySelectorAll(".domvec-slate-reveal-line")].some((r) => /color/.test(r.textContent));
+            out.back_unmarked = !hv.contentEl.querySelector(".domvec-var.is-external");
             out.stats = { ...cp.externalStats };
             return out;
           } finally {
@@ -14971,7 +14973,7 @@ export function makeChecks(env) {
         })()`, { timeout: 60000 });
         const clean = await arm(false), planted = await arm(true);
         const ok = !!clean && clean.ref_under && !clean.click_opened && clean.placed && clean.near_drop && clean.line && clean.solid
-          && clean.cards_of_rec === 1 && clean.moved && clean.back_taken && clean.back_closed && clean.back_revealed;
+          && clean.cards_of_rec === 1 && clean.moved && clean.back_taken && clean.back_closed && clean.back_revealed && clean.braces_external && clean.back_unmarked;
         return { pass: ok && !!planted && planted.ref_under && !planted.placed, evidence: { clean, planted } };
       },
     },
@@ -15160,6 +15162,55 @@ export function makeChecks(env) {
         const clean = await arm(false), planted = await arm(true);
         const ok = !!clean && clean.button && (clean.cell_tools || []).includes("triple") && clean.tripled_15;
         return { pass: ok && !!planted && planted.button && !(planted.cell_tools || []).includes("triple") && !planted.tripled_15, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-400",
+      asks: "the ego in 3D as the world is drawn (PLUGIN_GOAL 183: 'for 3D, we follow the graph formatting exactly as world: glowing 3D nodes ... hovering over higher rank nodes means more comprehensive canvases are billboarded ... selected and clicked for including and excluding from the plane view to relegate to the 3D UMAP'): an ego note not on the plane is a GLOWING world node in the ego's colour; the pointer held on it billboards its canvas (a note's outline, level 2; the ego's own canvas, level 3, lists its components -- more comprehensive); a click includes it on the plane and it leaves 3D; its card closed, it is relegated back and glows again; planted plantEgoHidden: item 76's rule -- no ego node drawn, nothing billboarded",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, desk = window.__domvecPlane;
+          if (!g || !g.graph) return { error: "no graph" };
+          g.plantEgoHidden = ${planted};
+          const GV = g.constructor, nodes = g.graph.graphData().nodes;
+          const drawn = (n) => g.lookOf(n, 4, false).alpha > 0;
+          const egoNodes = nodes.filter((n) => n.url && g.egoUrls.has(String(n.url)) && n.x != null);
+          const free = egoNodes.filter((n) => !g.egoOnPlane(String(n.url)));
+          const out = { planted: ${planted}, ego_nodes: egoNodes.length, free: free.length };
+          let opened = "";
+          try {
+            out.glowing = free.filter(drawn).length;
+            out.colour = free.length ? g.lookOf(free[0], 4, false).color : null;
+            // Hover: a note node on screen, held.
+            const r = g.graph.renderer().domElement.getBoundingClientRect();
+            const onScreen = free.filter((n) => { const [x, y] = g.egoScreen(n); return x > r.left + 8 && x < r.right - 8 && y > r.top + 8 && y < r.bottom - 8; });
+            const note = onScreen.find((n) => n.level === "page" && GV.egoPath(String(n.url)) !== "domvec/ego.md") || onScreen[0];
+            if (note) {
+              const [x, y] = g.egoScreen(note); g.egoHover(x, y); await sleep(700);
+              const b = document.querySelector(".domvec-ego-billboard");
+              out.board = b ? { level: +b.dataset.level, node: b.dataset.node, lines: b.querySelector("pre").textContent.split(String.fromCharCode(10)).length } : null;
+              g.egoHover(-1, -1);
+            }
+            out.ego_level = (await g.egoCanvasOf({ kind: "ego", id: "x", path: "domvec/ego.md", label: "ego" })).level;
+            out.ego_lines = (await g.egoCanvasOf({ kind: "ego", id: "x", path: "domvec/ego.md", label: "ego" })).lines.length;
+            // Include on the plane by a click; then relegate by closing the card.
+            const pick = free.find((n) => n.level === "page" && GV.egoPath(String(n.url)) !== "domvec/ego.md");
+            if (pick && !${planted}) {
+              opened = GV.egoPath(String(pick.url));
+              g.clickNode(pick); await sleep(1200);
+              out.included = !!desk.panelOf(opened); out.left_3d = !drawn(pick);
+              desk.closePath(opened); await sleep(500);
+              out.relegated = !desk.panelOf(opened) && drawn(pick);
+              opened = "";
+            }
+            return out;
+          } finally { g.plantEgoHidden = false; g.egoHover(-1, -1); if (opened) { try { desk.closePath(opened); } catch {} } }
+        })()`, { timeout: 30000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.free > 0 && clean.glowing === clean.free && clean.colour === "#ffc857"
+          && clean.board && clean.board.level >= 2 && clean.ego_level === 3 && clean.ego_lines > clean.board.lines - 1 && clean.included && clean.left_3d && clean.relegated;
+        return { pass: ok && !!planted && !planted.error && planted.glowing === 0 && !planted.board, evidence: { clean, planted } };
       },
     },
     {

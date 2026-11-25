@@ -407,6 +407,7 @@ export class PlaneDesk {
       // beneath it (the browser under its cockpit) arrives after -- a browser
       // booting for seconds once hid the panel itself (G-300).
       this.panels.push(p);
+      window.dispatchEvent(new CustomEvent("domvec-plane-changed"));   // G-400: 3D draws what the plane does not
       this.linksOn();                              // links between panels (G-398) whenever there are panels
       this.hook(p);
       const mount = opts.mount || (this.isTerminal(file) ? (c: HTMLElement) => this.terminalMount(c, Leaf)
@@ -505,6 +506,7 @@ export class PlaneDesk {
     if (!p) return false;
     // Off the list first: the leaf's own (patched) detach comes back here.
     this.panels = this.panels.filter((x) => x !== p);
+    window.dispatchEvent(new CustomEvent("domvec-plane-changed"));   // G-400: 3D draws what the plane does not
     p.undrag();
     try { p.cleanup?.(); } catch { /* gone */ }
     try { (detach || p.leaf.detach.bind(p.leaf))(); } catch { /* gone */ }

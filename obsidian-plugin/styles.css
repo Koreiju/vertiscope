@@ -1567,3 +1567,15 @@ body.domvec-chatui-pulling, body.domvec-chatui-pulling * { user-select: none !im
 .domvec-plane-links line.is-external { stroke-dasharray: none; stroke-opacity: 0.95; stroke-width: 2; }
 .domvec-field-ghost { position: fixed; z-index: 9999; pointer-events: none; padding: 1px 6px; border-radius: var(--radius-s); background: var(--background-primary); border: 1px solid var(--interactive-accent); font-family: var(--font-monospace); font-size: 12px; }
 body.domvec-field-holding, body.domvec-field-holding * { cursor: grabbing !important; user-select: none; }
+
+/* G-400: a craft node's canvas billboarded on hover, by rank. */
+.domvec-ego-billboard { position: fixed; z-index: 60; pointer-events: none; max-width: 340px; max-height: 320px; overflow: hidden;
+  background: color-mix(in srgb, var(--background-primary) 88%, transparent); border: 1px solid var(--interactive-accent);
+  border-radius: var(--radius-m); box-shadow: 0 0 18px color-mix(in srgb, var(--interactive-accent) 45%, transparent); padding: 4px 8px; }
+.domvec-ego-billboard-head { font-weight: 600; font-size: 12px; margin-bottom: 2px; }
+.domvec-ego-billboard pre { margin: 0; font-size: 11px; white-space: pre-wrap; }
+.domvec-ego-billboard[data-level="3"] { max-width: 420px; }
+.domvec-ego-billboard[data-level="1"] { max-width: 280px; }
+
+/* G-403: a field whose record is placed external, braces kept, a solid underline like its line. */
+.domvec-var.is-external { text-decoration: underline solid var(--interactive-accent) 2px; text-underline-offset: 3px; }

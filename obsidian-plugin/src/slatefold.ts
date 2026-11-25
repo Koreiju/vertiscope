@@ -89,6 +89,9 @@ export interface Reveal { name: string; lines: string[] }
 /** One note's fold state: the `{ref}`s revealed (by name) and whether the slate is collapsed. */
 export interface FoldState {
   reveals: Record<string, string[]>; collapsed: boolean; graph?: boolean;
+  /** G-403: `{ref}`s placed EXTERNAL -- their record a panel on the plane. The
+   *  braces stay and the token is marked; a reveal and an external are exclusive. */
+  externals?: string[];
   /** Fields whose rank-1 children are folded away, by path (`ego/search`).
    *  ONE state for both forms (mortegon DOMAIN_MODEL 7.3.4: graph form "has
    *  no independent fold state; it stays in node-count parity with the
@@ -572,6 +575,9 @@ export function foldDecorations(doc: Text, st: FoldState): DecorationSet {
         if (nodes) ranges.push([a + 1, z - 1, Decoration.mark({ class: "domvec-var is-revealed" })]);
         ranges.push([z - 1, z, Decoration.replace({})]);
         if (!reveal) reveal = { name, lines: st.reveals[name] };
+      } else if ((st.externals || []).includes(name) && !(window as any).__domvecPlantNoExternalMark) {
+        // Resolved-external: braces kept, the token marked as drawn outside (G-403).
+        ranges.push([a, z, Decoration.mark({ class: "domvec-var is-external", attributes: { "data-ref": name } })]);
       } else if (nodes) {
         ranges.push([a, z, Decoration.mark({ class: "domvec-var" })]);
       }

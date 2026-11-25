@@ -50,6 +50,8 @@ import { CAPS } from "./useragent";
 import { SearchLinks } from "./searchlinks";
 
 export const GRAPH_VIEW = "domvec-graph-view";
+/** G-400: the ego's glow in the world (183: "glowing 3D nodes"). */
+const EGO_GLOW = "#ffc857";
 
 export interface LayoutNode {
   cid: string;
@@ -408,6 +410,73 @@ export class GraphView extends ItemView {
     minimized?: boolean;
     openedAt?: number;
   }>();
+  /**
+   * G-400 (PLUGIN_GOAL 183: "hovering over higher rank nodes means more
+   * comprehensive canvases are billboarded in 3D"): the pointer held on a
+   * craft node billboards that node's canvas beside it -- the ego's whole
+   * canvas (every component it holds), a note's rank-1 outline, a cell's own
+   * lines -- the higher the rank, the more it shows. Click still includes the
+   * node on the plane or relegates it (the craft's own click). Planted
+   * `plantNoEgoBillboard`: the hover shows nothing.
+   */
+  egoBillboardStats = { shown: 0, last: null as null | { id: string; kind: string; level: number; lines: number } };
+  plantNoEgoBillboard = false;
+  private egoHoverId = "";
+  private egoHoverTimer = 0;
+  private egoBoard: HTMLElement | null = null;
+  egoHover(x: number, y: number): void {
+    let cn: any = x < 0 || this.plantNoEgoBillboard ? null : (this.craft?.nodeAt(x, y) || null);
+    if (!cn && x >= 0 && !this.plantNoEgoBillboard) {
+      const w = this.egoWorldAt(x, y);
+      if (w) {
+        const path = GraphView.egoPath(String(w.url));
+        cn = { id: w.id, kind: path === "domvec/ego.md" ? "ego" : (w.level === "page" ? "note" : "cell"), path, line: 0, label: path.split("/").pop()!.replace(/[.]md$/, ""), world: w };
+      }
+    }
+    const id = cn ? cn.id : "";
+    if (id === this.egoHoverId) { if (this.egoBoard && cn) { this.egoBoard.style.left = x + 18 + "px"; this.egoBoard.style.top = y + 18 + "px"; } return; }
+    this.egoHoverId = id;
+    window.clearTimeout(this.egoHoverTimer);
+    this.egoBoard?.remove(); this.egoBoard = null;
+    if (!cn) return;
+    this.egoHoverTimer = window.setTimeout(() => void this.showEgoBoard(cn, x, y), 350);
+  }
+  /** The canvas a craft node stands for, at its rank: [level, title, lines]. */
+  async egoCanvasOf(cn: any): Promise<{ level: number; title: string; lines: string[] }> {
+    const c: any = this.craft;
+    const all: any[] = c?.allNodes || c?.nodes || [], edges: any[] = c?.allEdges || [];
+    if (cn.kind === "ego") {
+      const kids = edges.filter((e) => e.a === cn.id && e.kind === "root").map((e) => all.find((n) => n.id === e.b)).filter(Boolean);
+      // Drawn as a world node: the ego's components are its notes (egoUrls).
+      const labels = kids.length ? kids.map((n: any) => n.label)
+        : [...this.egoUrls].map((u) => GraphView.egoPath(u)).filter((p) => p !== "domvec/ego.md").map((p) => p.split("/").pop()!.replace(/[.]md$/, ""));
+      return { level: 3, title: "ego -- the whole canvas", lines: labels.slice(0, 24).map((l: string) => "▸ " + l) };
+    }
+    if (cn.kind === "cell" && cn.world && cn.world.text) return { level: 1, title: cn.label, lines: String(cn.world.text).split("\n").slice(0, 6) };
+    const f: any = this.app.vault.getAbstractFileByPath(cn.path);
+    const text: string = f && f.extension ? await this.app.vault.cachedRead(f) : "";
+    const ls = text.replace(/^---[\s\S]*?\n---\n?/, "").split("\n");
+    if (cn.kind === "note") {
+      const out = ls.filter((l) => /^(#{1,6} |```\w)/.test(l.trim()) || (l.trim() && !/^(```|<!--|>|\|)/.test(l.trim()))).map((l) => l.trim()).slice(0, 12);
+      return { level: 2, title: cn.label, lines: out };
+    }
+    const from = Math.max(0, (cn.line ?? 0) - (text.split("\n").length - ls.length));
+    return { level: 1, title: cn.label, lines: ls.slice(from, from + 6).map((l) => l.replace(/\s+$/, "")) };
+  }
+  private async showEgoBoard(cn: any, x: number, y: number): Promise<void> {
+    if (this.egoHoverId !== cn.id) return;
+    const { level, title, lines } = await this.egoCanvasOf(cn);
+    if (this.egoHoverId !== cn.id) return;
+    const b = document.body.createDiv({ cls: "domvec-ego-billboard" });
+    b.dataset.node = cn.id; b.dataset.level = String(level);
+    b.createDiv({ cls: "domvec-ego-billboard-head", text: title });
+    const pre = b.createEl("pre");
+    pre.setText(lines.join("\n") || "(empty)");
+    b.style.left = x + 18 + "px"; b.style.top = y + 18 + "px";
+    this.egoBoard = b;
+    this.egoBillboardStats.shown++;
+    this.egoBillboardStats.last = { id: cn.id, kind: cn.kind, level, lines: lines.length };
+  }
   private billboardFrame = 0;
   private billboardLayer: HTMLElement | null = null;
   private canvasEl: HTMLElement | null = null;
@@ -698,7 +767,11 @@ export class GraphView extends ItemView {
       // Immediate: the orbit controls listen on this same canvas and would dolly too.
       if (took) { e.preventDefault(); e.stopImmediatePropagation(); }
     }, { passive: false, capture: true });
-    canvas.addEventListener("pointermove", (e) => { if (e.buttons) moved(); }, { passive: true, capture: true });
+    canvas.addEventListener("pointermove", (e) => { if (e.buttons) moved(); else this.egoHover(e.clientX, e.clientY); }, { passive: true, capture: true });
+    canvas.addEventListener("pointerleave", () => this.egoHover(-1, -1), { passive: true });
+    const planeChanged = () => { if (this.egoUrls.size) { this.batchDirty = true; this.graph?.nodeColor(this.graph.nodeColor()); } };
+    window.addEventListener("domvec-plane-changed", planeChanged);
+    this.register(() => window.removeEventListener("domvec-plane-changed", planeChanged));
     // A RIGHT-CLICK ON A LINK toggles it as a memory link (PLUGIN_GOAL
     // 135(d)): solid (on) or translucent (off). Only within 6 px of a drawn
     // segment; anywhere else the right-click is what it was.
@@ -6391,8 +6464,17 @@ export class GraphView extends ItemView {
     // placed by the EGO, in the craft -- not drawn again in the world's fit.
     // Planted `plantEgoInWorld`: drawn in both, as before the rule.
     if (!this.plantEgoInWorld && this.egoUrls.size && n.url && this.egoUrls.has(String(n.url))) {
-      this.egoHidden++;
-      return { half: 0, translucent: true, alpha: 0, color: "#000000" };
+      // G-400 (183, 2026-11-22, over item 76): "for 3D, we follow the graph
+      // formatting exactly as world: glowing 3D nodes" -- an ego note is a
+      // world node, glowing in the ego's colour, while it is RELEGATED to 3D;
+      // included on the plane it is drawn there instead, not twice.
+      // Planted `plantEgoHidden`: item 76's rule, hidden always.
+      if (this.plantEgoHidden || this.egoOnPlane(String(n.url))) {
+        this.egoHidden++;
+        return { half: 0, translucent: true, alpha: 0, color: "#000000" };
+      }
+      const b = this.baseLook(n, relSize, media);
+      return { half: b.half * (n.level === "page" ? 1.4 : 1), translucent: true, alpha: n.hovered ? 2.8 : 1.8, color: EGO_GLOW, glass: true };
     }
     const base = this.baseLook(n, relSize, media);
     const st = this.searchState;
@@ -7132,6 +7214,40 @@ export class GraphView extends ItemView {
   plantCraftAnyFile = false;
   egoHidden = 0;
   plantEgoInWorld = false;
+  /** G-400: planted -- item 76's rule back: ego notes never drawn in the world. */
+  plantEgoHidden = false;
+  egoWorldStats = { included: 0, last: "" };
+  /** `vault://<vault>/<path>` -> the note's vault path. */
+  static egoPath(url: string): string { return url.replace(/^vault:\/\/[^/]+\//, ""); }
+  egoOnPlane(url: string): boolean { return !!(window as any).__domvecPlane?.panelOf?.(GraphView.egoPath(url)); }
+  async includeEgo(url: string): Promise<boolean> {
+    const desk = (window as any).__domvecPlane, f = this.app.vault.getAbstractFileByPath(GraphView.egoPath(url));
+    if (!desk || !f) return false;
+    await desk.open(f);
+    this.egoWorldStats.included++; this.egoWorldStats.last = GraphView.egoPath(url);
+    this.batchDirty = true;
+    return true;
+  }
+  /** The drawn ego world node nearest a client point, within `px`. */
+  egoWorldAt(x: number, y: number, px = 16): any {
+    const g: any = this.graph; if (!g || this.plantEgoHidden) return null;
+    const cam = g.camera(), el = g.renderer().domElement as HTMLElement, r = el.getBoundingClientRect();
+    let best: any = null, bd = px;
+    for (const n of g.graphData().nodes) {
+      if (!n.url || !this.egoUrls.has(String(n.url)) || this.egoOnPlane(String(n.url)) || n.x == null) continue;
+      const v = new THREE.Vector3(n.x, n.y, n.z).project(cam);
+      if (v.z > 1) continue;
+      const d = Math.hypot(r.left + (v.x + 1) / 2 * r.width - x, r.top + (1 - v.y) / 2 * r.height - y);
+      if (d < bd) { bd = d; best = n; }
+    }
+    return best;
+  }
+  /** A world ego node's client point (for the harness). */
+  egoScreen(n: any): [number, number] {
+    const g: any = this.graph, r = (g.renderer().domElement as HTMLElement).getBoundingClientRect();
+    const v = new THREE.Vector3(n.x, n.y, n.z).project(g.camera());
+    return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height];
+  }
   /** The chunks tagged into the ego (item 74b), as the store last said. */
   egoTags = new Set<string>();
   egoTagUrls: Record<string, string> = {};
@@ -10537,6 +10653,8 @@ export class GraphView extends ItemView {
       .backgroundColor(this.plantGreyBackground ? "rgba(0,0,0,0)" : "#000000")
       .onNodeClick(this.clickNode = (n: any) => {
         this.nodeClickAt = performance.now();
+        // G-400: an ego node clicked is INCLUDED on the plane (and leaves 3D).
+        if (n.url && this.egoUrls.has(String(n.url)) && !this.plantEgoHidden) { void this.includeEgo(String(n.url)); return; }
         // A page or a branch unravels; a chunk opens (`G-54`). One gesture,
         // and which it means is a property of the node rather than of a mode
         // the reader has to remember they are in.
