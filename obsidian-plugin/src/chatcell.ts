@@ -63,6 +63,8 @@ export function chatCell(app: App, stream: (prompt: string, ctx: string[], on: (
         });
       }
       chatCellStats.turns++;
+      // G-412: the chat's state changed -- the cells reading Chat.messages re-run.
+      if (written) window.dispatchEvent(new CustomEvent("domvec-tool-view", { detail: { tool: "chat", url: ctx.sourcePath } }));
       chatCellStats.last = { prompt, context_chars: context.join("").length, tokens, ms: Math.round(performance.now() - t0), written };
       busy = false; input.disabled = false; input.value = "";
     });

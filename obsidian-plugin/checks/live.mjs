@@ -15024,6 +15024,50 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-412",
+      asks: "chat as a live object (187, 182; spec 13h): Chat.messages() in a note's kernel is the note's turns, read from the note (the note is the record); a python cell reading it re-runs when the ```chat cell writes a turn, and prints the new count (2: the question and the reply); planted toolRun.plantOff: the reader is not re-run",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const pl = app.plugins.getPlugin("domvec-bridge"), tr = pl.toolRun;
+          tr.plantOff = ${planted}; window.__domvecChatDryMs = 600;
+          const path = "domvec-checks/g412 " + (${planted} ? "p" : "c") + Date.now().toString(36) + ".md";
+          const text = "# g412" + NL + NL + F + "python" + NL + "print('TURNS', len(Chat.messages()))" + NL + F + NL + NL + F + "chat" + NL + F + NL;
+          if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+          const f = await app.vault.create(path, text);
+          const leaf = app.workspace.getLeaf("tab");
+          const out = { planted: ${planted} };
+          try {
+            await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(900);
+            for (let k = 0; k < 20 && !tr.readers.get("chat")?.has(path); k++) await sleep(200);
+            out.indexed = !!tr.readers.get("chat")?.has(path);
+            const ta = leaf.view.containerEl.querySelector(".domvec-chat-cell textarea");
+            if (!ta) return { ...out, error: "no chat cell" };
+            const r0 = tr.stats.reran, t0 = window.__domvecChatCell.turns;
+            ta.value = "What is a trie?";
+            ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+            for (let k = 0; k < 80 && window.__domvecChatCell.turns === t0; k++) await sleep(100);
+            out.turn_written = !!(window.__domvecChatCell.last || {}).written;
+            let body = "";
+            for (let k = 0; k < (${planted} ? 12 : 40); k++) { body = await app.vault.read(f); if (/TURNS 2/.test(body.split("nb-output")[1] || "") && tr.stats.reran > r0) break; await sleep(300); }
+            out.reran = tr.stats.reran - r0;
+            out.prints_2 = /TURNS 2/.test(body.split("nb-output")[1] || "");
+            out.last = tr.stats.last;
+            return out;
+          } finally {
+            tr.plantOff = false; window.__domvecChatDryMs = 0;
+            leaf.detach();
+            await sleep(1500);
+            const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0);
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.indexed && clean.turn_written && clean.reran >= 1 && clean.prints_2;
+        return { pass: ok && !!planted && !planted.error && planted.turn_written && planted.reran === 0 && !planted.prints_2, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-431",
       asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
       async run() {

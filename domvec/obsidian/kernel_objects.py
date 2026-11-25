@@ -419,6 +419,35 @@ if "Vault" not in globals():
 Vault.here = Vault._at("/" + %(folder)r) if %(folder)r else Vault.root
 _os.chdir(Vault.here)
 
+if "Chat" not in globals():
+    class _Chat:
+        """Chat: the chat note's turns as live state (G-412; spec 13h). `messages(note=None)` -- the
+        turns of a note (default: this one) as [{role, content}], read from the note itself: the note
+        is the record, this is its mirror. A cell that reads it re-runs when a turn is written."""
+        def messages(self, note=None):
+            """The note's turns, oldest first: [{role: user|assistant, content}]."""
+            path = note or globals().get("_domvec_note") or ""
+            text = (Vault.root / path).read_text(encoding="utf-8") if path else ""
+            out, cur = [], None
+            for line in text.split(chr(10)):
+                if line.startswith("> **You** "):
+                    if cur: out.append(cur)
+                    cur = {"role": "user", "content": line[len("> **You** "):]}
+                elif cur and cur["role"] == "user" and line.startswith("> "):
+                    cur["content"] += chr(10) + line[2:]
+                elif line.strip().startswith(chr(96) * 3 + "chat"):
+                    break
+                elif cur and cur["role"] == "user" and line.strip():
+                    out.append(cur); cur = {"role": "assistant", "content": line}
+                elif cur and cur["role"] == "assistant":
+                    cur["content"] += chr(10) + line
+            if cur: out.append(cur)
+            for m in out: m["content"] = m["content"].strip()
+            return out
+        def __repr__(self):
+            return "Chat(turns of the note)"
+    Chat = _Chat()
+
 if "answer" not in globals():
     import re as _re_answer
 

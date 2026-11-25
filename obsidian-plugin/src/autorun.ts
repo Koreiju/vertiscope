@@ -140,6 +140,8 @@ export class CrossRun {
  */
 export const TOOL_READS: Record<string, RegExp> = {
   browser: /\bWebBrowser\s*\.\s*(url|title|chunks|controls)\b/,
+  // G-412: the chat's turns. A turn written re-runs the cells reading them.
+  chat: /\bChat\s*\.\s*messages\b/,
 };
 
 export class ToolRun {
@@ -169,7 +171,7 @@ export class ToolRun {
     for (const f of this.app.vault.getMarkdownFiles()) {
       if (SKIP.test(f.path)) continue;
       const t = await this.app.vault.cachedRead(f);
-      if (t.includes("WebBrowser")) this.reindex(f.path, t);
+      if (t.includes("WebBrowser") || t.includes("Chat.")) this.reindex(f.path, t);
       this.stats.indexed++;
     }
   }
@@ -192,6 +194,7 @@ export class ToolRun {
     for (const reader of [...(this.readers.get(tool) || [])]) {
       const f = this.app.vault.getAbstractFileByPath(reader) as TFile | null;
       if (!f || this.running.has(reader) || !this.isOpen(reader)) continue;
+      if (tool === "chat" && detail && reader !== detail) continue;   // a chat's turn re-runs its own note's readers
       this.running.add(reader);
       try {
         for (const c of findFences(await this.app.vault.read(f)).filter((c) => PY.test(c.lang) && re.test(c.body))) {
