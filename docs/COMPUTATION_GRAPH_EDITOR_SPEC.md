@@ -15,18 +15,25 @@ in each dated series, so every citation below carries its date:
 `(2026-11-01) 62` is not `(2026-10-11) 62`. §12-§14 are the exception: they
 cite the latest series by bare number, under the rule at §13's head.
 
-> **193 (2026-11-24) bears on most of §12-§13 (F-118).** The reader:
-> "you're totally overdoing the work required for the markdown panels". A
-> panel is a plain Obsidian note, rendered natively, and the purple `{ref}`
-> chips go. A Python cell is Obsidian's own code block. One "interface"
-> generalizes every canvas type. Where §12-§13 build a renderer of their own
-> (the slate's chips and field rows, §12b-§12c; litegraph's nodes, ports
-> and widgets, §13d'-§13g; §13h's search node, a slate field drawn as a
-> node), they are suspended until the reader answers
-> one question: are links between plain notes wiki links (over 136 and T-4,
-> and O-7's finding), or compiled links shown only as highlighting? O-1,
-> O-6, O-10, G-401, G-409 and G-411 wait on that answer. The live objects
-> (187: G-408, G-410, G-412, G-413), O-5, O-7 and O-8 stand.
+> **193 and 194 (2026-11-24) bear on most of §12-§13 (F-118, F-129).**
+> 193: "you're totally overdoing the work required for the markdown panels".
+> A panel is a plain Obsidian note, rendered natively; the purple `{ref}`
+> chips go; a Python cell is Obsidian's own code block; one "interface"
+> generalizes every canvas type. 194: "the suggestions can override our
+> syntactic treatments as well in our custom markdown panels, since we then
+> offload that to code cells ... that still run and compile on the
+> reservoir in the 2D editor". My reading of 194 answers the links
+> question: links are compiled, from code cells (def/use), as 136 and T-4
+> ruled. The custom syntax is a "nice to have", not required.
+> - **Withdrawn**: the slate's markdown syntax as the editor's grammar --
+>   chips and field rows (§12b-§12c), §13h's search node as a slate field,
+>   the fence-line `{ref}` across notes (§13d, O-6), G-401's fields and what
+>   seeds them (O-10). Kept as found in the code until the reader confirms
+>   this reading; nothing deleted yet.
+> - **Stands**: the node editor over CODE cells (§13d'-§13g, G-409, G-411,
+>   litegraph, O-1). 194 (g) keeps "our findings on graphical code design
+>   interfaces with our package research" beside the live objects (187:
+>   G-408, G-410, G-412, G-413). O-5, O-7, O-8 and O-11 stand.
 
 ---
 
@@ -62,8 +69,9 @@ where it was read into a design.
 | 2026-11-22, 188-191 | The cross-check goal, no agents, design docs with fragments only; code tools on canvases scoped as app tools vs workspace code; eleven late-transcribed messages; every session prompt in the check (85 recovered, PLUGIN_GOAL's 2026-11-22 inventory) | §13n, §14 |
 | 2026-11-24, 192 | Hover previews of billboards in 3D; does fly-to still work; "I don't know what these dotted lines are" | G-414; the craft gate (G-405) deployed; F-105 |
 | **2026-11-24, 193** | "you're totally overdoing the work required for the markdown panels": plain Obsidian notes; the purple nodes removed; a `#` query as the retrieval gesture; code blocks as cells; one interface for every canvas type, two query embeddings | the head note; F-118 |
+| **2026-11-24, 194** | the suggestions override the custom syntax in markdown panels; it moves to code cells that run and compile on the reservoir; measurements coupled at the code's interface; every output shown for i/o and vectorization, re-indexed by diffs; the terminal a standard interface type; groups of artifacts compose; live objects alongside the graphical code interfaces | the head note; F-129 |
 
-Where the verbatim record ends: 2026-11-24, item 193 (it was 166 when this table was first written). Anything below that
+Where the verbatim record ends: 2026-11-24, item 194 (it was 166 when this table was first written). Anything below that
 line in any design is interpretation.
 
 ## 2. The designs already written, and what 166 does to each
@@ -1406,8 +1414,8 @@ Reading: the last standalone `@comfyorg/litegraph`, because it is TypeScript
 like the plugin and carries ComfyUI's widget work, frozen and owned here from
 then on.
 
-Every row above is a download, so each waits for a yes. The two litegraph
-rows are suspended under 193 (head note).
+Every row above is a download, so each waits for a yes. The litegraph rows
+stand under 194 (g), for code cells.
 
 ### 13k. Build order -- each a live check with a planted arm
 
@@ -1421,9 +1429,9 @@ rows are suspended under 193 (head note).
 | G-413 | the base tools as live objects: Search, Browser, Terminal, Kernel, from their governing classes | each tool panel lists its class read-only; an instance's trait changes re-run its readers | the dataflow event off: readers stay stale |
 
 G-408 and G-409 need no download. G-410, G-412 and G-413 wait on §13j's
-`anywidget`. Under 193 (head note), G-409 and G-411 are suspended with the
-litegraph rows of §13j, and G-410's host is a plain panel (my reading of
-193 (a), pending the reader's answer).
+`anywidget`. G-409 and G-411 stand under 194 (g), over code cells; a
+slate's fields are no longer their nodes (head note). G-410's host is a
+plain panel or a code cell's node (my reading of 193 (a) and 194).
 
 A slice lands only with the plugin's existing live checks still passing:
 "I need something like this to work with our whole plugin without
@@ -1581,7 +1589,7 @@ Sources (read 2026-11-22):
 The whole set, re-read at every pass. Scope: this spec, the sibling designs
 (RESERVOIR, GRAPH_WORKBENCH, DESIGN_VISION, SEARCH_GRAPH, NOTEBOOK_PANEL,
 THROUGH_STACK_SYNTHESIS, EGO_CANVAS, CALLABLE_INTERFACE's head), PLUGIN_GOAL
-from 2026-10-29 to 193, mortegon UR §E, §F, §M-§T, the PRD rows they
+from 2026-10-29 to 194, mortegon UR §E, §F, §M-§T, the PRD rows they
 cite, and every prompt the reader sent in this session's transcript
 (2026-09-12 to 2026-11-23 UTC, 238 messages; from F-59). Kinds: **M** a mistake, **I** an inconsistency between documents or
 with the app, **U** an unclear term or step.
@@ -1716,6 +1724,8 @@ with the app, **U** an unclear term or step.
 | F-126 | I | spec §13j, §13k vs the 193 head note | the build order and the packages still put G-409 and G-411 and litegraph on the path, and G-410 "a node body once G-411 lands" | each names its suspension; G-410 in a plain panel, as my reading |
 | F-127 | M | spec §13m `interface` (my pass-27 row) | the second of 193's two query embeddings stated as "over content"; 193 names only the one over interface types | the second marked as my reading |
 | F-128 | I | PRD vs 193 | 193 was transcribed and read, never decomposed into rows | G-415 (a, c), G-416 (b, d); (e) is O-11, (f) a download |
+| F-129 | I | spec head note, §13j, §13k (F-118, F-126) vs 194 | the node editor was suspended with the markdown syntax; 194 moves compilation into code cells and keeps the graphical code interfaces and the package research | the syntax withdrawn (my reading, to be confirmed); the node editor over code cells stands |
+| F-130 | I | PRD G-38 vs its live check (O-9) | Confirm while its check failed: the planted banner was added only on hover 2 and never measured when hover 2 found no new chunk | the plant moved to the first landed hover; passes both arms (`402c5a2`); O-9 closed |
 
 **Still open** -- O-1 to O-4 and O-6 to O-10 are work the design names; O-5 and O-11 are questions for the reader:
 
@@ -1768,9 +1778,9 @@ with the app, **U** an unclear term or step.
 - O-8. A 3D hover previews a chunk node's billboard (G-414) and nothing
   over a page or path node; §12f wants every level billboarded, a higher
   rank revealing more of the tree (F-106).
-- O-9. Live check G-38's planted arm expects `banner_moves >= 1` and
-  measures 0, while its clean arm rings the hovered chunk's own node on 10
-  of 10 hovers: the check's expectation is stale, not the app.
+- O-9. Closed 2026-11-24 (F-130): G-38's planted banner was added only on
+  hover 2; it now lands on the first hover that registers, and both arms
+  pass.
 - O-10. What seeds the ego slate's fields. §12c and §12h say the tool
   space (158: the cockpit, browsers, the search, notebooks, chats, tagged
   chunks, the reader's notes). PRD G-401 and `planepanels.ts`'s
