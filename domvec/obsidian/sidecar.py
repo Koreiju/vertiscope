@@ -4001,7 +4001,16 @@ class _Handler(BaseHTTPRequestHandler):
                 _chat.IN_FLIGHT["peak"] = max(_chat.IN_FLIGHT["peak"], in_flight)
                 t0 = time.time(); n = 0; t_first = 0.0
                 try:
-                    if dry_ms:
+                    if dry_ms and body.get("dry_text"):
+                        # A scripted reply, streamed a few characters a tick: a turn whose
+                        # text a check chooses (G-412: a reply holding a code block).
+                        dt = str(body.get("dry_text"))
+                        for k in range(0, len(dt), 6):
+                            if not n:
+                                t_first = time.time()
+                            self.wfile.write(dt[k:k + 6].encode("utf-8")); self.wfile.flush(); n += 1
+                            time.sleep(0.02)
+                    elif dry_ms:
                         while (time.time() - t0) * 1000 < dry_ms:
                             if not n:
                                 t_first = time.time()

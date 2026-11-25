@@ -15070,6 +15070,55 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-436",
+      asks: "each code block of a chat reply is a cell (G-412; 187, 182; spec 13h: 'each code block a cell with the one code interface'): a ```chat turn whose reply holds a python block writes that block into the note as a fence that carries the cell controls (run, pull out) and runs -- print(6 * 7) gives 42 -- and Chat.messages() holds the reply with its block; planted __domvecPlantReplyFlat: the reply's fences are flattened to text, no cell",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const pl = app.plugins.getPlugin("domvec-bridge");
+          window.__domvecChatDryMs = 600; window.__domvecPlantReplyFlat = ${planted};
+          window.__domvecChatDryText = "Here it is:" + NL + NL + F + "python" + NL + "print('ANSWER', 6 * 7)" + NL + F + NL + NL + "Run it.";
+          const path = "domvec-checks/g436 " + (${planted} ? "p" : "c") + Date.now().toString(36) + ".md";
+          if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+          const f = await app.vault.create(path, "# g436" + NL + NL + F + "chat" + NL + F + NL);
+          const leaf = app.workspace.getLeaf("tab");
+          const out = { planted: ${planted} };
+          try {
+            await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(900);
+            const ta = leaf.view.containerEl.querySelector(".domvec-chat-cell textarea");
+            if (!ta) return { ...out, error: "no chat cell" };
+            const t0 = window.__domvecChatCell.turns;
+            ta.value = "Give me code for 6 times 7";
+            ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+            for (let k = 0; k < 80 && window.__domvecChatCell.turns === t0; k++) await sleep(100);
+            await sleep(1200);
+            const body = await app.vault.read(f);
+            out.fence_in_note = body.includes(F + "python" + NL + "print('ANSWER', 6 * 7)" + NL + F);
+            let pre = null;
+            for (let k = 0; k < 20 && !pre; k++) { pre = [...leaf.view.containerEl.querySelectorAll("pre")].find((p) => p.textContent.includes("ANSWER")); if (!pre) await sleep(200); }
+            out.controls = pre ? [...pre.querySelectorAll("button, .domvec-run-fence, .domvec-pull-fence")].map((b) => (b.textContent || "").trim()).filter(Boolean).slice(0, 6) : [];
+            if (out.fence_in_note) {
+              const line = body.split(NL).findIndex((l) => l === F + "python");
+              const r = await pl.onRunFence({ path, lang: "python", code: "print('ANSWER', 6 * 7)", line, refs: [] });
+              out.runs_42 = JSON.stringify(r && (r.stdout || r.output || r)).includes("42");
+              const m = await pl.onRunFence({ path, lang: "python", code: "m = Chat.messages(); print('ROLES', [x['role'] for x in m], 'BLOCK' if '6 * 7' in m[-1]['content'] else 'NOBLOCK')", line: 0, refs: [] });
+              out.messages = JSON.stringify(m && (m.stdout || m.output || m)).slice(0, 200);
+            }
+            return out;
+          } finally {
+            window.__domvecChatDryMs = 0; window.__domvecChatDryText = ""; window.__domvecPlantReplyFlat = false;
+            leaf.detach(); await sleep(1500);
+            const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0);
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.fence_in_note && clean.controls.some((c) => /run/.test(c)) && clean.runs_42
+          && /ROLES.*user.*assistant.*BLOCK/.test(clean.messages || "") && !/NOBLOCK/.test(clean.messages || "");
+        return { pass: ok && !!planted && !planted.error && !planted.fence_in_note && planted.controls.length === 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-431",
       asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
       async run() {

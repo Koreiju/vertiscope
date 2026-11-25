@@ -31,7 +31,8 @@ export class Sidecar {
     const base = this.base().trim().replace(/\/+$/, "");
     const r = await fetch(base + "/chat_stream", { method: "POST",
       headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
-      body: JSON.stringify({ prompt, context, ...((window as any).__domvecChatDryMs ? { dry_ms: (window as any).__domvecChatDryMs } : {}) }) });
+      body: JSON.stringify({ prompt, context, ...((window as any).__domvecChatDryMs ? { dry_ms: (window as any).__domvecChatDryMs } : {}),
+        ...((window as any).__domvecChatDryText ? { dry_text: (window as any).__domvecChatDryText } : {}) }) });
     if (!r.ok || !r.body) throw new Error("chat_stream " + r.status);
     const rd = r.body.getReader(), dec = new TextDecoder();
     let all = "";

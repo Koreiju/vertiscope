@@ -52,7 +52,11 @@ export function chatCell(app: App, stream: (prompt: string, ctx: string[], on: (
       // The turn into the note, above the cell: it stays at the foot.
       let written = false;
       if (f) {
-        const turn = "> **You** " + prompt.split(NL).join(NL + "> ") + NL + NL + reply.trim() + NL + NL;
+        // Each code block of the reply is written as itself -- a fence, so a
+        // cell with the one code interface (G-412). Planted
+        // `__domvecPlantReplyFlat`: fences flattened to text, no cell.
+        const said = (window as any).__domvecPlantReplyFlat ? reply.split("`".repeat(3)).join("'".repeat(3)) : reply;
+        const turn = "> **You** " + prompt.split(NL).join(NL + "> ") + NL + NL + said.trim() + NL + NL;
         await app.vault.process(f, (t) => {
           const lines = t.split(NL);
           const at = info && lines[info.lineStart] !== undefined && lines[info.lineStart].trim().startsWith("```") ? info.lineStart
