@@ -1532,10 +1532,18 @@ body.domvec-chatui-pulling, body.domvec-chatui-pulling * { user-select: none !im
 .domvec-chat-cell { display: flex; flex-direction: column; gap: 6px; }
 .domvec-chat-cell-out:not(:empty) { white-space: pre-wrap; font-size: var(--font-text-size); }
 .domvec-chat-cell-input { width: 100%; resize: vertical; font-size: var(--font-ui-small); }
+/* +chat: a cell in each plane card's top-right corner, never clipped by the plane (chatcell.ts plusChat). */
+.domvec-plus-chat { position: absolute; right: 10px; top: 6px; padding: 1px 8px; border-radius: var(--radius-s);
+  border: 1px dashed var(--background-modifier-border); background: var(--background-primary);
+  color: var(--text-muted); font-size: var(--font-ui-smaller); cursor: pointer; z-index: 2; }
+.domvec-plus-chat:hover { color: var(--text-normal); border-style: solid; }
 
 /* Only the panel's own markdown is drawn on a plane card: Obsidian's inline
    title (the file name) doubled a note's own heading (2026-11-24). */
-.domvec-plane-card .inline-title { display: none; }
+/* A card's title is an editable header field in every syntax (2026-11-24):
+   a note opening on a # heading has that as its title, so Obsidian's inline
+   title is hidden only then (no doubled "ego"); any other card keeps it. */
+.domvec-plane-card:has(.cm-content > .HyperMD-header-1:first-child, .markdown-preview-section > div:nth-child(2) > h1) .inline-title { display: none; }
 
 /* The plain cockpit's prose wraps as any note's does (193-194). */
 .domvec-cockpit-card .cm-line:not(.HyperMD-codeblock) { white-space: break-spaces; }

@@ -67,3 +67,23 @@ export function chatCell(app: App, stream: (prompt: string, ctx: string[], on: (
     });
   };
 }
+
+/** "A '+chat' cell should accompany the panels" (2026-11-24): a cell at each
+ *  plane card's foot; pressing it gives the card's note a ```chat cell at its
+ *  foot (once) and puts the cursor in it. Planted `__domvecPlantNoPlusChat`. */
+export function plusChat(app: App, card: HTMLElement, path: string): void {
+  if ((window as any).__domvecPlantNoPlusChat || card.querySelector(":scope > .domvec-plus-chat")) return;
+  const b = card.createDiv({ cls: "domvec-plus-chat", text: "+chat" });
+  b.setAttr("aria-label", "add a chat cell to this note");
+  b.addEventListener("mousedown", (e) => e.stopPropagation(), true);
+  b.onclick = async () => {
+    const f = app.vault.getAbstractFileByPath(path) as TFile | null;
+    if (!f) return;
+    await app.vault.process(f, (t) => new RegExp("(^|\n)" + "`".repeat(3) + "chat[ \\t]*(\\r?\\n|$)").test(t) ? t : t.replace(/\s*$/, "") + NL + NL + "```chat" + NL + "```" + NL);
+    for (let i = 0; i < 20; i++) {
+      const ta = card.querySelector(".domvec-chat-cell textarea") as HTMLTextAreaElement | null;
+      if (ta) { ta.scrollIntoView({ block: "nearest" }); ta.focus(); return; }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  };
+}

@@ -26,6 +26,7 @@
  * query line asks the web (through the browser cell) when `duckduckgo` is
  * true -- typing alone never reaches the web (item 107).
  */
+import { plusChat } from "./chatcell";
 import { App, MarkdownView, TFile } from "obsidian";
 import { FoldState, SlateLine, foldsOf, isPlainCockpit, parseSlate, setFolds, titleLine } from "./slatefold";
 import { makeDraggable, type PlaceStats } from "./planecard";
@@ -212,6 +213,7 @@ export class Cockpit {
     this.card = card;
     // Draggable by its header node, contained in the plane (item 57).
     this.undrag = makeDraggable(card, plane, "domvec-plane-card:ego", this.placeStats);
+    plusChat(this.app, card, f.path);
     // One cockpit: the sidebar's copy goes.
     for (const l of this.app.workspace.getLeavesOfType("markdown")) {
       if ((l.view as any)?.file?.path === COCKPIT_PATH) { l.detach(); this.dockStats.undocked_sidebar++; }

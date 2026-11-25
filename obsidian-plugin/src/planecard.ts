@@ -13,6 +13,11 @@
 
 // The graph form's empty ground drags too (150: "I can't drag the computation
 // graph"); its nodes do not -- they wire (UR N.4) and fold.
+// A plain-note card (G-418) has no slate title: its own first heading is the
+// grip, SOFT -- a press there drags only once it moves 3px, and a still click
+// is the editor's, so the heading stays editable (2026-11-24: "I can't click
+// and drag the ego panel anywhere"). Planted `__domvecPlantNoHeadingGrip`.
+const SOFT = ".cm-line.HyperMD-header-1, .markdown-rendered h1, .inline-title";
 const HANDLE = ".domvec-var-title, .domvec-slate-circle, .domvec-slate-circle-dot, .domvec-plane-head-node, .domvec-slate-graph";
 
 export interface PlaceStats { drags: number; clamped: number }
@@ -111,8 +116,18 @@ export function makeDraggable(card: HTMLElement, home: HTMLElement, key: string,
     }
   } catch { /* a convenience only */ }
   let start: { x: number; y: number; left: number; top: number } | null = null;
+  let soft = false;
   const down = (e: MouseEvent) => {
     const tg = e.target as HTMLElement;
+    if (e.button === 0 && !(window as any).__domvecPlantNoHeadingGrip && !tg?.closest?.(HANDLE) && tg?.closest?.(SOFT)) {
+      const r = card.getBoundingClientRect(), p = plane.getBoundingClientRect();
+      start = { x: e.clientX, y: e.clientY, left: r.left - p.left, top: r.top - p.top };
+      (card as any).__dragFrom = { left: start.left, top: start.top };
+      soft = true;
+      window.addEventListener("mousemove", move, true);
+      window.addEventListener("mouseup", up, true);
+      return;                                    // the editor still gets the press
+    }
     if (e.button !== 0 || !tg?.closest?.(HANDLE)) return;
     if (tg.closest?.(".domvec-slate-graph") && (tg.closest?.(".domvec-slate-graph-node") || tg.getAttribute?.("data-path") != null)) return;
     e.preventDefault(); e.stopPropagation();
@@ -124,6 +139,10 @@ export function makeDraggable(card: HTMLElement, home: HTMLElement, key: string,
   };
   const move = (e: MouseEvent) => {
     if (!start) return;
+    if (soft) {
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) < 3) return;
+      soft = false; window.getSelection()?.removeAllRanges();
+    }
     e.preventDefault(); e.stopPropagation();
     card.style.right = "auto";
     card.style.left = `${start.left + e.clientX - start.x}px`;
@@ -141,6 +160,7 @@ export function makeDraggable(card: HTMLElement, home: HTMLElement, key: string,
     // (PLUGIN_GOAL 81: the halo opens on it).
     const still = !e || Math.hypot(e.clientX - start.x, e.clientY - start.y) < 3;
     start = null;
+    if (soft) { soft = false; return; }          // a click on the heading: the editor's
     if (still && onClick) { onClick(); return; }
     stats.drags++;
     // A drop the desk consumes (graph form's wiring): the card goes back.

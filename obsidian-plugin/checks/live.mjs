@@ -14245,10 +14245,10 @@ export function makeChecks(env) {
       id: "G-422",
       asks: "the chat is a formal chat input cell in the note, not a strip hovering on the panel (2026-11-24: 'replaced with a formal chat input cell as a canvas that then streams the chat output inline in the same obsidian panel'): a ```chat block in a note draws an input; Enter streams the reply into the cell token by token, then writes the turn into the note above the block, which stays at the foot; the context sent is the note above the cell; planted (__domvecPlantChatStrip) no cell",
       async run() {
-        const arm = (planted) => evaluate(`(async () => {
+        const arm = (planted, dry = 900) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
-          window.__domvecPlantChatStrip = ${planted}; window.__domvecChatDryMs = 900;
+          window.__domvecPlantChatStrip = ${planted}; window.__domvecChatDryMs = ${dry};
           const path = "domvec-checks/g422 chat.md";
           const text = "Tries are prefix trees, keyed by the path from the root." + NL + NL + F + "chat" + NL + F + NL;
           if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
@@ -14263,18 +14263,94 @@ export function makeChecks(env) {
             const before = window.__domvecChatCell.turns, lens = new Set();
             ta.value = "What is a trie?";
             ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-            for (let k = 0; k < 60 && window.__domvecChatCell.turns === before; k++) { if (out) lens.add(out.textContent.length); await sleep(100); }
+            for (let k = 0; k < (${dry} ? 60 : 1800) && window.__domvecChatCell.turns === before; k++) { if (out) lens.add(out.textContent.length); await sleep(100); }
             const body = await app.vault.read(f), last = window.__domvecChatCell.last || {};
             const you = body.indexOf("> **You** What is a trie?"), fence = body.indexOf(F + "chat");
-            return { planted: ${planted}, cell: true, streamed_states: lens.size, tokens: last.tokens, context_chars: last.context_chars,
+            return { planted: ${planted}, cell: true, reply: body.slice(you, you + 220), ms: last.ms, streamed_states: lens.size, tokens: last.tokens, context_chars: last.context_chars,
                      turn_written: you >= 0, turn_above_cell: you >= 0 && you < fence, cell_at_foot: body.trim().endsWith(F),
                      no_strip: !document.querySelector(".domvec-chat:not(.domvec-chat-cell)") };
           } finally { leaf.detach(); window.__domvecPlantChatStrip = false; window.__domvecChatDryMs = 0; }
-        })()`, { timeout: 60000 });
+        })()`, { timeout: 240000 });
         const clean = await arm(false), planted = await arm(true);
+        // The real model, once (llama.cpp on CUDA, G-385): a turn it wrote, not the dry ticks.
+        const real = await arm(false, 0);
+        // The browser cell's own note ends in the cell, and the cell has no strip.
+        const browser = await evaluate(`(async () => {
+          const l = app.workspace.getLeavesOfType("domvec-browser-view")[0];
+          if (l && l.loadIfDeferred) await l.loadIfDeferred();
+          const b = l && l.view; if (!b || !b.renderSide) return { error: "no browser cell" };
+          await b.renderSide(); await new Promise((r) => setTimeout(r, 1200));
+          const f = app.vault.getAbstractFileByPath(b.slatePath), t = f ? await app.vault.read(f) : "";
+          const F = String.fromCharCode(96).repeat(3);
+          return { note: b.slatePath, ends_in_cell: t.trim().endsWith(F + "chat" + String.fromCharCode(10) + F),
+                   cell_drawn: !!b.markdownWrap.querySelector(".domvec-chat-cell textarea"), strip: !!b.split.querySelector(".domvec-chat"), chat_obj: !!b.chat };
+        })()`, { timeout: 30000 });
         const ok = !!clean && clean.cell && clean.streamed_states >= 3 && clean.tokens >= 3 && clean.context_chars >= 40
           && clean.turn_above_cell && clean.cell_at_foot && clean.no_strip;
-        return { pass: ok && !!planted && planted.cell === false, evidence: { clean, planted } };
+        const realOk = !!real && real.cell && real.tokens >= 3 && real.turn_above_cell && !/did not answer|\[error/.test(real.reply || "");
+        const browserOk = !!browser && !browser.error && browser.ends_in_cell && browser.cell_drawn && !browser.strip && !browser.chat_obj;
+        return { pass: ok && realOk && browserOk && !!planted && planted.cell === false, evidence: { clean, planted, real, browser } };
+      },
+    },
+    {
+      id: "G-423",
+      asks: "a card's title is its editable header field and its grip, in every syntax (2026-11-24: 'I can't click and drag the ego panel anywhere'; 'the titles of cards are editable header fields for all syntaxes, markdown or otherwise'): on the ego card, pressing its # heading and moving 60px drags the card 60px; a still click there moves nothing and leaves the heading in the editable editor; Obsidian's inline title is hidden only where a # heading is the title; planted (__domvecPlantNoHeadingGrip) the press-and-move leaves the card where it was",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          window.__domvecPlantNoHeadingGrip = ${planted};
+          try {
+            await app.plugins.getPlugin("domvec-bridge").cockpit.open(); await sleep(800);
+            const card = [...document.querySelectorAll(".domvec-plane-card")].find((c) => c.querySelector(".cm-content > .HyperMD-header-1"));
+            if (!card) return { error: "no card with a heading" };
+            const h = card.querySelector(".cm-content > .HyperMD-header-1"), r = h.getBoundingClientRect();
+            const x = r.left + 20, y = r.top + r.height / 2;
+            const at = () => card.getBoundingClientRect().left;
+            const ev = (t, el, dx) => el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, button: 0, clientX: x + dx, clientY: y }));
+            const l0 = at(); ev("mousedown", h, 0); ev("mouseup", window, 0); await sleep(100);
+            const still = Math.round(at() - l0);
+            const l1 = at(); ev("mousedown", h, 0); for (const d of [-10, -30, -60]) { ev("mousemove", window, d); await sleep(30); } ev("mouseup", window, -60); await sleep(150);
+            const moved = Math.round(at() - l1);
+            if (moved) { ev("mousedown", card.querySelector(".cm-content > .HyperMD-header-1"), 0); for (const d of [10, 30, 60]) { ev("mousemove", window, d); await sleep(30); } ev("mouseup", window, 60); await sleep(150); }
+            const titles = [...document.querySelectorAll(".domvec-plane-card")].map((c) => ({ h1: !!c.querySelector(".cm-content > .HyperMD-header-1:first-child"),
+              shown: !!c.querySelector(".inline-title") && getComputedStyle(c.querySelector(".inline-title")).display !== "none" }));
+            return { planted: ${planted}, still_dx: still, drag_dx: moved, editable: h.closest("[contenteditable=true]") != null,
+                     cards: titles.length, title_rule_ok: titles.every((t) => t.h1 ? !t.shown : t.shown) };
+          } finally { window.__domvecPlantNoHeadingGrip = false; }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.still_dx === 0 && Math.abs(clean.drag_dx + 60) <= 4 && clean.editable && clean.title_rule_ok;
+        return { pass: ok && !!planted && !planted.error && planted.drag_dx === 0, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-424",
+      asks: "a +chat cell accompanies each panel (2026-11-24: 'A +chat cell should accompany the panels'): the ego card carries a +chat cell; pressing it gives the card's note a ```chat cell at its foot, drawn in the card with the cursor in its input; pressing again adds no second one; planted (__domvecPlantNoPlusChat) no +chat cell",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3);
+          window.__domvecPlantNoPlusChat = ${planted};
+          const cp = app.plugins.getPlugin("domvec-bridge").cockpit;
+          const f = app.vault.getAbstractFileByPath("domvec/ego.md"), keep = await app.vault.read(f);
+          try {
+            cp.undock(); await cp.open(); await sleep(900);
+            const card = document.querySelector(".domvec-cockpit-card");
+            const plus = card && card.querySelector(":scope > .domvec-plus-chat");
+            if (!plus) return { planted: ${planted}, plus: false };
+            plus.click(); await sleep(1500); plus.click(); await sleep(1200);
+            const t = await app.vault.read(f), ta = card.querySelector(".domvec-chat-cell textarea");
+            return { planted: ${planted}, plus: true, cells_in_note: t.split(F + "chat").length - 1, at_foot: t.trim().endsWith(F + "chat" + String.fromCharCode(10) + F),
+                     drawn: !!ta, focused: !!ta && document.activeElement === ta };
+          } finally {
+            window.__domvecPlantNoPlusChat = false;
+            await app.vault.modify(f, keep);
+            if (${planted}) { cp.undock(); await cp.open(); }      // leave the card as a reader has it
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && clean.plus && clean.cells_in_note === 1 && clean.at_foot && clean.drawn && clean.focused;
+        return { pass: ok && !!planted && planted.plus === false, evidence: { clean, planted } };
       },
     },
     {
@@ -21986,9 +22062,9 @@ export function makeChecks(env) {
     },
     {
       id: "G-82",
-      asks: "the side panel is the only second view: page always shown, pins stack, closing one closes its three forms",
+      asks: "a pin is a stuck panel on the plane, not a side card (PLUGIN_GOAL 133(b), \"instead of showing in the clipboard\"): the page always shown and no side panel at any step -- pinned, away, back; one stuck panel per pin; outlines leave with the page and return with it; the stuck panel's x lets go of its own pin only; planted (side-card): the old clipboard, the side shown",
       async run() {
-        const got = await evaluate(`(async () => {
+        const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           const d = window.__domvec;
           await d.act("open", "graph");

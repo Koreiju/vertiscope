@@ -6860,6 +6860,21 @@ the cell, then the turn is written into the note above it, so the conversation
 is the note's own markdown. Its context is the note above the cell. Dragging
 sub-panels in and out as cells and groupings is deferred, by name.*
 
+Then, the same evening:
+
+> I can't click and drag the ego panel anywhere
+
+> the 'titles' of cards are editable header fields for all syntaxes, markdown or
+> otherwise.
+
+> A "+chat" cell should accompany the panels.
+
+*Read as (198), mine: a card's title is its grip and stays an editable field --
+a note's opening # heading, else Obsidian's inline title (hidden only where a #
+heading is the title). A press that moves 3px drags; a still click edits. Every
+plane card carries a +chat cell in its corner that gives its note a ```chat
+cell (once) and puts the cursor in it.*
+
 ### Recovered verbatim (2026-11-22 inventory)
 
 *Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,
