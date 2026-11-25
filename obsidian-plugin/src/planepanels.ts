@@ -653,20 +653,30 @@ export class PlaneDesk {
   plantRefsNotLinks = false;
   /** note path -> the open panels its `{name}` references resolve to (by
    *  basename, spaces as underscores, case-folded). Re-read on edit. */
-  private refCache = new Map<string, { at: number; to: Set<string> }>();
+  private refCache = new Map<string, { at: number; names: Set<string> }>();
   refTargets(path: string): Set<string> {
     const f = this.app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return new Set();
-    const hit = this.refCache.get(path);
-    if (hit && hit.at === f.stat.mtime) return hit.to;
-    const key = (n: string) => n.toLowerCase().replace(/\s+/g, "_");
+    // The NAMES a note's braces reference are cached per version of the note;
+    // they are resolved against the panels open NOW (a panel opened after the
+    // read was never linked -- seen 2026-11-22). Names may hold spaces (N.7):
+    // `{notebook 3}` is a reference as much as `{search.results}`.
+    let hit = this.refCache.get(path);
+    if (!hit || hit.at !== f.stat.mtime) {
+      const names = new Set<string>();
+      hit = { at: f.stat.mtime, names };
+      this.refCache.set(path, hit);
+      void this.app.vault.cachedRead(f).then((t) => {
+        for (const m of t.matchAll(/\{([^{}\n]+)\}/g)) names.add(m[1].split(".")[0].split("#")[0].trim());
+        // A code cell reading another note is a compiled link (194; O-7):
+        // `x = Vault.read("folder/note.md")` names that note.
+        for (const m of t.matchAll(/Vault\.read\(\s*["']([^"'\n]+)["']/g)) names.add(m[1].replace(/^.*\//, "").replace(/\.md$/, "").trim());
+      });
+    }
+    const key = (n: string) => n.toLowerCase().replace(/[\s_]+/g, "_");
     const byName = new Map(this.panels.map((p) => [key(p.path.slice(p.path.lastIndexOf("/") + 1).replace(/\.md$/, "")), p.path]));
     const to = new Set<string>();
-    const entry = { at: f.stat.mtime, to };
-    this.refCache.set(path, entry);
-    void this.app.vault.cachedRead(f).then((t) => {
-      for (const m of t.matchAll(/\{([A-Za-z_][\w.]*)\}/g)) { const q = byName.get(key(m[1].split(".")[0])); if (q && q !== path) to.add(q); }
-    });
+    for (const n of hit.names) { const q = byName.get(key(n)); if (q && q !== path) to.add(q); }
     return to;
   }
   contain(path: string): string[] {

@@ -14397,6 +14397,43 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-420",
+      asks: "links are compiled, never wiki links (PLUGIN_GOAL 194, T-4; O-7): link(a, b) writes a python cell in a reading b (`b = Vault.read(...)`), the plane draws a line between their cards from it, and commit(s, a, b) makes a NEW note whose one cell reads each member and RUNS on the reservoir (194 f); planted (editor.plantWikiLink) link writes a wiki link and no cell",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const plugin = app.plugins.getPlugin("domvec-bridge"), d = window.__domvecPlane;
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const tag = (${planted} ? "p" : "c") + Date.now().toString(36);
+          const A = "g420a " + tag, B = "g420b " + tag, S = "g420s " + tag, P = (n) => "domvec/graph/" + n + ".md";
+          const driver = P("g420 driver " + tag);
+          const code = ["create(" + JSON.stringify(A) + ", 'a = 1', 'notebook')", "create(" + JSON.stringify(B) + ", 'b = 2', 'notebook')",
+                        "link(" + JSON.stringify(A) + ", " + JSON.stringify(B) + ")", "commit(" + JSON.stringify(S) + ", " + JSON.stringify(A) + ", " + JSON.stringify(B) + ")"].join(NL);
+          plugin.editor.plantWikiLink = ${planted};
+          const txt = async (q) => { const v = d.viewOf(q); if (v && v.editor) return v.editor.getValue(); const f = app.vault.getAbstractFileByPath(q); return f ? await app.vault.read(f) : ""; };
+          try {
+            await d.create("notebook", { path: driver, text: F + "python" + NL + code + NL + F + NL });
+            await plugin.onRunFence({ lang: "python", code, line: 0, path: driver });
+            await sleep(1500);
+            const ta = await txt(P(A)), ts = await txt(P(S));
+            for (let i = 0; i < 20 && !(d.linkStats.pairs || []).some((p) => p.includes(P(A)) && p.includes(P(B))); i++) { d.drawLinks && d.drawLinks(); await sleep(250); }
+            const cell = (ts.split(F + "python")[1] || "").split(F)[0].trim();
+            const ran = cell ? await plugin.onRunFence({ lang: "python", code: cell, line: 0, path: P(S) }) : null;
+            return { planted: ${planted}, a_cell: ta.includes("Vault.read("), a_wiki: ta.includes("[["),
+                     drawn: (d.linkStats.pairs || []).some((p) => p.includes(P(A)) && p.includes(P(B))),
+                     s_reads: cell.split("Vault.read(").length - 1, s_ran: !!(ran && ran.ok), s_wiki: ts.includes("[[") };
+          } finally {
+            plugin.editor.plantWikiLink = false;
+            for (const q of [driver, P(A), P(B), P(S)]) { try { await d.trash(q); } catch (e) {} }
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.a_cell && !clean.a_wiki && clean.drawn && clean.s_reads === 2 && clean.s_ran && !clean.s_wiki;
+        const caught = !!planted && !planted.error && planted.a_wiki && !planted.a_cell;
+        return { pass: ok && caught, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-414",
       asks: "hovering a CHUNK node in the 3D view opens its billboard as a preview (PLUGIN_GOAL 192: 'I should be able to view the panel billboard previews when hovering'): in fly-to mode, a pointer move onto chunk nodes on screen -- through the pane's own pointer handler -- opens THAT node's panel (or its unit's) within the dwell, and a move off onto empty canvas lets it go; planted (plantNo3DHoverPanel) no hover opens anything",
       async run() {

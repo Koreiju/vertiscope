@@ -114,6 +114,9 @@ export class EditorCalls {
     return { path, said: `${kind} card ${name}` };
   }
 
+  /** Planted (O-7): `link` writes a wiki link, as before. */
+  plantWikiLink = false;
+
   private async do_link(pair: [string, string]) {
     const [a, b] = (pair || []).map(String);
     const pa = this.pathOf(a), pb = this.pathOf(b);
@@ -122,10 +125,11 @@ export class EditorCalls {
     if (pa === pb) throw new Error("a card cannot link itself");
     if (this.host.desk.linkedTo(pa).has(pb)) return { from: pa, to: pb, said: `${a} and ${b} already linked` };
     const src = this.host.app.vault.getAbstractFileByPath(pa) as TFile, dst = this.host.app.vault.getAbstractFileByPath(pb) as TFile;
-    // As a wire-drop writes it (PlaneDesk.wireDrop). Undirected (G-383): the
-    // link lives in one note's text, but nothing draws which one.
-    const md = this.host.app.fileManager.generateMarkdownLink(dst, src.path);
-    await this.append(src, md);
+    // A COMPILED link (194; O-7): a code cell in a's note that reads b, which
+    // the reservoir runs and the plane draws -- never a wiki link (T-4).
+    // Planted `plantWikiLink`: the old wiki link.
+    if (this.plantWikiLink) await this.append(src, this.host.app.fileManager.generateMarkdownLink(dst, src.path));
+    else await this.append(src, ["```python", varOf(dst.basename) + " = Vault.read(" + JSON.stringify("/" + pb) + ")", "```"].join(NL));
     return { from: pa, to: pb, said: `${a} -- ${b}` };
   }
 
@@ -155,10 +159,10 @@ export class EditorCalls {
     const paths = members.map((m) => this.pathOf(m));
     const missing = members.filter((_, i) => !paths[i]);
     if (missing.length) throw new Error(`no card ${missing.join(", ")}`);
-    const got = await this.do_create({ name: c.name, kind: "slate", body: "subgraph of " + members.length });
-    const f = this.host.app.vault.getAbstractFileByPath(got.path) as TFile;
-    const links = paths.map((q) => this.host.app.fileManager.generateMarkdownLink(this.host.app.vault.getAbstractFileByPath(q!) as TFile, got.path));
-    await this.append(f, links.join(NL));
+    // The group as a NEW thing (194 f): one code cell reading each member, so
+    // the composite runs on the reservoir and its links are compiled (O-7).
+    const body = paths.map((q) => varOf(q!.replace(/^.*\//, "").replace(/\.md$/, "")) + " = Vault.read(" + JSON.stringify("/" + q) + ")").join(NL);
+    const got = await this.do_create({ name: c.name, kind: "notebook", body });
     return { path: got.path, members: paths, said: `${c.name} holds ${members.length}` };
   }
 
@@ -177,3 +181,6 @@ export class EditorCalls {
     return { path: p, said: `asked on ${name}` };
   }
 }
+
+/** A note name as a Python identifier, for the cell that reads it. */
+function varOf(name: string): string { const v = name.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, ""); return /^[a-z_]/.test(v) ? v : "n_" + v; }
