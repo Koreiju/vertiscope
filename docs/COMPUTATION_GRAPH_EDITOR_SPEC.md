@@ -47,8 +47,9 @@ where it was read into a design.
 | 2026-11-22, 183-186 | The ego as one central canvas; then native panels; then seamless; then "NO SPECIAL EFFECTS" and "a conclusive plan" | §12; G-396..G-405 |
 | **2026-11-22, 187** | Established interactive-object APIs over the in-markdown syntax; the graphical side is an existing permissive node editor for Python modules | §13; G-408..G-413 |
 | 2026-11-22, 188-191 | The cross-check goal, no agents, design docs with fragments only; code tools on canvases scoped as app tools vs workspace code; eleven late-transcribed messages; every session prompt in the check (85 recovered, PLUGIN_GOAL's 2026-11-22 inventory) | §13n, §14 |
+| 2026-11-24, 192 | Hover previews of billboards in 3D; does fly-to still work; "I don't know what these dotted lines are" | G-414; the craft gate (G-405) deployed; F-105 |
 
-Where the verbatim record ends: 2026-11-22, item 191 (it was 166 when this table was first written). Anything below that
+Where the verbatim record ends: 2026-11-24, item 192 (it was 166 when this table was first written). Anything below that
 line in any design is interpretation.
 
 ## 2. The designs already written, and what 166 does to each
@@ -1553,7 +1554,7 @@ Sources (read 2026-11-22):
 The whole set, re-read at every pass. Scope: this spec, the sibling designs
 (RESERVOIR, GRAPH_WORKBENCH, DESIGN_VISION, SEARCH_GRAPH, NOTEBOOK_PANEL,
 THROUGH_STACK_SYNTHESIS, EGO_CANVAS, CALLABLE_INTERFACE's head), PLUGIN_GOAL
-from 2026-10-29 to 191, mortegon UR §E, §F, §M-§T, the PRD rows they
+from 2026-10-29 to 192, mortegon UR §E, §F, §M-§T, the PRD rows they
 cite, and every prompt the reader sent in this session's transcript
 (2026-09-12 to 2026-11-23 UTC, 238 messages; from F-59). Kinds: **M** a mistake, **I** an inconsistency between documents or
 with the app, **U** an unclear term or step.
@@ -1661,8 +1662,16 @@ with the app, **U** an unclear term or step.
 | F-99 | I | RESERVOIR §1, §3.3, §4, §6, §6b, §8, §8b, §10.1, §10.2, §11.2, §11.4, §12.8 | read line by line: graph form, circles, the old cockpit fields, `Agent` as a download, the browser cockpit slate, three rungs, `+` buttons and soft links, libcst asked, the telescope -- all overridden later and not in its head note | head note extended, each named with what overrides it |
 | F-100 | I | app vs T-4, §12d, §13f: `editorcalls.ts` `link`, `planepanels.ts` `linkedTo`, `magnetized`, the wire drop; RESERVOIR §12.3; spec §11d | wiki links stand in for hard links: `link()` writes one, containment and chat context read them, while the plane draws only `{ref}`s (G-404) | O-7; §11d's comment and §13g's containment row say so |
 | F-101 | I | GRAPH_WORKBENCH §2, §4, §5 | read line by line: a 2026-10-18 "now" column, DeepSeek-Coder as a chat role, llama-cpp-python "needs installing", downloads "under way", through-stack agents still designed -- each overridden later | head note extended |
+| F-102 | I | NOTEBOOK §4a vs §3, §6 step 4 | §4a named the output's class `output`; §3 allows existing categories only, and the build wrote `text.output`; step 4 credited §3 with naming it | §4a says `text.output`; step 4 credits §4a |
+| F-103 | U | NOTEBOOK §6 step 2, step 5, §8 q2 | a dangling "§4b"; two `[[]]` spellings of the retrieval gesture that R-7 counted as fixed; `"x = 1\nprint(x)"` printed with raw line breaks, splitting the sentence | step 4 named; `[query]()`; the escapes restored |
+| F-104 | I | app: `shell.py` `interpreters()`, `tests/test_obsidian_shell.py`; NOTEBOOK §6 step 6 | `GET /interpreters` marked every Jupyter kernelspec `runnable: false` "because P-N1 is Partial", while P-N1 is Confirm and the pool drives `python3` over the Jupyter protocol; a test held the stale claim | runnable is `python3` exactly when the pool would start it; the test has a planted arm (forced subprocess kernel: nothing runnable); NOTEBOOK head note |
+| F-105 | I | spec §1, §14 scope vs PLUGIN_GOAL 192 | the record table and the ledger's scope stopped at 191 | 192 added; record ends 2026-11-24 |
+| F-106 | I | app (G-414 `hover3d`) vs §12f | §12f: "a hovered node billboards its record revealed to its level: higher rank, more of the tree"; G-414 previews chunk nodes and does nothing over a page or path node | O-8 |
+| F-107 | M | PRD G-414 | status "Open" for a row built and passed by its live check with a planted arm; that state is `Confirm` | Confirm |
+| F-108 | U | spec O-5 | three ways a live value could cross, then "Either ... or" offering two of them again | the repeated sentence removed |
+| F-109 | I | spec O-3 vs the app | O-3 said G-401, G-404, G-405 were not seen live; the 2026-11-24 rebuild deployed them. G-405's craft gate is seen working (192: the dotted lines gone); G-401's separate `domvec/ego canvas.md` card shows on the plane, which §12c ("one ego") and §12g retire | O-3 restated |
 
-**Still open** -- O-1 to O-4, O-6 and O-7 are work the design names; O-5 is a question for the reader:
+**Still open** -- O-1 to O-4 and O-6 to O-9 are work the design names; O-5 is a question for the reader:
 
 - O-1. The pinned litegraph release's own licence file must be read before
   it is vendored (§13j); only third-party listings say MIT.
@@ -1670,8 +1679,11 @@ with the app, **U** an unclear term or step.
   API, and G-399 part 4 expects a card-on-card link that G-404 now refuses.
   The app and its checks disagree until those checks follow the PRD's
   superseded rows.
-- O-3. G-401, G-404 and G-405 are written but neither committed nor seen
-  live.
+- O-3. G-401, G-404 and G-405 are written, not committed, and deployed
+  by the 2026-11-24 rebuild (F-109). G-405 is seen working. G-401 draws a
+  separate `domvec/ego canvas.md` card on the plane, the note §12c's "one
+  ego" retires; with the clipboard card it covers the 3D view's chunk nodes,
+  so hover and click reach none of them there.
 - O-4. The scope ladder: T-9 rules chunk -> group -> page -> browser
   (from 137.4, "chunk groups"); the governing browser class and
   G-301 step chunk -> page -> live. The ruling is the later word: the class
@@ -1683,9 +1695,7 @@ with the app, **U** an unclear term or step.
   kernel (§13d). Three ways a live value could cross: the plane's nodes share
   one kernel; a note is called as a module, its definitions returned
   (§9a, §10a, my reading of 166 e); or cross-note links stay at records
-  and readouts. Either
-  the plane's nodes share one kernel (one note, or one kernel per plane),
-  or cross-note links stay record-level. The answer also decides which note
+  and readouts. The answer also decides which note
   a node placed from the retrieval bar is written into. The record does not
   say. 148 answered T-14 with "No, share one" (one interpreter for every
   workspace, nothing downloaded), which is the Python environment and its
@@ -1702,6 +1712,12 @@ with the app, **U** an unclear term or step.
   cache's resolved links. The plane draws only compiled `{ref}`s (G-404), so
   a `link()` call makes a link that is neither drawn nor compiled. Each
   must write or read compiled links: a fence-line `{ref}` or a def/use.
+- O-8. A 3D hover previews a chunk node's billboard (G-414) and nothing
+  over a page or path node; §12f wants every level billboarded, a higher
+  rank revealing more of the tree (F-106).
+- O-9. Live check G-38's planted arm expects `banner_moves >= 1` and
+  measures 0, while its clean arm rings the hovered chunk's own node on 10
+  of 10 hovers: the check's expectation is stale, not the app.
 
 ### 14a. The recovered prompts, one by one (F-59)
 

@@ -131,15 +131,26 @@ def test_discovery_reports_this_machine_not_a_fixed_list():
         assert shell["path"], shell
 
 
-def test_jupyter_kernels_are_reported_but_not_claimed_runnable():
+def test_jupyter_runnable_names_exactly_the_kernel_the_pool_drives():
     """Honest in both directions.
 
-    `P-N2` names Jupyter kernels, so a reader should see what is installed. But
-    this sidecar drives a subprocess, not the Jupyter protocol, and marking them
-    runnable would be exactly the claim `P-N1` is still `Partial` for.
+    `P-N1` drives the `python3` kernelspec over the Jupyter protocol whenever
+    `jupyter_available()`; that one is runnable and no other is, because a
+    per-cell kernelspec choice is not built (`P-N2`). Planted arm: with the
+    subprocess kernel forced, nothing Jupyter is runnable -- the flag follows
+    what the pool would actually start, not what is installed.
     """
-    for kernel in interpreters()["jupyter_kernels"]:
-        assert kernel["runnable"] is False, kernel
+    from domvec.obsidian import kernel as k
+    found = interpreters()["jupyter_kernels"]
+    for spec in found:
+        want = k.jupyter_available() and spec["key"] == "python3"
+        assert spec["runnable"] is want, spec
+    k.PLANT_SUBPROCESS_KERNEL[0] = True
+    try:
+        for spec in interpreters()["jupyter_kernels"]:
+            assert spec["runnable"] is False, spec
+    finally:
+        k.PLANT_SUBPROCESS_KERNEL[0] = False
 
 
 # --- the session ------------------------------------------------------------

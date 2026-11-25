@@ -15,7 +15,7 @@
 >   sets the boundary of def/use links: across notes only a fence-line
 >   `{ref}`, which binds a record, not a value (spec §13d, F-68). Whether
 >   that stands is the open question O-5.
-> - §5's "verifiable over CDP, never a screenshot" is stricter than the
+> - §6's "verifiable over CDP, never a screenshot" is stricter than the
 >   record, which says "Screenshots must be sparing" (2026-09-20 20:28).
 >   State is read as data through the harness, and a screenshot is taken when
 >   the question is what a person sees (spec §13k, F-69, F-80).
@@ -23,6 +23,17 @@
 >   default (DESIGN_VISION T-13); one interpreter for every workspace,
 >   nothing downloaded (148: "No, share one", over T-14's per-workspace
 >   environment).
+> - Read line by line (pass 19, F-102..F-104):
+>   - §1's third reason and §6 step 6's `runnable: false` for Jupyter
+>     kernels: superseded by 49 with the rest of "subprocesses first".
+>     `GET /interpreters` still said so after P-N1 drove `python3` over
+>     the Jupyter protocol; fixed 2026-11-24 (F-104).
+>   - §7's "no cell reordering, folding": overridden. A record's fold state
+>     and its fields' compile order are the record (spec §12a, §12c).
+>   - §7's "hovering SLM bar is the next deliverable": the chat panel and the
+>     retrieval bar carry it now (spec §13h, 133 d).
+>   - §4a's `content-detection: output` is spelled `text.output` everywhere
+>     it was built (§6 step 4); the body now says so (F-102).
 
 Addendum II puts this before the hovering SLM bar and asks that it be nailed
 down *first*: *"we move onward to the notebook kernel panel design first to nail
@@ -283,7 +294,7 @@ layout — it is two panes, which Obsidian already does.
 
 **Consequence for §3's addressing.** A kernel run writes into the document, so
 its output is trie content under the note's address (`content-detection:
-output`). **A command terminal in a separate pane is not in a document, and so
+text.output`, §6 step 4). **A command terminal in a separate pane is not in a document, and so
 by default it has no address.** That is a decision rather than an oversight: a
 shell session is a stream, not a leaf, and giving it a trie address would put
 untracked command history into a store whose point is addressable page content.
@@ -341,7 +352,7 @@ Each step ends somewhere verifiable over CDP (`X-2`), never a screenshot.
 | 2 | ~~Fence detection + `▶ run` in both views~~ **DONE** — `src/fences.ts`, `src/runbutton.ts` | both paths draw one button per runnable fence and none on a `json` fence; both fire with the same lang, line and byte-identical source. `probes/run-buttons.js`, 9 checks |
 | 3 | ~~Subprocess kernel, python only, per-note state~~ **DONE** — `domvec/obsidian/kernel.py`, `_kernel_driver.py`, `POST /kernel` | two cells share a variable and two notes do not, asserted through the button in the running app. 14 pytest + `probes/kernel-run.js` (6 checks) |
 | 4 | ~~Output markers written, read, re-rendered~~ **DONE** — `src/outputs.ts` | written after the fence, replaced on re-run, markers invisible in reading view, survives a close and re-read. `probes/cell-outputs.js`, 11 checks |
-| 5 | Outputs are chunked and vectorised (`P-N5`/`P-N6`) | **GATE PASSED** — a stored output is addressed `…/output[n]` and retrieves on its own words; the markers do NOT (§4b). Live `[[]]` wiring still to do |
+| 5 | Outputs are chunked and vectorised (`P-N5`/`P-N6`) | **GATE PASSED** — a stored output is addressed `…/output[n]` and retrieves on its own words; the markers do NOT (step 4 below). Live `[query]()` wiring still to do |
 | 6 | ~~Kernel run surface; command terminal in a *separate pane* (§4a); interpreter discovery~~ **DONE** — `domvec/obsidian/shell.py`, `src/terminal.ts`, `POST /shell`, `GET /interpreters` | a pwsh prompt in its own pane, `cd` persisting per pane and isolated across them, picker filled from discovery. 11 pytest + `probes/terminal-pane.js` (7 checks) |
 | 7 | ~~`P-N8` chunk overlay~~ **DONE** — `vault.chunk_preview`, `POST /chunk_preview`, `src/chunkgutter.ts` | marks match the sidecar's own answer for the same text, and the preview matches what indexing STORES (39 = 39, identical address sets). 5 pytest + `probes/chunk-gutter.js` (6 checks) |
 | 8 | `P-N9`/`P-N10` selection → address set → SLM context | the SLM's prompt contains exactly the selected addresses' content |
@@ -477,7 +488,7 @@ parser, a second chunker and a second answer to what address an output has.
   gone, the output's fence became an immediate `code` sibling of the cell's own
   fence, and `markdown.py` merges adjacent same-label runs — so source and result
   came out as ONE line: `` `print("…") critical current density 4.2e6` ``. The
-  markers had been separators as well as metadata. The fix is the label §3
+  markers had been separators as well as metadata. The fix is the label §4a
   already named: an output is `text.output` at `…/output[n]`, which separates it
   *and* says what it is, so a reader and an SLM can tell what was run from what
   came back.
@@ -569,11 +580,8 @@ what the `format` field is for.
   fence already renders an interactive surface.
 - **One normalisation of the cell source, found by measurement.** Reading view
   reads `code.textContent` and gets a trailing newline; the live-preview scanner
-  joins body lines and does not. The same cell came back `"x = 1
-print(x)
-"`
-  through one path and `"x = 1
-print(x)"` through the other. Step 4 keys a
+  joins body lines and does not. The same cell came back `"x = 1\nprint(x)\n"`
+  through one path and `"x = 1\nprint(x)"` through the other. Step 4 keys a
   stored output on a digest of the source, so two spellings mean **switching
   view modes silently invalidates the output and re-runs the cell**. `cellSource`
   is that one spelling, and the probe asserts the two paths agree byte for byte
@@ -603,7 +611,7 @@ writing updates back to notebooks are explicitly 'later on'"*. Accordingly:
    switch selects a kernel run in place; a command terminal is what a
    *separate pane* holds.
 2. **Does a notebook output belong in retrieval by default?** Making outputs
-   trie content (§1) means a `[[]]` query can return a dataframe the reader
+   trie content (§1) means a `[query]()` query can return a dataframe the reader
    computed. That is either the best feature here or noise in every result set,
    and it should be chosen rather than discovered.
 3. **Which interpreter is the default kernel?** The repo runs Python 3.13 from

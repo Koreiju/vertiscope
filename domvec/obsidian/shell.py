@@ -105,10 +105,14 @@ def interpreters() -> Dict:
     the machine and a fixed one is wrong on every machine but the author's.
 
     Jupyter kernels are included when `jupyter` is installed -- `P-N2` names
-    them -- even though nothing executes through the Jupyter protocol yet. That
-    is honest in both directions: the reader is told what is INSTALLED, and
-    `runnable` says which of it this sidecar can currently drive.
+    them. That is honest in both directions: the reader is told what is
+    INSTALLED, and `runnable` says which of it this sidecar can currently
+    drive -- the `python3` kernelspec, which `kernel.py`'s per-note pool runs
+    over the Jupyter protocol whenever `jupyter_available()` (P-N1), and no
+    other, since choosing a kernelspec per cell is not built (P-N2 Partial).
     """
+    from .kernel import PLANT_SUBPROCESS_KERNEL, jupyter_available
+    drives_jupyter = jupyter_available() and not PLANT_SUBPROCESS_KERNEL[0]
     out: Dict = {
         "python": [{
             "name": "this sidecar's interpreter",
@@ -137,10 +141,10 @@ def interpreters() -> Dict:
                 out["jupyter_kernels"].append({
                     "name": spec.get("spec", {}).get("display_name", key),
                     "key": key,
-                    # Named and not runnable: this sidecar executes Python in a
-                    # subprocess, not over the Jupyter protocol. Reporting them
-                    # as runnable would be the claim `P-N1` is still Partial for.
-                    "runnable": False,
+                    # Runnable only for the kernelspec the pool starts
+                    # (`_JupyterKernel`'s default); any other is listed, not
+                    # offered, until a per-cell choice exists (P-N2).
+                    "runnable": drives_jupyter and key == "python3",
                 })
         except Exception:                       # noqa: BLE001
             # A broken or slow jupyter must not make discovery fail; the rest
