@@ -6742,6 +6742,53 @@ The third image adds, under the same code block:
 - *(f) Quantized permissive GGUF code models are suggested for code
   retrieval and embedding. Any download waits for the reader's yes.*
 
+### 194. (2026-11-24) The suggestions override the custom syntax; code cells compile on the reservoir
+
+Said after 193, while the links question (plain notes: wiki links, or
+compiled links shown as highlighting) was open:
+
+> I think the suggestions can override our syntactic treatments as well in
+> our custom markdown panels, since we then offload that to code cells more
+> specifically that still run and compile on the reservoir in the 2D editor.
+> Perhaps if we can, it would still be a nice to have, but difficult to nail
+> down as a gesture properly. The benefit is that we keep interacting with
+> the code itself and its measurements directly coupled at the interface of
+> the code itself, meaning that we do away with things like calling in the
+> terminal because we're measuring the changes instantly to the updates in
+> the rendered fields and overall behaviors of the rest of the reservoir, in
+> which each output artifact of the reservoir *should* be shown for general
+> i/o and vectorization. we should use diffs to keep the
+> vectorization/re-indexing in our database efficient. we should still have
+> the terminal capability as a standard interface type that we can
+> instantiate along with our code artifacts, but also be able to compose
+> these groups of artifacts as new things, which also ties in with the
+> dynamic pure-interactive-object style interface I'm thinking could somehow
+> work alongside our findings on graphical code design interfaces with our
+> package research from past transcripts in our same session to this end.
+
+*Read as (194), mine, to be corrected:*
+- *(a) 193's suggestions override the custom syntax in the markdown panels:
+  the slate's `{ref}` fields and chips go, and a panel is a plain note. What
+  that syntax did (binding, compiling, linking) moves into code cells, which
+  run and compile on the reservoir in the 2D editor. Links therefore come
+  from compilation in code cells (def/use), as 136 and T-4 ruled. This
+  answers the links question: compiled, from code cells.*
+- *(b) Keeping the custom syntax as a gesture is a "nice to have", not
+  required, and hard to get right.*
+- *(c) The code and its measurements are coupled at the code's own
+  interface: an edit shows at once in the rendered fields and in the rest of
+  the reservoir's behaviour, so the reader need not call into a terminal to
+  see it.*
+- *(d) Every output artifact of the reservoir is shown, for i/o and for
+  vectorization; re-indexing goes by diffs.*
+- *(e) The terminal stays a standard interface type, instantiated alongside
+  code artifacts.*
+- *(f) Groups of artifacts compose into new things.*
+- *(g) The live-object interface (187) works alongside the graphical code
+  design interfaces from the package research (spec §9, §10, §13j: the node
+  editors). That research is kept for its own question, not suspended with
+  the markdown syntax.*
+
 ### Recovered verbatim (2026-11-22 inventory)
 
 *Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,
