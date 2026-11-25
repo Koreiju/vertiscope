@@ -1,7 +1,8 @@
 /**
  * Named extension slots over a stable core (G-240; PLUGIN_GOAL Addendum XI
  * (169), a reading of "the 'everything is a plugin' framework"): an extension
- * fills ONE named slot -- `codeblock:<lang>` is the only kind so far -- and may
+ * fills ONE named slot -- `codeblock:<lang>` (a block it draws) or `card:<name>`
+ * (a decoration on every plane card: `decorateCard`, below) -- and may
  * only tighten the core: a slot the core owns (`domvec`, `browser`, `python`)
  * is refused, so an extension can add a block but never replace one. Loading
  * is isolated: an extension that throws is recorded and skipped, the rest and
@@ -20,6 +21,19 @@ export interface Ext {
 
 export const CORE_SLOTS = new Set(["codeblock:domvec", "codeblock:browser", "codeblock:python", "codeblock:py", "codeblock:python3"]);
 
+/** The `card:` slot kind: decorations every plane card gets as it is drawn.
+ *  Each runs isolated -- one that throws is recorded and the card is drawn
+ *  regardless. */
+const decorators = new Map<string, (card: HTMLElement, path: string) => void>();
+export const cardStats = { failed: [] as string[] };
+export function registerDecorator(name: string, fn: (card: HTMLElement, path: string) => void): void { decorators.set(name, fn); }
+export function unregisterDecorator(name: string): void { decorators.delete(name); }
+export function decorateCard(card: HTMLElement, path: string): void {
+  for (const [name, fn] of decorators) {
+    try { fn(card, path); } catch (err) { cardStats.failed.push(name); console.warn("domvec: card decoration " + name + " failed; the card is drawn", err); }
+  }
+}
+
 export class Slots {
   exts: Ext[] = [];
   stats = { loaded: [] as string[], refused: [] as string[], failed: [] as string[], off: [] as string[] };
@@ -27,16 +41,30 @@ export class Slots {
 
   add(e: Ext): void { this.exts.push(e); }
 
-  load(): void {
+  private taken = new Map<string, string>();
+
+  load(): void { for (const e of this.exts) this.loadOne(e, false); }
+
+  /** One extension, by the same rules; also how one is added while running. */
+  loadOne(e: Ext, add = true): "loaded" | "off" | "refused" | "failed" {
+    if (add) this.exts.push(e);
     const off = new Set([...this.disabled(), ...(((window as any).__domvecDisableExtensions as string[]) || [])]);
-    const taken = new Set<string>();
-    for (const e of this.exts) {
-      if (off.has(e.id) || off.has("*")) { this.stats.off.push(e.id); continue; }
-      // May only tighten: never a core slot, never a slot another extension holds.
-      // Planted `__domvecPlantNoSlotGuard`: any slot is taken, a core one too.
-      if (!(window as any).__domvecPlantNoSlotGuard && (CORE_SLOTS.has(e.slot) || taken.has(e.slot))) { this.stats.refused.push(e.id); continue; }
-      try { e.register(); taken.add(e.slot); this.stats.loaded.push(e.id); }
-      catch (err) { this.stats.failed.push(e.id); console.warn("domvec: extension " + e.id + " failed; the core runs on", err); }
+    if (off.has(e.id) || off.has("*")) { this.stats.off.push(e.id); return "off"; }
+    // May only tighten: never a core slot, never a slot another extension holds.
+    // Planted `__domvecPlantNoSlotGuard`: any slot is taken, a core one too.
+    if (!(window as any).__domvecPlantNoSlotGuard && (CORE_SLOTS.has(e.slot) || this.taken.has(e.slot))) { this.stats.refused.push(e.id); return "refused"; }
+    try { e.register(); this.taken.set(e.slot, e.id); this.stats.loaded.push(e.id); return "loaded"; }
+    catch (err) { this.stats.failed.push(e.id); console.warn("domvec: extension " + e.id + " failed; the core runs on", err); return "failed"; }
+  }
+
+  /** Release a slot (a `card:` decoration is unregistered with it). */
+  unload(id: string): void {
+    for (const [slot, who] of this.taken) if (who === id) {
+      this.taken.delete(slot);
+      if (slot.startsWith("card:")) unregisterDecorator(slot.slice(5));
     }
+    this.exts = this.exts.filter((e) => e.id !== id);
+    this.stats.loaded = this.stats.loaded.filter((x) => x !== id);
   }
 }
+(window as any).__domvecCardSlot = { registerDecorator, unregisterDecorator, decorateCard, cardStats, decorators };

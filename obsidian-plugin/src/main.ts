@@ -68,7 +68,7 @@ import { DataflowRun, noteTextOf } from "./dataflowrun";
 import { AutoRun, CrossRun } from "./autorun";
 import { PullApart } from "./pullapart";
 import { agentBlock } from "./agentblock";
-import { Slots } from "./slots";
+import { Slots, registerDecorator } from "./slots";
 import { completeCell } from "./complete";
 import { watchTabDrags } from "./tabdrag";
 import { drawDefs, nodeDefs, setDefault } from "./nodedefs";
@@ -79,7 +79,7 @@ import { PlaneHalo } from "./planehalo";
 import { slateFolds } from "./slatefold";
 import { NotebookChats } from "./notebookchat";
 import { NoteMarks } from "./marks";
-import { chatCell } from "./chatcell";
+import { chatCell, plusChat } from "./chatcell";
 import { slateLint, slateLintStats } from "./slatelint";
 import { EditorView as CmView } from "@codemirror/view";
 
@@ -323,6 +323,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       box.createDiv({ cls: "domvec-tool-panel-head", text: "\u{1F512} " + name + " -- app tool, read-only" });
       box.createEl("pre", { text: text || "no app tool named " + name });
     }) });
+    // The +chat cell is a decoration in a `card:` slot (G-240's second kind).
+    this.slots.add({ id: "plus-chat", slot: "card:plus-chat", register: () => registerDecorator("plus-chat", (card, path) => plusChat(this.app, card, path)) });
     for (const e of ((window as any).__domvecExtraExtensions || []) as any[]) this.slots.add(e);
     this.slots.load();
     this.register(watchTabDrags(this.app));

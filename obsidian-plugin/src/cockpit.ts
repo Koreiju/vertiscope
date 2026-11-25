@@ -26,8 +26,8 @@
  * query line asks the web (through the browser cell) when `duckduckgo` is
  * true -- typing alone never reaches the web (item 107).
  */
+import { decorateCard } from "./slots";
 import { edgeResizable } from "./edgeresize";
-import { plusChat } from "./chatcell";
 import { App, MarkdownView, TFile } from "obsidian";
 import { FoldState, SlateLine, foldsOf, isPlainCockpit, parseSlate, setFolds, titleLine } from "./slatefold";
 import { makeDraggable, type PlaceStats } from "./planecard";
@@ -215,7 +215,7 @@ export class Cockpit {
     this.card = card;
     // Draggable by its header node, contained in the plane (item 57).
     this.undrag = makeDraggable(card, plane, "domvec-plane-card:ego", this.placeStats);
-    plusChat(this.app, card, f.path);
+    decorateCard(card, f.path);   // the card: slot (G-240): +chat and any other decoration
     // Any edge or corner resizes it (PLUGIN_GOAL 159; 2026-11-25: "I can't
     // resize the ego markdown panel"), the size remembered like its place.
     try {

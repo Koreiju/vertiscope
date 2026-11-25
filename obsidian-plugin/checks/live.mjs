@@ -14833,6 +14833,44 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-434",
+      asks: "a second slot kind, card: (G-240, Addendum XI 169 'everything is a plugin'): the +chat cell is a decoration in slot card:plus-chat; an extension added while running fills its own card: slot and every new card carries it; one whose decoration throws is recorded and the card is drawn regardless, +chat and all; one that asks for card:plus-chat, held by another, is refused; planted __domvecPlantNoSlotGuard: the taker gets the slot and new cards lose their +chat",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const pl = app.plugins.getPlugin("domvec-bridge"), desk = pl.desk, CS = window.__domvecCardSlot;
+          const keep = CS.decorators.get("plus-chat");
+          window.__domvecPlantNoSlotGuard = ${planted};
+          const path = "domvec-checks/g434 " + (${planted} ? "p" : "c") + Date.now().toString(36) + ".md";
+          const out = { planted: ${planted}, plus_chat_ext: pl.slots.stats.loaded.includes("plus-chat") };
+          try {
+            out.mark = pl.slots.loadOne({ id: "g434-mark", slot: "card:g434", register: () => CS.registerDecorator("g434", (c) => c.createDiv({ cls: "g434-mark" })) });
+            out.boom = pl.slots.loadOne({ id: "g434-boom", slot: "card:g434-boom", register: () => CS.registerDecorator("g434-boom", () => { throw new Error("planted in the check"); }) });
+            out.steal = pl.slots.loadOne({ id: "g434-steal", slot: "card:plus-chat", register: () => CS.registerDecorator("plus-chat", () => {}) });
+            const failed0 = CS.cardStats.failed.filter((x) => x === "g434-boom").length;
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, "# g434" + String.fromCharCode(10));
+            await desk.open(f); await sleep(600);
+            const card = desk.panelOf(path)?.card;
+            out.drawn = !!card; out.marked = !!card?.querySelector(".g434-mark");
+            out.has_plus = !!card?.querySelector(":scope > .domvec-plus-chat");
+            out.boom_recorded = CS.cardStats.failed.filter((x) => x === "g434-boom").length > failed0;
+            return out;
+          } finally {
+            window.__domvecPlantNoSlotGuard = false;
+            for (const id of ["g434-mark", "g434-boom", "g434-steal"]) pl.slots.unload(id);
+            if (keep) { CS.decorators.set("plus-chat", keep); pl.slots.taken.set("card:plus-chat", "plus-chat"); }
+            try { desk.closePath(path); } catch {}
+            const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0);
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && clean.plus_chat_ext && clean.mark === "loaded" && clean.boom === "loaded" && clean.steal === "refused"
+          && clean.drawn && clean.marked && clean.has_plus && clean.boom_recorded;
+        return { pass: ok && !!planted && planted.steal === "loaded" && planted.drawn && !planted.has_plus, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-431",
       asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
       async run() {

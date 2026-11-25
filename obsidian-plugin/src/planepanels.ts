@@ -1,5 +1,5 @@
+import { decorateCard } from "./slots";
 import { acceptTabDrops, toTabs } from "./tabdrag";
-import { plusChat } from "./chatcell";
 import { TERMINAL_VIEW } from "./terminal";
 /**
  * Panels on the 2D plane: every computation-graph artifact, not only the
@@ -313,7 +313,7 @@ export class PlaneDesk {
       if (!Leaf && !opts.leaf) return null;
       const card = plane.createDiv({ cls: "domvec-plane-card domvec-panel-card" });
       card.dataset.path = file.path;
-      plusChat(this.app, card, file.path);
+      decorateCard(card, file.path);   // the card: slot (G-240): +chat and any other decoration
       // A cascade, so a second panel is never under the first.
       const n = this.panels.length;
       card.style.right = "auto";
