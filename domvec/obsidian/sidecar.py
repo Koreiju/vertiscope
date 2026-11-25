@@ -1252,11 +1252,24 @@ def _document_url(url: str) -> str:
     place in one document, not another page -- ddg's `/` and `/#chat` were
     stored as two pages and drew two page nodes for one document (the tree
     verdict's one second root, 2026-10-07). A hash ROUTE (`#/...`, `#!...`)
-    selects content in a single-page app and is kept."""
+    selects content in a single-page app and is kept.
+
+    A space in the QUERY is spelled `+`, never `%20` (2026-11-18): the
+    browser opened `?q=venture%20capital`, DuckDuckGo rewrote it to
+    `?q=venture+capital` in place, and one results page was stored twice --
+    the second capture's 35 chunks every one a copy of the first's."""
     head, sep, frag = url.partition("#")
+    q = head.find("?")
+    if q >= 0 and "%20" in head[q:] and not PLANT_RAW_QUERY[0]:
+        head = head[:q] + head[q:].replace("%20", "+")
+        url = head + sep + frag
     if not sep or frag.startswith("/") or frag.startswith("!"):
         return url
     return head
+
+
+#: Planted (2026-11-18): a query's `%20` and `+` spellings are two pages.
+PLANT_RAW_QUERY = [False]
 
 
 def _settle_truncated(session: dict, stored: int, now: Optional[float] = None) -> bool:
@@ -2732,6 +2745,9 @@ class _Handler(BaseHTTPRequestHandler):
             if self.client_address[0] not in ("127.0.0.1", "::1"):
                 self._send(403, {"error": "loopback only"})
                 return
+            qs = parse_qs(parts.query)
+            stop_all = (qs.get("stop") or [""])[0].lower() in ("1", "true")
+            exit_code = 0 if stop_all else 75
             _SHUTTING[0] = True
             asked = time.time()
 
@@ -2739,16 +2755,24 @@ class _Handler(BaseHTTPRequestHandler):
                 # Every capture, embed batch, settle and checkpoint in flight
                 # holds the work lock: taking it means none is mid-write.
                 with _WORK_LOCK:
-                    _profile("shutdown", {"waited_s": round(time.time() - asked, 1)})
+                    try:
+                        from .projector import projector as _get_proj
+                        proj = _get_proj()
+                        if proj is not None and hasattr(proj, "save_if_dirty"):
+                            proj.save_if_dirty(min_quiet_s=0.0, min_interval_s=0.0)
+                    except Exception:               # noqa: BLE001
+                        pass
+                    _profile("shutdown", {"waited_s": round(time.time() - asked, 1), "stop": stop_all})
                     # The reply first: with nothing in flight the lock was free
                     # at once and the process left before answering (the
                     # restart script read that as "did not answer").
                     time.sleep(0.5)
-                    # 75: "restart me" to the supervisor (exit 0 is a stop,
-                    # and the first graceful restart left the sidecar down).
-                    _exit_for_supervisor(75, self.workspace)
+                    # 75: "restart me" to the supervisor; 0: clean stop (exit
+                    # 0 is a stop, and the first graceful restart left the
+                    # sidecar down).
+                    _exit_for_supervisor(exit_code, self.workspace)
             threading.Thread(target=_exit_when_idle, daemon=True).start()
-            self._send(200, {"shutting_down": True, "waits_for": "the work lock"})
+            self._send(200, {"shutting_down": True, "stop": stop_all, "waits_for": "the work lock"})
             return
         if _SHUTTING[0]:
             self._send(503, {"error": "shutting down", "retry": True})

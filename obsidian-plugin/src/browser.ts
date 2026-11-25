@@ -170,9 +170,30 @@ interface PinRecord {
  */
 const SIGNAL = "\u0001domvec:" + Math.random().toString(36).slice(2, 10) + ":";
 
+/**
+ * One spelling for a url's QUERY: a space is `+`, never `%20`. The search
+ * opened `?q=venture%20capital` and DuckDuckGo rewrote its own address to
+ * `?q=venture+capital` in place (2026-11-18: "duckduckgo picking up
+ * effectively zero nodes"): the session, the store and the chunk map kept the
+ * first spelling, the shown url and the graph's "page being browsed" the
+ * second, so every placed chunk was folded as another page's, and the
+ * re-capture under the second spelling stored 35 chunks that were all copies
+ * of the first. Both spellings decode to the same form value. Planted
+ * `__domvecPlantRawQuery`: the url as given.
+ */
+export function canonQuery(u: string): string {
+  const s = String(u || "");
+  if ((globalThis as any).__domvecPlantRawQuery) return s;
+  const q = s.indexOf("?");
+  if (q < 0 || s.indexOf("%20", q) < 0) return s;
+  const h = s.indexOf("#", q);
+  const end = h < 0 ? s.length : h;
+  return s.slice(0, q) + s.slice(q, end).replace(/%20/g, "+") + s.slice(end);
+}
+
 /** A url's DOCUMENT: the same page with or without a #fragment. */
 function docKey(u: string): string {
-  return String(u || "").split("#")[0];
+  return canonQuery(String(u || "").split("#")[0]);
 }
 
 /** The DOCUMENT a url names, as the sidecar's `_document_url` reads it: a
@@ -181,7 +202,7 @@ function docKey(u: string): string {
  *  one page (2026-11-07: "duplicate page nodes because one link has '#' on the
  *  tail end of its url"). Planted `fragment-pages`: the url as given. */
 export function documentUrl(u: string): string {
-  const s = String(u || ""), i = s.indexOf("#");
+  const s = canonQuery(String(u || "")), i = s.indexOf("#");
   if (i < 0) return s;
   const frag = s.slice(i + 1);
   return frag.startsWith("/") || frag.startsWith("!") ? s : s.slice(0, i);
@@ -316,7 +337,7 @@ export class BrowserView extends ItemView {
   constructor(leaf: WorkspaceLeaf, private sidecar: Sidecar,
               private onChunks: (nodes: LayoutNode[],
                                  edges?: { source: string; target: string }[],
-                                 trace?: string)
+                                 trace?: string, keep?: Set<string>)
                 => void = () => {},
               //: What the reader has scrolled to, for the projector to
               //: open the page to (`G-55`, `G-56`).
@@ -621,7 +642,7 @@ export class BrowserView extends ItemView {
     view.addEventListener("did-navigate-in-page", (e: any) => {
       // A #fragment is the SAME document: following an anchor link started
       // a new page ("Radix_tree#PATR" stored beside "Radix_tree", 2026-09-27).
-      const sameDoc = (a: string, c: string) => a.split("#")[0] === c.split("#")[0];
+      const sameDoc = (a: string, c: string) => docKey(a) === docKey(c);
       if (e && e.isMainFrame && this.session && sameDoc(String(e.url || view.getURL()), this.session)) {
         this.address.value = view.getURL();
         return;
@@ -637,7 +658,7 @@ export class BrowserView extends ItemView {
         // navigation, so the url cannot tell them apart -- the content can:
         // the first drain under the new url says whether the page's chunks
         // stayed (the same document, still growing) or went (a new page).
-        if (this.session && !this.plant.has("inpage-is-new-page")) this.pendingInPage = String(view.getURL());
+        if (this.session && !this.plant.has("inpage-is-new-page")) this.pendingInPage = canonQuery(String(view.getURL()));
         else void this.pageChanged(view.getURL(), true);
       }
     });
@@ -809,7 +830,13 @@ export class BrowserView extends ItemView {
    * outline on it, which is what the pins exist to show.
    */
   private layoutSide(): void {
-    const side = this.pinned.size > 0;
+    // PLUGIN_GOAL 133(b): a pin emerges as a stuck panel on the plane, "instead
+    // of showing in the clipboard" -- the side is no longer where pins go, and
+    // `pin` stopped rendering it. This still SHOWED it whenever anything was
+    // pinned, so the first navigation after a pin opened the side, empty
+    // (G-82, live 2026-11-16: side shown after "away", no card in it). Only the
+    // planted `side-card` path, the old clipboard, lays the side out now.
+    const side = this.pinned.size > 0 && this.plant.has("side-card");
     this.browserWrap.show();
     this.markdownWrap.toggle(side);
     this.markdownWrap.toggleClass("is-side", side);
@@ -1623,7 +1650,7 @@ export class BrowserView extends ItemView {
   private async renderSide(): Promise<void> {
     this.markdownWrap.empty();
     this.chat?.refresh();
-    if (!this.pinned.size) {
+    if (!this.pinned.size && (this.plantStaticSide || this.chat)) {
       this.markdownWrap.createDiv({ cls: "domvec-browser-empty" }).setText(
         "Double right-click a chunk in the browser to pin it here.");
       // The conversation stays below, whatever is pinned now (G-44).
@@ -1753,7 +1780,7 @@ export class BrowserView extends ItemView {
   shownUrl(): string {
     const now = performance.now();
     if (this.plant.has("sync-url") || now - this.shownAt > 1000) {
-      try { this.shown = this.webview?.getURL() || ""; } catch { return this.shown; }
+      try { this.shown = canonQuery(this.webview?.getURL() || ""); } catch { return this.shown; }
       this.shownAt = now;
       this.shownAsks++;
     }
@@ -1763,7 +1790,7 @@ export class BrowserView extends ItemView {
   private shownAt = -Infinity;
   /** Synchronous asks made (the harness reads it). */
   shownAsks = 0;
-  private noteShown(u: string): void { if (u) { this.shown = u; this.shownAt = performance.now(); } }
+  private noteShown(u: string): void { if (u) { this.shown = canonQuery(u); this.shownAt = performance.now(); } }
   currentPage(): string {
     let u = "";
     try { u = this.shownUrl(); } catch { return ""; }
@@ -1858,7 +1885,8 @@ export class BrowserView extends ItemView {
     const seq = ++this.webSeq;
     const t0 = performance.now();
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    const url = "https://duckduckgo.com/?q=" + encodeURIComponent(query.trim()) + "&ia=web";
+    // `+` for a space: the spelling DuckDuckGo rewrites its own address to.
+    const url = "https://duckduckgo.com/?q=" + encodeURIComponent(query.trim()).replace(/%20/g, "+") + "&ia=web";
     this.webSearchStats.asked++;
     this.webSearchStats.last = query.trim();
     this.webSearchStats.stopped = "";
@@ -2491,6 +2519,7 @@ export class BrowserView extends ItemView {
   private async pageChanged(url: string, force = false): Promise<void> {
     // The same document under another url is not a page change (G-216); an
     // in-page navigation not yet decided waits for its first drain.
+    url = canonQuery(url);
     url = this.sessionAliases.get(url) || url;
     if (url && url === this.pendingInPage) return;
     if (!force && this.session && url && url !== this.session && this.docSeq === this.sessionDocSeq
@@ -2616,9 +2645,33 @@ export class BrowserView extends ItemView {
    * left its page used to re-add that page's chunks just after they had been
    * collapsed into its node (G-91: the left page never stayed collapsed).
    */
-  private forPage(nodes: LayoutNode[]): LayoutNode[] {
-    return nodes.filter((n: any) => n.level === "page" || !n.url || n.url === this.session);
+  private forPage(nodes: LayoutNode[], keep?: Set<string>): LayoutNode[] {
+    const here = docKey(this.session);
+    return nodes.filter((n: any) => n.level === "page" || !n.url || docKey(n.url) === here
+      || (!!keep && keep.has(n.cid)));
   }
+
+  /**
+   * The chunks the store draws THROUGH a chunk of another page (G-25's
+   * store-wide copies): a results page shares its header, its filters and
+   * often whole results with an earlier search. The page being browsed shows
+   * them, so their leads are drawn for it -- hung from its page node too --
+   * rather than filtered as the other page's (2026-11-18: a DuckDuckGo page
+   * of 44 stored chunks, 14 drawn through other result pages; a re-capture of
+   * 35, every one a copy). Planted `alias-leads-folded`.
+   */
+  private aliasLeads(got: any, edges: { source: string; target: string }[]): Set<string> {
+    const keep = new Set<string>();
+    if (this.plant.has("alias-leads-folded") || !this.session) return keep;
+    for (const lead of Object.values((got && got.aliases) || {}) as string[]) if (lead) keep.add(lead);
+    if (keep.size) {
+      const hub = "page:" + this.session;
+      for (const lead of keep) edges.push({ source: hub, target: lead });
+      this.aliasLeadsKept += keep.size;
+    }
+    return keep;
+  }
+  aliasLeadsKept = 0;
 
   /** When each url's first capture of this visit came back (D-35). */
   private capturedAt = new Map<string, number>();
@@ -2727,9 +2780,10 @@ export class BrowserView extends ItemView {
         byTrace.set(entry.trace, list);
       }
       const edges = ((got && got.edges) || []) as { source: string; target: string }[];
+      const keep = this.aliasLeads(got, edges);
       const first = byTrace.keys().next();
       if (!first.done && unasked.length) byTrace.get(first.value)!.unshift(...unasked);
-      for (const [traceId, list] of byTrace) this.onChunks(this.forPage(list), edges, traceId);
+      for (const [traceId, list] of byTrace) this.onChunks(this.forPage(list, keep), edges, traceId, keep);
     } finally {
       this.placing = false;
     }
@@ -2844,7 +2898,7 @@ export class BrowserView extends ItemView {
         const { payload: p, at } = this.pushQueue.shift()!;
         const wv = this.webview;
         if (!wv || !this.live) continue;
-        let url = String(p.url || this.shownUrl() || "");
+        let url = canonQuery(String(p.url || this.shownUrl() || ""));
         if (!url || url === "about:blank") continue;
         // An in-page url change, decided by this drain (see did-navigate-in-page):
         // at least half the session's live chunks removed -> a new page;

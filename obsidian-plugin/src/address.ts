@@ -20,7 +20,9 @@ export function addressTarget(text: string): { url: string; search: boolean } {
   // A machine on this one (a dev server, the sidecar) is plain http.
   const local = /^(localhost|\d{1,3}(\.\d{1,3}){3})([:/?#]|$)/i.test(t);
   if (!/\s/.test(t) && host.test(t)) return { url: (local ? "http://" : "https://") + t, search: false };
-  return { url: "https://duckduckgo.com/?q=" + encodeURIComponent(t) + "&ia=web", search: true };
+  // `+` for a space: DuckDuckGo rewrites `%20` to it in place, and two
+  // spellings of one results page were stored as two pages (2026-11-18).
+  return { url: "https://duckduckgo.com/?q=" + encodeURIComponent(t).replace(/%20/g, "+") + "&ia=web", search: true };
 }
 
 /**

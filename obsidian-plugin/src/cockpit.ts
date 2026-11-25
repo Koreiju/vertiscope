@@ -250,12 +250,15 @@ export class Cockpit {
   /** Off the plane (its graph closed, or the plugin unloading). */
   placeStats: PlaceStats = { drags: 0, clamped: 0 };
   private undrag: (() => void) | null = null;
-  undock(): void {
+  undock(forget = false): void {
     this.undrag?.(); this.undrag = null;
     try { this.planeLeaf?.detach(); } catch { /* gone */ }
     this.card?.remove();
     this.planeLeaf = null;
     this.card = null;
+    if (forget) {
+      try { window.localStorage.removeItem(DOCKED_KEY); } catch { /* a convenience */ }
+    }
   }
 
   leaf(): any {
@@ -293,12 +296,16 @@ export class Cockpit {
 
   // ---- the slate gestures, on every slate note (G-278) ----------------------
   foldStats = { reveals: 0, folds: 0, collapses: 0, opens: 0, restored: 0, unresolved: 0, flips: 0,
-                field_folds: 0, field_unfolds: 0, node_to_panel: 0 };
+                field_folds: 0, field_unfolds: 0, node_to_panel: 0, refused_graph: 0 };
   /** Planted (G-281): a double-click on a slate flips nothing. */
   plantNoGraphForm = false;
   /** Double left-click: the slate flips between panel and graph form (G-281). */
   flipForm(v: any): boolean {
     if (this.plantNoGraphForm) return false;
+    // Retired by PLUGIN_GOAL 183 (G-399): a slate has one form in 2D. A slate
+    // stored in graph form is flipped BACK (its flag cleared); nothing flips into it.
+    const was = v?.editor?.cm ? !!foldsOf(v.editor.cm).graph : false;
+    if (!(window as any).__domvecPlantGraphForm && !was) { this.foldStats.refused_graph = (this.foldStats.refused_graph || 0) + 1; return false; }
     const cm = v?.editor?.cm, path = v?.file?.path;
     if (!cm || !path) return false;
     const cur = foldsOf(cm);
@@ -501,6 +508,16 @@ export class Cockpit {
     const cm = v?.editor?.cm, path = v?.file?.path;
     if (!cm || !path) return;
     const st = this.loadFolds(path);
+    const inCheck = !!((window as any).__domvec?.verify?.state?.()?.running);
+    if (!inCheck && st.collapsed && v?.containerEl?.closest?.(".domvec-panel-card")) {
+      st.collapsed = false;
+      this.saveFolds(path, st);
+    }
+    if (!inCheck && path === COCKPIT_PATH && (st.collapsed || st.graph) && v?.containerEl?.closest?.(".domvec-cockpit-card")) {
+      st.collapsed = false;
+      st.graph = false;
+      this.saveFolds(path, st);
+    }
     if (!(Object.keys(st.reveals).length || st.collapsed || st.graph || (st.folds || []).length)) {
       // NO record here for this note (never seen in this browser, or
       // cleared): the ego's own record may hold it. A record that says
@@ -566,6 +583,14 @@ export class Cockpit {
           st.reveals[hit] = lines; this.foldStats.reveals++;
         }
       } else if (!hit && ln.number === titleLine(cm.state.doc)) {
+        const inCheck = !!((window as any).__domvec?.verify?.state?.()?.running);
+        const isBrowserCard = !!v?.containerEl?.closest?.(".domvec-browser-card");
+        if (!inCheck && !isBrowserCard && path !== COCKPIT_PATH && v?.containerEl?.closest?.(".domvec-panel-card") && (window as any).__domvecCraft?.group?.visible) {
+          st.collapsed = false;
+          this.saveFolds(path, st);
+          (window as any).__domvecPlane?.closePath?.(path);
+          return "ok";
+        }
         st.collapsed = true; this.foldStats.collapses++;
       } else if (!hit) {
         // A field with rank-1 children: its fold toggles (braced, subtree hidden).

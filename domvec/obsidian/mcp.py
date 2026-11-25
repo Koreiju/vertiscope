@@ -556,10 +556,10 @@ class DomvecMCP:
             "verify_state": self._verify_state,
             "design_state": self._design_state,
             "sidecar_start": lambda a: __import__("domvec.obsidian.controls", fromlist=["start_sidecar"]).start_sidecar(
-                workspace=a.get("workspace") or "build/corpus123",
+                workspace=a.get("workspace") or None,
                 stop_existing=bool(a.get("stop_existing", False)),
                 force=bool(a.get("force", False)),
-                port=int(a.get("port") or 8788),
+                port=int(a["port"]) if a.get("port") else None,
                 semantic=bool(a.get("semantic", True)),
                 capture=bool(a.get("capture", True)),
                 enact=bool(a.get("enact", True)),
@@ -567,11 +567,11 @@ class DomvecMCP:
                 supervise=bool(a.get("supervise", True)),
             ),
             "sidecar_stop": lambda a: __import__("domvec.obsidian.controls", fromlist=["stop_sidecar"]).stop_sidecar(
-                port=int(a.get("port") or 8788),
+                port=int(a["port"]) if a.get("port") else None,
                 force=bool(a.get("force", False)),
             ),
             "sidecar_status": lambda a: __import__("domvec.obsidian.controls", fromlist=["sidecar_status"]).sidecar_status(
-                port=int(a.get("port") or 8788),
+                port=int(a["port"]) if a.get("port") else None,
             ),
             "workspace_open": lambda a: __import__("domvec.obsidian.controls", fromlist=["open_workspace"]).open_workspace(
                 workspace=a["workspace"],

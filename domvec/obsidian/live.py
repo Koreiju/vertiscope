@@ -42,15 +42,9 @@ class Live:
                  cdp: str = "", timeout: float = 120.0):
         import os as _os
         resolved = sidecar.rstrip("/")
-        if resolved == "http://127.0.0.1:8788" and not _os.environ.get("DOMVEC_SIDECAR"):
-            try:
-                cfg = Path(__file__).resolve().parents[2] / ".obsidian" / "plugins" / "domvec-bridge" / "data.json"
-                if cfg.exists():
-                    s_url = str(json.loads(cfg.read_text(encoding="utf-8")).get("sidecar") or "").rstrip("/")
-                    if s_url:
-                        resolved = s_url
-            except Exception:
-                pass
+        self._dynamic_sidecar = (resolved == "http://127.0.0.1:8788" and not _os.environ.get("DOMVEC_SIDECAR"))
+        if self._dynamic_sidecar:
+            resolved = self._resolve_sidecar_from_config(resolved)
         self.sidecar = resolved
         # `DOMVEC_CDP` names the app's debug port when 9222 is taken (a Chrome
         # holding 9222 answered for the app on 2026-10-07).
@@ -59,16 +53,32 @@ class Live:
         self._ws = None
         self._next_id = 0
 
+    @staticmethod
+    def _resolve_sidecar_from_config(default: str = "http://127.0.0.1:8788") -> str:
+        try:
+            from .controls import _configured_target
+            port, _ = _configured_target(None, None)
+            if port:
+                return f"http://127.0.0.1:{port}"
+        except Exception:                           # noqa: BLE001
+            pass
+        return default
+
     # -- the sidecar ---------------------------------------------------------
 
+    def _base(self) -> str:
+        if getattr(self, "_dynamic_sidecar", False):
+            self.sidecar = self._resolve_sidecar_from_config(self.sidecar)
+        return self.sidecar
+
     def get(self, path: str) -> Dict:
-        req = urllib.request.Request(self.sidecar + path)
+        req = urllib.request.Request(self._base() + path)
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             return json.load(r)
 
     def post(self, path: str, payload: Dict) -> Dict:
         req = urllib.request.Request(
-            self.sidecar + path, data=json.dumps(payload).encode(),
+            self._base() + path, data=json.dumps(payload).encode(),
             headers={"content-type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             return json.load(r)

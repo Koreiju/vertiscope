@@ -1165,14 +1165,15 @@ body.domvec-plant-slate-chips .domvec-slate .domvec-var { background: color-mix(
   border-radius: 4px; padding: 0 3px; }
 body.domvec-plant-slate-chips .domvec-slate .domvec-var-title { border: 1px solid var(--link-color); border-radius: 12px; padding: 1px 10px; }
 /* Minimized, the card is its header node alone, compact. */
-.domvec-plane-card.is-collapsed { width: auto; background: transparent; border: 0; box-shadow: none; }
+.domvec-plane-card.is-collapsed { width: auto; background: transparent; border: 0; box-shadow: none; overflow: visible !important; }
 /* Minimized: the header node alone, sized to it (an auto height left the
    circle no room and the card measured 0 x 0). */
-.domvec-plane-card.is-collapsed > .workspace-leaf { display: block; height: 62px; width: 62px; }
-.domvec-plane-card.is-collapsed .cm-scroller { overflow: hidden; padding: 0; }
-.domvec-plane-card.is-collapsed .view-content { border: 0; background: transparent; }
-.domvec-plane-card.is-collapsed .domvec-slate-circle { padding: 0; }
-.domvec-plane-card.is-collapsed .domvec-slate-circle-dot { width: 46px; height: 46px; font-size: 12px; }
+.domvec-plane-card.is-collapsed > .workspace-leaf { display: block; height: 62px; width: 62px; contain: none !important; overflow: visible !important; }
+.domvec-plane-card.is-collapsed :is(.workspace-leaf-content, .view-content, .markdown-source-view, .cm-editor, .cm-scroller, .cm-sizer, .cm-contentContainer, .cm-content) {
+  overflow: visible !important; padding: 0 !important; margin: 0 !important; border: 0; background: transparent; contain: none !important; width: auto !important; height: auto !important;
+}
+.domvec-plane-card.is-collapsed .domvec-slate-circle { padding: 0; contain: none !important; }
+.domvec-plane-card.is-collapsed .domvec-slate-circle-dot { width: 46px; height: 46px; font-size: 12px; background: #000; }
 /* Item 57: the header node is the panel's handle on the plane. */
 .domvec-plane-card .domvec-var-title, .domvec-plane-card .domvec-slate-circle-dot { cursor: grab; }
 /* The narrow card on the plane: Obsidian's own margin variable, smaller. */
@@ -1354,16 +1355,17 @@ body.domvec-plant-slate-chips .domvec-slate-error { text-decoration: underline w
    body.domvec-plant-graph-boxed keeps the box. */
 body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) {
   background: transparent !important; border-color: transparent !important; box-shadow: none !important;
-  overflow: visible !important; height: auto !important; resize: none !important;
+  overflow: visible !important; height: auto !important; width: max-content !important; resize: none !important;
 }
-body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) :is(.workspace-leaf, .workspace-leaf-content, .view-content, .cm-editor, .cm-scroller, .cm-content, .markdown-source-view) {
+body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) :is(.workspace-leaf, .workspace-leaf-content, .view-content, .cm-editor, .cm-scroller, .cm-sizer, .cm-contentContainer, .cm-content, .markdown-source-view) {
   background: transparent !important; overflow: visible !important; border: none !important;
+  contain: none !important; width: max-content !important; height: auto !important;
 }
 body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) :is(.view-header, .domvec-plane-head-tools, .domvec-browser-panel-leaf, .domvec-browser-chunk, .domvec-browser-card-split, .domvec-browser-card-exit) { display: none !important; }
 body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) ::-webkit-scrollbar { display: none; }
 .domvec-slate-graph svg { overflow: visible; }
 .domvec-browser-chunk-leaf :is(.view-header, .metadata-container, .inline-title) { display: none !important; }
-body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) .domvec-slate-graph { overflow: visible !important; width: max-content; }
+body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) .domvec-slate-graph { overflow: visible !important; width: max-content; contain: none !important; }
 /* 135(c)(d)/136: memory links between plane panels -- from the computation graph only. */
 .domvec-memory-links { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 3; overflow: visible; }
 .domvec-memory-links line { stroke: #e8e8e8; stroke-width: 3; pointer-events: stroke; cursor: context-menu; }
@@ -1385,10 +1387,16 @@ body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) 
 .domvec-tethers circle { fill: none; stroke: #ffffff; stroke-width: 1.5; }
 /* PLUGIN_GOAL 150: a slate in graph form sizes its card to the graph, so the
    whole graph is the card's (its overflow fell through to the 3D canvas). */
-.domvec-plane-card:has(.domvec-slate-graph) { height: auto !important; max-height: none !important; width: max-content !important; overflow: visible !important; }
+.domvec-plane-card:has(.domvec-slate-graph) { height: auto !important; max-height: none !important; width: max-content !important; overflow: visible !important; contain: none !important; }
 .domvec-plane-card:has(.domvec-slate-graph) .workspace-leaf,
+.domvec-plane-card:has(.domvec-slate-graph) .workspace-leaf-content,
 .domvec-plane-card:has(.domvec-slate-graph) .view-content,
-.domvec-plane-card:has(.domvec-slate-graph) .cm-scroller { height: auto !important; overflow: visible !important; }
+.domvec-plane-card:has(.domvec-slate-graph) .markdown-source-view,
+.domvec-plane-card:has(.domvec-slate-graph) .cm-editor,
+.domvec-plane-card:has(.domvec-slate-graph) .cm-scroller,
+.domvec-plane-card:has(.domvec-slate-graph) .cm-sizer,
+.domvec-plane-card:has(.domvec-slate-graph) .cm-contentContainer,
+.domvec-plane-card:has(.domvec-slate-graph) .cm-content { height: auto !important; width: max-content !important; overflow: visible !important; contain: none !important; }
 
 /* Edge resize (PLUGIN_GOAL 159): the edge's cursor over the whole band,
    children included -- the panel's content sets its own cursors otherwise. */
@@ -1499,33 +1507,21 @@ body:not(.domvec-plant-graph-boxed) .domvec-plane-card:has(.domvec-slate-graph) 
 .domvec-chatui-ghost { position: fixed; z-index: 9999; pointer-events: none; max-width: 320px; white-space: pre; overflow: hidden; font: 11px var(--font-monospace); background: #0e0e12; color: #ccc; border: 1px solid #7aa2f7; border-radius: 4px; padding: 4px 6px; opacity: 0.9; }
 body.domvec-chatui-pulling, body.domvec-chatui-pulling * { user-select: none !important; cursor: grabbing !important; }
 
-/* The ego canvas (PLUGIN_GOAL 183, G-396): one central panel, its sections
-   the ego's components -- contained (drawn live) or pulled out (a link). */
-.domvec-plane-card.is-canvas > .workspace-leaf { display: none; }
-.domvec-plane-card.is-canvas > .domvec-rows { display: none; }
-/* min-height: the panel's own sizing (G-326) writes an inline height for a
-   card whose leaf is hidden -- 120 px, seen 2026-11-22 */
-.domvec-plane-card.is-canvas { min-height: min(560px, 70vh); border-color: #b48ef0; }
-.domvec-canvas { flex: 1 1 auto; min-height: 0; overflow-y: auto; background: #111116; padding: 4px 6px; }
-.domvec-canvas-section { border: 1px solid #2a2a36; border-radius: 6px; margin: 4px 0; background: #16161c; }
-.domvec-canvas-section.is-out { border-style: dashed; opacity: 0.75; }
-.domvec-canvas-head { display: flex; gap: 6px; align-items: center; padding: 3px 8px; cursor: pointer; user-select: none; font-size: 12px; color: #ccc; }
-.domvec-canvas-head:hover { background: #1f1f28; }
-.domvec-canvas-fold { width: 12px; color: #b48ef0; }
-.domvec-canvas-name { font-weight: 600; }
-.domvec-canvas-missing { color: #e07070; font-style: italic; }
-.domvec-canvas-body { border-top: 1px solid #2a2a36; }
-/* A leaf's content is absolutely positioned: with height auto it drew
-   nothing (seen 2026-11-22). A fixed height, scrolled inside. */
-.domvec-canvas-body > .workspace-leaf { position: relative; height: 300px; }
-.domvec-canvas-body > .workspace-leaf > .workspace-leaf-content { height: 100%; }
-.domvec-canvas-body .view-header { display: none; }
-.domvec-canvas.plant-autoheight .domvec-canvas-body > .workspace-leaf { height: auto; }
-.domvec-canvas-head.is-armed { box-shadow: inset 0 0 0 2px #7aa2f7; cursor: grabbing; }
-
 /* Links between panels (183, G-398): the only graph mark on the plane. */
 .domvec-plane-links { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 0; overflow: visible; }
 .domvec-plane-links line { stroke: #b48ef0; stroke-width: 1.5; stroke-opacity: 0.7; stroke-dasharray: 5 4; }
+
+/* No circles in 2D (PLUGIN_GOAL 183, G-399): a collapsed panel or slate is
+   its header bar -- its name in a rounded bar, the interface's own head --
+   never a circle node. */
+.domvec-panel-card.is-collapsed .domvec-plane-head-node { border-radius: 8px !important; min-width: 0 !important; height: auto !important;
+  display: inline-block !important; padding: 3px 12px !important; }
+.domvec-plane-card.is-collapsed > .workspace-leaf { height: auto !important; width: auto !important; }
+.domvec-slate-circle-dot { border-radius: 8px !important; width: auto !important; height: auto !important; padding: 3px 12px !important; }
+
+/* A collapsed panel is its header bar ALONE (184, seen 2026-11-22): what is
+   mounted beside its leaf -- a chat's interface, a typed-rows strip -- folds too. */
+.domvec-panel-card.has-head.is-collapsed > :not(.domvec-plane-head) { display: none !important; }
 
 /* The chat input cell (chatcell.ts, G-422): Obsidian's own input look, the
    reply streaming above it inline. */

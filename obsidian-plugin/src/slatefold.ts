@@ -192,7 +192,9 @@ class CircleWidget extends WidgetType {
   toDOM(): HTMLElement {
     const el = document.createElement("div");
     el.className = "domvec-slate-circle";
-    el.createDiv({ cls: "domvec-slate-circle-dot", text: this.title.slice(0, 18) });
+    // The slate's NAME -- the title line's first field, not its `{ref}`s (a
+    // title "ego\t{unfolded} {view}" drew "ego\t{unfolded} {vi", seen 2026-11-22).
+    el.createDiv({ cls: "domvec-slate-circle-dot", text: (this.title.split("\t")[0] || this.title).trim().slice(0, 18) });
     return el;
   }
   ignoreEvent(): boolean { return false; }

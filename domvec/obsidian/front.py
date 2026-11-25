@@ -45,6 +45,7 @@ class _State:
         self.health: Optional[Dict] = None
         self.health_at = 0.0
         self.backend = "starting"
+        self.stop_requested = False
         self.stats = {"proxied": 0, "health_served": 0, "refused": 0, "polls": 0}
 
 
@@ -104,16 +105,22 @@ def _handler(state: _State):
             self.wfile.write(raw)
 
         def _proxy(self) -> None:
-            if self.path.split("?", 1)[0].rstrip("/") in ("", "/health") and self.command == "GET":
+            route = self.path.split("?", 1)[0].rstrip("/")
+            if route in ("", "/health") and self.command == "GET":
                 state.stats["health_served"] += 1
                 self._json(200, health_body(state))
                 return
+            if route == "/shutdown" and self.command == "POST" and ("stop=1" in self.path or "stop=true" in self.path):
+                state.stop_requested = True
             n = int(self.headers.get("Content-Length") or 0)
             data = self.rfile.read(n) if n else None
             # A worker the supervisor saw die: refused at once, not proxied into
             # a socket the kernel still accepts on and nothing answers (a
             # verification run's /cypher waited out this proxy's 900 s).
             if health_body(state).get("backend") == "dead":
+                if state.stop_requested:
+                    self._json(200, {"shutting_down": True, "stop": True, "stopped_front": True})
+                    return
                 state.stats["refused"] += 1
                 self._json(503, {"error": "sidecar worker died", "backend": "dead"})
                 return
@@ -123,6 +130,9 @@ def _handler(state: _State):
                 c.request(self.command, self.path, body=data, headers=headers)
                 r = c.getresponse()
             except ConnectionRefusedError:
+                if state.stop_requested:
+                    self._json(200, {"shutting_down": True, "stop": True, "stopped_front": True})
+                    return
                 state.stats["refused"] += 1
                 self._json(503, {"error": "sidecar worker starting", "backend": "starting"})
                 return

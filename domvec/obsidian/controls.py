@@ -31,6 +31,41 @@ def wal_bytes(workspace: Union[str, Path]) -> int:
     return wal.stat().st_size if wal.exists() else 0
 
 
+def _configured_target(port: Optional[int] = None,
+                       workspace: Optional[Union[str, Path]] = None) -> tuple[int, str]:
+    """Resolve the active sidecar port and workspace from the vault's data.json when omitted."""
+    cfg_port = 8788
+    cfg_ws = "build/corpus123"
+    try:
+        cfg_path = REPO_ROOT / ".obsidian" / "plugins" / "domvec-bridge" / "data.json"
+        if cfg_path.exists():
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            launch = cfg.get("sidecarLaunch") or {}
+            argv = [str(a) for a in (launch.get("argv") or [])]
+            active = str(cfg.get("activeWorkspace") or "")
+            workspaces = cfg.get("workspaces") or {}
+            if "--port" in argv:
+                idx = argv.index("--port")
+                if idx + 1 < len(argv) and argv[idx + 1].isdigit():
+                    cfg_port = int(argv[idx + 1])
+            elif cfg.get("sidecar"):
+                import re
+                m = re.search(r":(\d+)", str(cfg.get("sidecar")))
+                if m:
+                    cfg_port = int(m.group(1))
+            if active and isinstance(workspaces, dict) and workspaces.get(active):
+                cfg_ws = str(workspaces[active])
+            elif launch.get("workspace"):
+                cfg_ws = str(launch["workspace"])
+    except Exception:                               # noqa: BLE001
+        pass
+    use_cfg_port = (not port) or (int(port) == 8788 and cfg_port != 8788 and not find_sidecars(8788))
+    resolved_port = cfg_port if use_cfg_port else int(port)
+    use_cfg_ws = (not workspace) or (str(workspace) == "build/corpus123" and cfg_ws != "build/corpus123" and resolved_port == cfg_port)
+    resolved_ws = cfg_ws if use_cfg_ws else str(workspace)
+    return (resolved_port, resolved_ws)
+
+
 def _workspace_of(procs: List[Dict]) -> Optional[str]:
     """The --workspace a running sidecar was started with."""
     for info in procs:
@@ -78,31 +113,65 @@ def find_sidecars(port: int = 8788) -> List[Dict]:
     return results
 
 
-def stop_sidecar(port: int = 8788, timeout_s: float = 5.0, force: bool = False) -> Dict:
+def stop_sidecar(port: Optional[int] = None, timeout_s: float = 5.0, force: bool = False) -> Dict:
     """Stop any running sidecar and supervisor processes on the given port.
 
-    Refused while the store's WAL is over `WAL_LIMIT` unless `force`: the
-    stop is a hard kill, and the WAL folds by itself after ten idle minutes.
+    Asks `/shutdown?stop=1` first so the worker finishes its work lock, saves
+    the projector, checkpoints its WAL and exits 0 (stopping the supervisor
+    cleanly). Falls back to killing the process tree when `force` or when the
+    worker is not answering HTTP; a hard kill is refused while the store's WAL
+    is over `WAL_LIMIT` unless `force`.
     """
     import psutil
 
-    procs = find_sidecars(port)
+    port, _ = _configured_target(port, None)
+    initial_procs = find_sidecars(port)
+    procs = list(initial_procs)
     ws = _workspace_of(procs)
     # A checkpoint in progress: the WAL reads ~0 bytes DURING it, so the size
-    # test alone let a restart kill the fold twice (2026-10-17). A sidecar too
-    # busy to answer `/checkpointing` is treated as checkpointing.
+    # test alone let a restart kill the fold twice (2026-10-17). A sidecar whose
+    # `/checkpointing` times out is treated as checkpointing; an HTTP 503
+    # (worker starting/dead) or connection refused is not.
     if procs and not force:
         try:
             with urllib.request.urlopen("http://127.0.0.1:%d/checkpointing" % port, timeout=5.0) as res:
                 cp = json.loads(res.read().decode("utf-8"))
-        except Exception:                           # noqa: BLE001
-            cp = {"checkpointing": True, "why": "no answer (busy?)"}
+        except urllib.error.HTTPError:
+            cp = {"checkpointing": False}
+        except Exception as exc:                    # noqa: BLE001
+            timed_out = "timed out" in str(exc).lower() or isinstance(exc, TimeoutError)
+            cp = {"checkpointing": timed_out, "why": str(exc)[:120]}
         if cp.get("checkpointing"):
-            return {"ok": False, "refused": "a checkpoint is running; wait for it to finish", "detail": cp}
+            return {"ok": False, "refused": "a checkpoint is running; wait for it to finish", "detail": cp, "port": port}
+
+    graceful = False
+    if procs:
+        try:
+            req = urllib.request.Request("http://127.0.0.1:%d/shutdown?stop=1" % port, data=b"{}",
+                                         headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=5.0) as res:
+                graceful = (res.status == 200)
+        except Exception:                           # noqa: BLE001
+            graceful = False
+        if graceful:
+            g_deadline = time.time() + max(timeout_s, 10.0)
+            while time.time() < g_deadline:
+                procs = find_sidecars(port)
+                if not procs:
+                    return {
+                        "ok": True,
+                        "graceful": True,
+                        "port": port,
+                        "stopped_pids": [p["pid"] for p in initial_procs],
+                        "remaining": 0,
+                    }
+                time.sleep(0.25)
+
+    procs = find_sidecars(port)
     if procs and ws and not force and wal_bytes(ws) > WAL_LIMIT:
         return {"ok": False, "refused": "WAL is %.1f MB (limit %.0f MB); wait for the fold or pass force"
-                % (wal_bytes(ws) / 1e6, WAL_LIMIT / 1e6), "workspace": ws}
-    stopped_pids = []
+                % (wal_bytes(ws) / 1e6, WAL_LIMIT / 1e6), "workspace": ws, "port": port}
+    stopped_pids = [p["pid"] for p in initial_procs if p["pid"] not in {x["pid"] for x in procs}]
     for info in procs:
         pid = info["pid"]
         try:
@@ -127,14 +196,16 @@ def stop_sidecar(port: int = 8788, timeout_s: float = 5.0, force: bool = False) 
 
     return {
         "ok": len(find_sidecars(port)) == 0,
+        "graceful": graceful,
+        "port": port,
         "stopped_pids": list(set(stopped_pids)),
         "remaining": len(find_sidecars(port)),
     }
 
 
 def start_sidecar(
-    workspace: Union[str, Path],
-    port: int = 8788,
+    workspace: Optional[Union[str, Path]] = None,
+    port: Optional[int] = None,
     *,
     semantic: bool = True,
     capture: bool = True,
@@ -152,7 +223,8 @@ def start_sidecar(
     how an unreplayable WAL gets made. `wait_s` covers loading the encoder,
     which takes well over the old 25 s on a cold `--semantic` start.
     """
-    workspace = Path(workspace).resolve()
+    port, ws_default = _configured_target(port, workspace)
+    workspace = Path(ws_default).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
 
     running = find_sidecars(port)
@@ -210,7 +282,7 @@ def start_sidecar(
         **hidden(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0),
     )
 
-    # Wait for /health
+    # Wait for /health (and if the front is serving, wait for its worker to be up)
     healthy = False
     exited = None
     start_t = time.time()
@@ -218,7 +290,8 @@ def start_sidecar(
         exited = proc.poll()
         if exited is not None:              # died on start: say so, do not wait out the clock
             break
-        if "error" not in _health(port, 10.0):
+        h = _health(port, 10.0)
+        if "error" not in h and h.get("ok") and h.get("backend") not in ("starting", "dead"):
             healthy = True
             break
         time.sleep(1.0)
@@ -248,11 +321,12 @@ def start_sidecar(
     }
 
 
-def sidecar_status(port: int = 8788, url: str = "http://127.0.0.1:8788") -> Dict:
+def sidecar_status(port: Optional[int] = None, url: str = "http://127.0.0.1:8788") -> Dict:
     """Return live status of the sidecar process and HTTP endpoint."""
     # /health recounts the store when its cache is stale, and that took over
     # 6 s on corpus123 -- the old 2 s timeout reported a healthy sidecar as
     # "timed out" (2026-10-17). A slow answer is "busy", not "down".
+    port, _ = _configured_target(port, None)
     procs = find_sidecars(port)
     t0 = time.time()
     health_data = _health(port, 20.0)
@@ -283,7 +357,7 @@ def sidecar_status(port: int = 8788, url: str = "http://127.0.0.1:8788") -> Dict
 
 def setup_vault(
     vault_path: Union[str, Path],
-    sidecar_url: str = "http://127.0.0.1:8788",
+    sidecar_url: Optional[str] = None,
     *,
     register_in_obsidian: bool = True,
 ) -> Dict:
@@ -346,7 +420,16 @@ def setup_vault(
             settings.update(json.loads(data_json.read_text(encoding="utf-8")))
         except Exception:                           # noqa: BLE001
             pass
-    settings["sidecar"] = sidecar_url
+    if sidecar_url:
+        settings["sidecar"] = sidecar_url
+    else:
+        launch_argv = [str(a) for a in ((settings.get("sidecarLaunch") or {}).get("argv") or [])]
+        if "--port" in launch_argv and launch_argv.index("--port") + 1 < len(launch_argv):
+            p_str = launch_argv[launch_argv.index("--port") + 1]
+            if p_str.isdigit():
+                settings["sidecar"] = f"http://127.0.0.1:{p_str}"
+        if not settings.get("sidecar"):
+            settings["sidecar"] = "http://127.0.0.1:8788"
     data_json.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
     # 5. Register in %APPDATA%/obsidian/obsidian.json

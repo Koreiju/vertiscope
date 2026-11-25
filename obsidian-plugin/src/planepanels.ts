@@ -32,7 +32,7 @@ import { chunkNoteState, clampToPlane, makeDraggable, type PlaceStats } from "./
 import { edgeResizable } from "./edgeresize";
 import { isSlate, COCKPIT_PATH } from "./cockpit";
 import { ChatUI, type Piece } from "./chatui";
-import { EgoCanvas, CANVAS_PATH } from "./egocanvas";
+import { EgoCanvas } from "./egocanvas";
 
 export interface PlaneHost {
   /** The plane over the 3D view, when a graph is open. */
@@ -99,9 +99,27 @@ export class PlaneDesk {
   private restored = false;
 
   /** The panels open on the plane, remembered across a reload (a convenience:
-   *  the cockpit's card is remembered the same way). */
+   *  the cockpit's card is remembered the same way). Collapsed node artifacts
+   *  are never remembered as open panels: the Craft IS their node form. */
   private remember(): void {
-    try { window.localStorage.setItem(OPEN_KEY, JSON.stringify(this.panels.map((p) => p.path))); } catch { /* a convenience */ }
+    try {
+      const openPaths = this.panels.filter((p) => !p.card.hasClass("is-collapsed")).map((p) => p.path);
+      window.localStorage.setItem(OPEN_KEY, JSON.stringify(openPaths));
+    } catch { /* a convenience */ }
+  }
+  private uncollapseStoredFold(path: string): boolean {
+    try {
+      const k = "domvec.slate.folds:" + path;
+      const raw = window.localStorage.getItem(k);
+      if (!raw) return false;
+      const st = JSON.parse(raw);
+      if (st && st.collapsed) {
+        st.collapsed = false;
+        window.localStorage.setItem(k, JSON.stringify(st));
+        return true;
+      }
+    } catch { /* a convenience */ }
+    return false;
   }
   private async restore(): Promise<void> {
     if (this.restored) return;
@@ -116,10 +134,15 @@ export class PlaneDesk {
     }
     let paths: string[] = [];
     try { paths = JSON.parse(window.localStorage.getItem(OPEN_KEY) || "[]"); } catch { /* a convenience */ }
-    for (const path of Array.isArray(paths) ? paths : []) {
-      const f = this.app.vault.getAbstractFileByPath(String(path));
+    for (const rawPath of Array.isArray(paths) ? paths : []) {
+      const path = String(rawPath);
+      // A panel that was collapsed to its deprecated circle node before restart
+      // lives in the Craft as a node now; do not restore it as a circle artifact.
+      if (this.uncollapseStoredFold(path)) continue;
+      const f = this.app.vault.getAbstractFileByPath(path);
       if (f instanceof TFile) await this.open(f);
     }
+    this.remember();
   }
 
   constructor(private app: App, private host: PlaneHost) {}
@@ -278,6 +301,9 @@ export class PlaneDesk {
       await leaf.openFile(file, { state: { mode: "source", source: false } } as any);
       return leaf;
     }
+    if (!((window as any).__domvec?.verify?.state?.()?.running)) {
+      this.uncollapseStoredFold(file.path);
+    }
     let p = this.panelOf(file.path);
     if (!p) {
       const Leaf = (this.app.workspace as any).activeLeaf?.constructor ?? (this.app.workspace.getMostRecentLeaf() as any)?.constructor;
@@ -358,10 +384,17 @@ export class PlaneDesk {
       }
       const fpath = file.path;
       // Alt+click on the node is the containment gesture (G-327), not the halo.
+      // Only a panel with an explicit header bar (`head`) triggers `headerClick`
+      // on click; a slate's `.domvec-var-title` is line 1 of its text editor.
       const undrag = makeDraggable(card, plane, "domvec-plane-card:" + file.path, this.place,
-        () => { if (performance.now() - this.altAt < 800) return; this.host.headerClick?.(fpath); },
+        () => { if (performance.now() - this.altAt < 800 || !head) return; this.host.headerClick?.(fpath); },
         (x, y) => this.wireDrop(fpath, x, y),
         () => this.host.moved?.(fpath), () => this.host.moved?.(fpath));
+      if (opts.at && Number.isFinite(opts.at.x) && Number.isFinite(opts.at.y)) {
+        card.style.right = "auto";
+        card.style.left = `${Math.round(opts.at.x + 18)}px`;
+        card.style.top = `${Math.round(opts.at.y - 24)}px`;
+      }
       clampToPlane(card, plane);
       // Any edge or corner resizes it, found by hovering (159); a resize is the
       // READER sizing it, as the corner's was (G-326).
@@ -374,8 +407,7 @@ export class PlaneDesk {
       this.linksOn();                              // links between panels (G-398) whenever there are panels
       this.hook(p);
       const mount = opts.mount || (this.isTerminal(file) ? (c: HTMLElement) => this.terminalMount(c, Leaf)
-                                   : this.isChatNote(file) ? (c: HTMLElement) => this.chatMount(c, file)
-                                   : file.path === CANVAS_PATH ? (c: HTMLElement) => this.canvas.mount(c, file) : undefined);
+                                   : this.isChatNote(file) ? (c: HTMLElement) => this.chatMount(c, file) : undefined);
       if (mount) { const pp = p; const undo = await mount(card); if (undo) pp.cleanup = undo; clampToPlane(card, plane); }
       const path = file.path;
       // Ctrl+= / Ctrl+- (and Ctrl+0) resize THIS panel (PLUGIN_GOAL 133),
@@ -397,7 +429,7 @@ export class PlaneDesk {
       card.addEventListener("dblclick", (e: MouseEvent) => {
         const t = e.target as HTMLElement;
         const onCircle = !!t?.closest?.(".domvec-slate-circle, .domvec-slate-circle-dot");
-        if (!card.hasClass("is-collapsed") && !onCircle) return;
+        if (t?.closest?.(".domvec-plane-card") !== card || (!card.hasClass("is-collapsed") && !onCircle)) return;
         if (!this.host.intoCraft?.(path)) return;
         e.preventDefault(); e.stopPropagation();
         this.intoStats.sent++;
@@ -413,6 +445,12 @@ export class PlaneDesk {
       this.host.changed?.();
     } else {
       p.card.removeClass("is-collapsed");
+      if (opts.at && Number.isFinite(opts.at.x) && Number.isFinite(opts.at.y)) {
+        p.card.style.right = "auto";
+        p.card.style.left = `${Math.round(opts.at.x + 18)}px`;
+        p.card.style.top = `${Math.round(opts.at.y - 24)}px`;
+        clampToPlane(p.card, plane);
+      }
       // Opened before by a path that mounted nothing beneath it (a remembered
       // panel restored at load): mounted now -- the browser's slate had come
       // back alone, with no browser under it (G-300).
@@ -752,34 +790,31 @@ export class PlaneDesk {
     return String(this.app.metadataCache.getFileCache(file)?.frontmatter?.domvec || "") === "chat";
   }
   chats = new Map<string, ChatUI>();
-  /** The ego canvas (183, G-396): the cockpit and every ego artifact, contained. */
+  /** The ego canvas (183; spec §12c, G-401): the ego slate's component fields. */
   canvas = new EgoCanvas({
     app: this.app,
-    plane: () => this.host.plane(),
     members: () => {
       const g: any = this.app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
       return [...new Set<string>((g?.craft?.nodes || []).filter((n: any) => n.kind === "note" && n.path).map((n: any) => n.path))];
     },
-    openPanel: async (path, at) => {
-      const f = this.app.vault.getAbstractFileByPath(path);
-      if (!(f instanceof TFile)) return;
-      const plane = this.host.plane();
-      const r = plane?.getBoundingClientRect();
-      const p = await this.open(f);
-      const c = p?.card || this.panelOf(path)?.card;
-      if (c && plane && r) {
-        c.style.right = "auto"; c.style.left = `${Math.round(at.x - r.left)}px`; c.style.top = `${Math.round(at.y - r.top)}px`;
-        clampToPlane(c, plane);
-      }
-    },
-    closePanel: (path) => { const q = this.panelOf(path); if (q) { try { q.leaf.detach(); } catch { /* gone */ } } },
   });
+  /** Planted (G-404): a card dropped on a card writes a wiki link (136 forbids it). */
+  plantCardLinks = false;
+  /** The ego canvas IS the ego slate (54 "one ego"; spec §12c): its component
+   *  fields brought up to date, the cockpit opened at the plane's centre (183). */
   async openCanvas(): Promise<any> {
     this.linksOn();
-    const f = await this.canvas.ensure();
-    const p = this.panelOf(f.path);
-    if (p) { this.canvas.centre(p.card); await this.canvas.sync(); return p; }
-    return this.open(f, { mount: (c) => this.canvas.mount(c, f) });
+    await this.canvas.sync();
+    const cp: any = (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit;
+    const v = await cp?.open?.();
+    const card: HTMLElement | null = cp?.card || null, plane = this.host.plane();
+    if (card && plane) {
+      const w = Math.min(560, Math.round(plane.clientWidth * 0.62));
+      card.style.width = w + "px"; card.style.right = "auto";
+      card.style.left = Math.round((plane.clientWidth - w) / 2) + "px";
+      card.style.top = Math.max(8, Math.round(plane.clientHeight * 0.08)) + "px";
+    }
+    return v;
   }
   /** L-1: the chat role of the one model table (`models.ROLES["chat"]`). */
   static CHAT_MODEL = "Nous Hermes 2 Mistral DPO";
@@ -1023,9 +1058,13 @@ export class PlaneDesk {
     this.flipHooked.add(ground);
     const onDbl = (e: MouseEvent) => {
       if ((e as any).__domvecFlip) return;
-      (e as any).__domvecFlip = true;
       const t = e.target as HTMLElement;
       if (!(t?.classList?.contains("domvec-plane") || t?.tagName === "CANVAS")) return;
+      // Double-clicking a Craft node or 3D world node on the canvas belongs to
+      // that node (open/close panel or fly to linked node), not a ground flip.
+      const gv: any = (this.app as any).workspace?.getLeavesOfType?.("domvec-graph-view")?.[0]?.view;
+      if (gv?.craft?.nodeAt?.(e.clientX, e.clientY) || gv?.nodeAtScreen?.(e.clientX, e.clientY)) return;
+      (e as any).__domvecFlip = true;
       e.preventDefault(); e.stopPropagation();
       const now = this.host.plane(); if (!now) return;
       const r = now.getBoundingClientRect();
@@ -1043,16 +1082,20 @@ export class PlaneDesk {
    * flipped, and only between two of its nodes. Planted `plantNoWiring`.
    */
   plantNoWiring = false;
-  wireStats = { wired: 0, last: null as any };
+  wireStats = { wired: 0, refused: 0, last: null as any };
   wireDrop(from: string, x: number, y: number): boolean {
-    // PUSH IN (183, G-397): a card dropped on the ego canvas is contained there.
-    if (from !== CANVAS_PATH && this.panelOf(CANVAS_PATH) && this.canvas.holds(x, y)) {
-      void this.canvas.pushIn(from, y);
-      return true;
-    }
+    // A card dropped on another card is PLACEMENT, never a link (136: "magnetizing
+    // new panels together doesn't create new links between panels. That comes
+    // from the compilation aspect"; G-404). Links come only from compilation
+    // (`{ref}`s, def/use). Wiring survives only inside the retired, planted
+    // flip form it always belonged to. Planted `plantCardLinks`: a card dropped
+    // on a card writes a wiki link (G-399's slice, which wrote `[[browser]]` x3
+    // into the canvas note when the canvas was moved).
     const f = this.flipped;
-    if (!f || this.plantNoWiring || !f.members.includes(from)) return false;
-    const to = f.members.find((m) => {
+    if (!f && !this.plantCardLinks) { this.wireStats.refused = (this.wireStats.refused || 0) + 1; return false; }
+    const members = f ? f.members : this.panels.filter((q) => !q.card.hasClass("is-collapsed")).map((q) => q.path);
+    if (this.plantNoWiring || !members.includes(from)) return false;
+    const to = members.find((m) => {
       if (m === from) return false;
       const c = this.panelOf(m)?.card.getBoundingClientRect();
       return !!c && x >= c.left - 8 && x <= c.right + 8 && y >= c.top - 8 && y <= c.bottom + 8;
@@ -1067,7 +1110,7 @@ export class PlaneDesk {
       // 700 ms redrew before it, and the new edge was not drawn.
       let tries = 0;
       const wait = () => { if (!this.linkedTo(from).has(to) && ++tries < 40) { window.setTimeout(wait, 100); return; } redraw(); };
-      const redraw = () => { const keep = this.flipped; if (!keep) return; const pr = this.host.plane()?.getBoundingClientRect(); if (!pr) return;
+      const redraw = () => { const keep = this.flipped; if (!keep) { this.drawLinks(); return; } const pr = this.host.plane()?.getBoundingClientRect(); if (!pr) return;
         const c = this.panelOf(from)?.card.getBoundingClientRect(); if (!c) return;
         this.flip(0, 0); this.flip(c.left - pr.left + c.width / 2, c.top - pr.top + c.height / 2); };
       wait();
@@ -1077,9 +1120,14 @@ export class PlaneDesk {
   }
 
   /** Flip the panels within reach of (x, y) in plane coordinates; again flips back. */
+  /** RETIRED by PLUGIN_GOAL 183 (G-399): there is no graph form in 2D -- the
+   *  links between panels are always drawn (G-398). A flip already open is
+   *  closed; a new one is refused. Planted `plantFlipForm`: as before. */
+  plantFlipForm = false;
   flip(x: number, y: number): string[] {
     const plane = this.host.plane();
     if (!plane) return [];
+    if (!this.flipped && !this.plantFlipForm) { (this.flipStats as any).refused = ((this.flipStats as any).refused || 0) + 1; return []; }
     if (this.flipped) {
       const f = this.flipped; this.flipped = null;
       window.clearInterval(f.timer); f.svg.remove();
@@ -1137,6 +1185,8 @@ export class PlaneDesk {
    * is the only graph mark on the plane. Planted `plantNoPlaneLinks`: none.
    */
   plantNoPlaneLinks = false;
+  /** Planted (G-404): the plane's lines follow wiki links as well (T-4 forbids it). */
+  plantWikiLines = false;
   linkStats = { edges: 0, pairs: [] as string[][] };
   private linkSvg: SVGSVGElement | null = null;
   private linkTimer = 0;
@@ -1161,9 +1211,13 @@ export class PlaneDesk {
     if (!this.plantNoPlaneLinks) {
       const open = this.panels.filter((q) => !q.card.hasClass("is-collapsed") && q.card.isConnected);
       for (let i = 0; i < open.length; i++) {
-        const la = this.linkedTo(open[i].path);
+        // Lines come from COMPILATION only (136, 142; spec §12d, G-404): a
+        // `{ref}` naming the other record. A plain wiki link is a plain link
+        // (T-4) and draws nothing. Planted `plantWikiLines`: wiki links too.
+        const rel = (q: string) => this.plantWikiLines ? this.linkedTo(q) : this.refTargets(q);
+        const la = rel(open[i].path);
         for (let j = i + 1; j < open.length; j++) {
-          if (la.has(open[j].path) || this.linkedTo(open[j].path).has(open[i].path)) pairs.push([open[i].path, open[j].path]);
+          if (la.has(open[j].path) || rel(open[j].path).has(open[i].path)) pairs.push([open[i].path, open[j].path]);
         }
       }
     }
@@ -1210,7 +1264,9 @@ export class PlaneDesk {
     const onRight = (e: MouseEvent) => {
       const t = e.target as HTMLElement;
       const onHead = !!t?.closest?.(".domvec-plane-head-node, .domvec-var-title, .domvec-slate-circle-dot");
-      if (!onHead) return;
+      // Its OWN header only: a card inside this one has its own (seen
+      // 2026-11-22: a right-click on an inner title minimized the outer card).
+      if (!onHead || t.closest(".domvec-plane-card") !== p.card) return;
       const now = performance.now();
       if (now - rightAt < 450) {
         e.preventDefault(); e.stopPropagation();
@@ -1230,7 +1286,7 @@ export class PlaneDesk {
     p.card.addEventListener("click", (e: MouseEvent) => {
       if (!e.altKey) return;
       const t = e.target as HTMLElement;
-      if (!t?.closest?.(".domvec-plane-head-node, .domvec-var-title, .domvec-slate-circle-dot")) return;
+      if (!t?.closest?.(".domvec-plane-head-node, .domvec-var-title, .domvec-slate-circle-dot") || t.closest(".domvec-plane-card") !== p.card) return;
       e.preventDefault(); e.stopPropagation();
       this.altAt = performance.now();
       this.contain(p.path);
@@ -1379,12 +1435,14 @@ export class PlaneDesk {
   plantGraphOverflow = false;
   intoStats = { sent: 0 };
   fitGraphCards(): void {
-    for (const p of this.panels) {
-      const g = p.card.querySelector(".domvec-slate-graph") as HTMLElement | null;
-      if (!g || this.plantGraphOverflow) { if (p.card.dataset.graphFit) { p.card.style.minWidth = ""; p.card.style.minHeight = ""; delete p.card.dataset.graphFit; } continue; }
-      const gr = g.getBoundingClientRect(), cr = p.card.getBoundingClientRect();
+    const cpCard: HTMLElement | null = (this.app as any).plugins?.plugins?.["domvec-bridge"]?.cockpit?.card || null;
+    const cards = this.panels.map((p) => p.card).concat(cpCard && cpCard.isConnected ? [cpCard] : []);
+    for (const card of cards) {
+      const g = card.querySelector(".domvec-slate-graph") as HTMLElement | null;
+      if (!g || this.plantGraphOverflow) { if (card.dataset.graphFit) { card.style.minWidth = ""; card.style.minHeight = ""; delete card.dataset.graphFit; } continue; }
+      const gr = g.getBoundingClientRect(), cr = card.getBoundingClientRect();
       const w = Math.ceil(gr.right - cr.left + 8), h = Math.ceil(gr.bottom - cr.top + 8);
-      if (w > cr.width || h > cr.height) { p.card.style.minWidth = `${Math.max(w, cr.width)}px`; p.card.style.minHeight = `${Math.max(h, cr.height)}px`; p.card.dataset.graphFit = "1"; }
+      if (w > cr.width || h > cr.height) { card.style.minWidth = `${Math.max(w, cr.width)}px`; card.style.minHeight = `${Math.max(h, cr.height)}px`; card.dataset.graphFit = "1"; }
     }
   }
   /** Start drawing memory links on the plane (once the plane exists). */

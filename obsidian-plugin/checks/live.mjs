@@ -12072,6 +12072,57 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-399",
+      asks: "no circles in 2D (PLUGIN_GOAL 183 'circles gone in 2D', 182 'Both'): a collapsed panel is its HEADER BAR -- wider than tall, square-ish corners -- not a circle; a slate never enters graph form (a double-click flip is refused) and a slate stored in graph form draws its panel; the ground flip to graph form is refused; a card dropped on another card writes a link between their notes and the plane draws it (G-398) -- the gesture the flip used to host; planted __domvecPlantGraphForm + plantFlipForm: the graph form and the flip come back",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvecPlane, P = app.plugins.getPlugin("domvec-bridge"), NL = String.fromCharCode(10);
+          window.__domvecPlantGraphForm = ${planted}; d.plantFlipForm = ${planted};
+          const tok = Date.now().toString(36), a = "domvec/graph/g399 a " + tok + ".md", b = "domvec/graph/g399 b " + tok + ".md", s = "domvec/graph/g399 s " + tok + ".md";
+          const out = { planted: ${planted} };
+          try {
+            await d.create("notebook", { path: a, text: "panel a" + NL });
+            await d.create("notebook", { path: b, text: "panel b" + NL });
+            // 1. A collapsed panel: its header bar.
+            d.toggleMinimized(b); await sleep(500);
+            const node = d.panelOf(b).card.querySelector(".domvec-plane-head-node"), r = node.getBoundingClientRect();
+            out.collapsed = { w: Math.round(r.width), h: Math.round(r.height), radius: parseFloat(getComputedStyle(node).borderTopLeftRadius) };
+            d.toggleMinimized(b); await sleep(300);
+            // 2. A slate: the flip to graph form.
+            await d.create("slate", { path: s });
+            await sleep(800);
+            const sv = d.panelOf(s)?.leaf?.view;
+            const flipped = P.cockpit.flipForm(sv); await sleep(600);
+            out.slate_flip = { returned: flipped, graph_drawn: !!sv?.contentEl?.querySelector(".domvec-slate-graph") };
+            if (flipped) { P.cockpit.flipForm(sv); await sleep(400); }
+            // 3. The ground flip.
+            const members = d.flip(200, 200); out.ground_flip = members.length; if (d.flipped) d.flip(0, 0);
+            // 4. Card on card: a link written, a line drawn.
+            const ca = d.panelOf(a).card, cb = d.panelOf(b).card, br = cb.getBoundingClientRect();
+            const wired = d.wireDrop(a, br.left + 20, br.top + 20);
+            let txt = ""; for (let i = 0; i < 20; i++) { await sleep(150); txt = await app.vault.read(app.vault.getAbstractFileByPath(a)); if (txt.includes("[[")) break; }
+            out.wire = { accepted: wired, link_written: txt.includes("g399 b " + tok) };
+            let line = false;
+            for (let i = 0; i < 30 && !line; i++) { await sleep(150); line = [...d.host.plane().querySelectorAll(".domvec-plane-links line")].some((l) => [l.dataset.a, l.dataset.b].includes(a) && [l.dataset.a, l.dataset.b].includes(b)); }
+            out.wire.line = line;
+          } finally {
+            window.__domvecPlantGraphForm = false; d.plantFlipForm = false;
+            if (d.flipped) d.flip(0, 0);
+            for (const q of [a, b, s]) { try { d.panelOf(q)?.leaf.detach(); } catch (e) {} for (let k = 0; k < 3; k++) { await sleep(700); const f = app.vault.getAbstractFileByPath(q); if (!f) break; await app.vault.trash(f, true); } }
+          }
+          return out;
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const c = clean;
+        return { pass: c.collapsed.w > c.collapsed.h * 1.5 && c.collapsed.radius < 16
+                       && c.slate_flip.returned === false && !c.slate_flip.graph_drawn && c.ground_flip === 0
+                       && c.wire.accepted && c.wire.link_written && c.wire.line
+                       && planted.slate_flip.returned === true && planted.slate_flip.graph_drawn && planted.ground_flip > 0,
+                 evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-398",
       asks: "links between the pulled-apart panels (PLUGIN_GOAL 183 'Links between panels'): two open cards whose notes link (a wiki link written in one) are joined by a line on the plane, border to border -- its ends on the cards' edges, never under a card's middle -- and the line follows a card that moves; a section PULLED OUT of the ego canvas is joined to the canvas the same way (its `[[...]]` line); planted plantNoPlaneLinks: no line",
       async run() {
@@ -12107,7 +12158,7 @@ export function makeChecks(env) {
             }
             // A section pulled out of the canvas is joined to the canvas.
             const secs = await d.canvas.sections();
-            const x = secs.find((s, i) => i > 0 && s.embedded && app.vault.getAbstractFileByPath(s.path) && !d.panelOf(s.path));
+            const x = secs.find((s, i) => i > 0 && s.embedded && d.panelOf(s.path)?.nested && d.panelOf(s.path).head);
             if (x) {
               const cr = d.panelOf(CP).card.getBoundingClientRect();
               await d.canvas.pullOut(x.path, { x: cr.left + 20, y: cr.bottom - 40 });
@@ -12129,7 +12180,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-397",
-      asks: "the ego canvas's graph operations (PLUGIN_GOAL 183: pull out / push in, order = compile order): a CLICK on a section's header folds it and pulls nothing; a header HELD past the debounce and dropped off the canvas turns its line into a link `[[...]]` and opens the component as its own panel at the drop; that panel's card dropped on the canvas turns the line back into `![[...]]` AT the drop position and closes the panel; a header held and dropped inside the canvas moves its line there; planted plantPullNoLine: the pulled-out component's line still claims it is contained",
+      asks: "the ego canvas's graph operations (PLUGIN_GOAL 183: pull out / push in, order = compile order; 184: the nesting FIELD on the panel's own header): a CLICK on a nested panel's header folds it and pulls nothing; a header HELD past the debounce and dropped off the canvas turns its line into a link `[[...]]` and opens the component as its own panel at the drop; that panel's card dropped on the canvas turns the line back into `![[...]]` AT the drop position and closes the panel; a header held and dropped inside the canvas moves its line there; the heading's `in canvas` field clicked frees the panel beside the canvas (its line a link, its field `free`) and clicked again nests it back; planted plantPullNoLine: the pulled-out component's line still claims it is contained",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -12140,9 +12191,9 @@ export function makeChecks(env) {
           C.plantPullNoLine = ${planted};
           try {
             const card = d.panelOf(CP).card, plane = d.host.plane();
-            const head = (p) => card.querySelector('.domvec-canvas-section[data-path="' + p + '"] .domvec-canvas-head');
+            const head = (p) => card.querySelector('.domvec-canvas > .domvec-plane-card.is-nested[data-path="' + p + '"] > .domvec-plane-head');
             const secs0 = await d.canvas.sections();
-            const x = secs0.find((s, i) => i > 0 && s.embedded && app.vault.getAbstractFileByPath(s.path) && !d.panelOf(s.path));
+            const x = secs0.find((s, i) => i > 0 && s.embedded && d.panelOf(s.path)?.nested && d.panelOf(s.path).head);
             if (!x) return { error: "no embedded section to pull" };
             out.x = x.path; out.x_index = secs0.indexOf(x);
             const pe = (el, type, px, py) => (type === "pointerdown" ? el : window).dispatchEvent(new PointerEvent(type, { clientX: px, clientY: py, button: 0, bubbles: true, pointerId: 1 }));
@@ -12157,7 +12208,7 @@ export function makeChecks(env) {
             const drop = { x: cr.left - pr.left > 160 ? cr.left - 120 : cr.right + 40, y: cr.top + 60 };
             r0 = hr(); pe(head(x.path), "pointerdown", r0.left + 20, r0.top + 5); await sleep(C.HOLD_MS + 150);
             pe(head(x.path), "pointermove", r0.left + 40, r0.top + 5); pe(head(x.path), "pointermove", drop.x, drop.y); pe(head(x.path), "pointerup", drop.x, drop.y);
-            for (let i = 0; i < 30 && !d.panelOf(x.path); i++) await sleep(100);
+            for (let i = 0; i < 30 && !d.panels.some((q) => q.path === x.path && !q.nested); i++) await sleep(100);
             await sleep(400);
             const s1 = (await d.canvas.sections()).find((s) => s.path === x.path);
             const pc = d.panelOf(x.path)?.card;
@@ -12166,22 +12217,40 @@ export function makeChecks(env) {
             if (!${planted}) {
               // PUSH IN: the card dropped on the canvas at section 4's top -- BELOW its
               // own pulled-out line (index 1), so it lands just before that section: index 3.
-              const sec1 = card.querySelectorAll(".domvec-canvas-section")[4].getBoundingClientRect();
+              // 184: the pulled-out line draws no panel, so the drawn panel at [3] is the note's section 4.
+              const sec1 = card.querySelectorAll(".domvec-canvas > .domvec-plane-card.is-nested")[3].getBoundingClientRect();
               d.wireDrop(x.path, cr.left + 40, sec1.top + 2);
-              for (let i = 0; i < 30 && d.panelOf(x.path); i++) await sleep(100);
+              for (let i = 0; i < 30 && !d.panelOf(x.path)?.nested; i++) await sleep(100);
               await sleep(500);
               const s2 = await d.canvas.sections();
-              out.push = { contained: s2.some((s) => s.path === x.path && s.embedded), index: s2.findIndex((s) => s.path === x.path), panel_closed: !d.panelOf(x.path) };
+              out.push = { contained: s2.some((s) => s.path === x.path && s.embedded), index: s2.findIndex((s) => s.path === x.path), panel_closed: !d.panels.some((q) => q.path === x.path && !q.nested),
+                           nested_again: !!d.panelOf(x.path)?.nested };
               // REORDER: the LAST section held and dropped at the top of section 1.
               await d.canvas.render(); await sleep(400);
-              const last = s2[s2.length - 1];
+              const last = [...s2].reverse().find((s) => s.embedded && head(s.path));
               const lh = head(last.path), lr = lh.getBoundingClientRect();
-              const t1 = card.querySelectorAll(".domvec-canvas-section")[1].getBoundingClientRect();
+              const t1 = card.querySelectorAll(".domvec-canvas > .domvec-plane-card.is-nested")[1].getBoundingClientRect();
               pe(lh, "pointerdown", lr.left + 20, lr.top + 5); await sleep(C.HOLD_MS + 150);
               pe(lh, "pointermove", lr.left + 20, lr.top - 20); pe(lh, "pointermove", cr.left + 40, t1.top + 2); pe(lh, "pointerup", cr.left + 40, t1.top + 2);
               await sleep(800);
               const s3 = await d.canvas.sections();
               out.move = { path: last.path, index: s3.findIndex((s) => s.path === last.path), count: s3.length, was: s2.length };
+              // THE NESTING FIELD (184): cleared, the panel is free beside the
+              // canvas and its line a link; set again, nested and contained.
+              await d.canvas.render(); await sleep(300);
+              const nf = () => card.querySelector('.domvec-canvas > .domvec-plane-card.is-nested[data-path="' + x.path + '"] .domvec-plane-nest');
+              const field0 = nf()?.textContent;
+              out.field_state = { nested: !!d.panelOf(x.path)?.nested, has_head: !!d.panelOf(x.path)?.head, in_canvas: !!card.querySelector('.domvec-canvas > [data-path="' + x.path + '"]'), line: (await d.canvas.sections()).find((s) => s.path === x.path) };
+              nf()?.click();
+              for (let i = 0; i < 30 && !d.panels.some((q) => q.path === x.path && !q.nested); i++) await sleep(100);
+              await sleep(300);
+              const freeCard = d.panels.find((q) => q.path === x.path && !q.nested);
+              const s4 = await d.canvas.sections();
+              out.field = { was: field0, freed: !!freeCard, line_is_link: s4.some((s) => s.path === x.path && !s.embedded), free_field: freeCard?.card.querySelector(".domvec-plane-nest")?.textContent };
+              freeCard?.card.querySelector(".domvec-plane-nest")?.click();
+              for (let i = 0; i < 30 && !d.panelOf(x.path)?.nested; i++) await sleep(100);
+              await sleep(300);
+              out.field.renested = !!d.panelOf(x.path)?.nested && !d.panels.some((q) => q.path === x.path && !q.nested) && (await d.canvas.sections()).some((s) => s.path === x.path && s.embedded);
             }
           } finally {
             C.plantPullNoLine = false;
@@ -12195,7 +12264,8 @@ export function makeChecks(env) {
         const c = clean;
         return { pass: !c.error && c.click.clicks === 1 && c.click.pulled === 0 && c.click.unfolded
                        && c.pull.line_is_link && c.pull.same_index && c.pull.panel_open && c.pull.near_drop
-                       && c.push.contained && c.push.index === 3 && c.push.panel_closed
+                       && c.push.contained && c.push.index === 3 && c.push.panel_closed && c.push.nested_again
+                       && c.field && c.field.was === "in canvas" && c.field.freed && c.field.line_is_link && c.field.free_field === "free" && c.field.renested
                        && c.move.index === 1 && c.move.count === c.move.was
                        && !planted.error && planted.pull.panel_open && planted.pull.line_is_link === false,
                  evidence: { clean, planted } };
@@ -12203,12 +12273,12 @@ export function makeChecks(env) {
     },
     {
       id: "G-396",
-      asks: "the ego as ONE central artifact canvas (PLUGIN_GOAL 183): `domvec/ego canvas.md` holds the cockpit and the ego's members as embedded sections (`![[...]]`), seeded from the craft's membership; drawn at the plane's CENTRE; the cockpit's section unfolded with its LIVE editor (the slate's own text, editable), the rest folded to a header with no editor; a header click unfolds a section (an editor mounted) and folds it again (released); planted plantAutoHeight: the unfolded section draws no editor (seen 2026-11-22); the canvas FOLLOWS the ego -- a note made after the seed joins it, contained (a check's scratch note never does); planted plantSeedOnce: it does not",
+      asks: "the ego as ONE central artifact canvas (PLUGIN_GOAL 183, 184): `domvec/ego canvas.md` holds the cockpit and the ego's members as embedded sections (`![[...]]`), seeded from the craft's membership; drawn at the plane's CENTRE; each contained line is a NESTED PLANE PANEL -- the same card, header bar and native Obsidian markdown leaf a note gets anywhere, in line order, no section rows of the canvas's own -- the cockpit's panel open with its LIVE editor (the slate's own text), a headed panel folded to its header bar with nothing else drawn; a header click unfolds it (its leaf drawn) and folds it again; ONE panel per note: the cockpit opened elsewhere IS the nested panel (no cockpit card), a contained note opened from anywhere reaches the nested panel; planted plantDuplicates: the free card stays beside it; SEAMLESS (185): no component drawn as a box -- no border, no scrollbar of its own, its editor as tall as its content, the canvas the one surface (planted plantBoxed: 184's boxes); the canvas FOLLOWS the ego -- a note made after the seed joins it, contained (a check's scratch note never does); planted plantSeedOnce: it does not",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           const d = window.__domvecPlane, C = d.canvas.constructor;
-          C.plantAutoHeight = ${planted};
+          C.plantBoxed = ${planted};
           const out = { planted: ${planted} };
           try {
             await d.openCanvas(); await d.canvas.render(); await sleep(1200);
@@ -12221,10 +12291,42 @@ export function makeChecks(env) {
             const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view;
             const members = new Set((g?.craft?.nodes || []).filter((n) => n.kind === "note" && !C.scratch(n.path)).map((n) => n.path));
             out.members_contained = [...members].filter((p) => secs.some((s) => s.path === p)).length; out.members = members.size;
-            const bodyOf = (p) => card.querySelector('.domvec-canvas-section[data-path="' + p + '"] .domvec-canvas-body');
-            const ego = bodyOf("domvec/ego.md");
-            out.ego_drawn = !!ego && ego.offsetHeight > 100 && !!ego.querySelector(".cm-editor") && (ego.querySelector(".cm-content")?.innerText || "").includes("throttle");
-            out.folded_editors = [...card.querySelectorAll(".domvec-canvas-section")].filter((x) => x.dataset.path !== "domvec/ego.md" && x.querySelector(".cm-editor")).length;
+            const panelEl = (p) => card.querySelector('.domvec-canvas > .domvec-plane-card.is-nested[data-path="' + p + '"]');
+            const nestedOrder = [...card.querySelectorAll(".domvec-canvas > .domvec-plane-card.is-nested")].map((x) => x.dataset.path);
+            out.nested = nestedOrder.length; out.in_line_order = JSON.stringify(nestedOrder) === JSON.stringify(secs.filter((s) => s.embedded && app.vault.getAbstractFileByPath(s.path)).map((s) => s.path));
+            out.own_rows = card.querySelectorAll(".domvec-canvas-section, .domvec-canvas-head").length;
+            out.native = nestedOrder.every((p) => { const q = d.panelOf(p); return !!q && q.nested && q.leaf?.view?.getViewType?.() === "markdown" && q.card.contains(q.leaf.containerEl); });
+            const ego = panelEl("domvec/ego.md");
+            const egoLeaf = ego && ego.querySelector(":scope > .workspace-leaf");
+            out.ego_drawn = !!egoLeaf && egoLeaf.offsetHeight > 100 && (egoLeaf.querySelector(".cm-content")?.innerText || "").includes("throttle");
+            // SEAMLESS (185): no component a box -- no border, no scrollbar of
+            // its own, its editor as tall as its content; the canvas scrolls alone.
+            const parts = [...card.querySelectorAll(".domvec-canvas > .domvec-plane-card.is-nested")];
+            out.seamless = {
+              borders: parts.filter((e) => parseFloat(getComputedStyle(e).borderTopWidth) > 0).length,
+              own_scrollers: parts.flatMap((e) => [...e.querySelectorAll("*")]).filter((e) => e.offsetHeight > 0 && /(auto|scroll)/.test(getComputedStyle(e).overflowY) && e.scrollHeight > e.clientHeight + 2).length,
+              ego_full: !!egoLeaf && egoLeaf.offsetHeight + 2 >= (egoLeaf.querySelector(".cm-content")?.offsetHeight || 0),
+            };
+            // A headed panel folded: its header bar alone.
+            out.folded_extra = [...card.querySelectorAll(".domvec-canvas > .domvec-plane-card.is-nested.has-head.is-collapsed")]
+              .filter((x) => [...x.children].some((ch) => !ch.classList.contains("domvec-plane-head") && ch.offsetHeight > 0)).length;
+            // ONE panel per note: the cockpit and a contained note asked for elsewhere.
+            d.plantDuplicates = ${planted};
+            const P = app.plugins.getPlugin("domvec-bridge");
+            const cv = await P.cockpit.open(); await sleep(500);
+            out.cockpit_is_nested = !!cv && !!ego && ego.contains(cv.containerEl);
+            out.cockpit_cards = document.querySelectorAll(".domvec-cockpit-card").length;
+            const someHeaded = secs.find((s) => s.embedded && s.path !== "domvec/ego.md" && d.panelOf(s.path)?.head);
+            if (someHeaded) {
+              const freeBefore = d.panels.filter((q) => !q.nested && q.path === someHeaded.path).length;
+              await d.open(app.vault.getAbstractFileByPath(someHeaded.path)); await sleep(400);
+              out.reached = { nested: !!d.panelOf(someHeaded.path)?.nested, free_cards: d.panels.filter((q) => !q.nested && q.path === someHeaded.path).length - freeBefore };
+              d.toggleMinimized(someHeaded.path); await sleep(200);
+              if (!d.panelOf(someHeaded.path).card.classList.contains("is-collapsed")) d.toggleMinimized(someHeaded.path);
+              d.canvas.unfolded.delete(someHeaded.path);
+            }
+            d.plantDuplicates = false;
+            if (${planted}) { P.cockpit.undock(); await P.cockpit.open(); }
             // A note made AFTER the seed joins the canvas (183: containable).
             C.plantSeedOnce = ${planted};
             const late = "domvec/graph/canvas late " + Date.now().toString(36) + ".md";
@@ -12236,25 +12338,28 @@ export function makeChecks(env) {
             await sleep(500);
             await app.vault.process(app.vault.getAbstractFileByPath("domvec/ego canvas.md"), (t) => t.split(String.fromCharCode(10)).filter((l) => !l.includes(late.replace(/\.md$/, ""))).join(String.fromCharCode(10)));
             const lf = app.vault.getAbstractFileByPath(late); if (lf) await app.vault.trash(lf, true);
-            const other = secs.find((s) => s.embedded && s.path !== "domvec/ego.md" && app.vault.getAbstractFileByPath(s.path));
+            const other = secs.find((s) => s.embedded && s.path !== "domvec/ego.md" && d.panelOf(s.path)?.head);
             if (other) {
-              const head = () => card.querySelector('.domvec-canvas-section[data-path="' + other.path + '"] .domvec-canvas-head');
-              const e0 = d.canvas.stats.mounted_editors;
-              head().click(); await sleep(1500);
-              const b = bodyOf(other.path);
-              out.unfolded = { editor: !!(b && b.querySelector(".cm-editor")), h: b ? b.offsetHeight : 0, mounted: d.canvas.stats.mounted_editors - e0 };
+              const pe = () => panelEl(other.path), head = () => pe().querySelector(":scope > .domvec-plane-head");
+              if (!pe().classList.contains("is-collapsed")) d.toggleMinimized(other.path);
+              head().click(); await sleep(1200);
+              const lf = pe().querySelector(":scope > .workspace-leaf");
+              out.unfolded = { editor: !!(lf && lf.querySelector(".cm-editor")), h: lf ? lf.offsetHeight : 0, collapsed: pe().classList.contains("is-collapsed") };
               head().click(); await sleep(600);
-              out.refolded = !bodyOf(other.path);
+              out.refolded = pe().classList.contains("is-collapsed") && pe().querySelector(":scope > .workspace-leaf").offsetHeight === 0;
             }
-          } finally { C.plantAutoHeight = false; C.plantSeedOnce = false; await d.canvas.render(); }
+          } finally { C.plantBoxed = false; C.plantSeedOnce = false; d.plantDuplicates = false; await d.canvas.render(); }
           return out;
         })()`, { timeout: 60000 });
         const clean = await arm(false), planted = await arm(true);
         const c = clean;
         return { pass: c.centred && c.first === "domvec/ego.md" && c.embedded === c.sections && c.members > 0 && c.members_contained === c.members
-                       && c.ego_drawn && c.folded_editors === 0 && c.unfolded && c.unfolded.editor && c.unfolded.h > 100 && c.unfolded.mounted === 1 && c.refolded
+                       && c.nested === c.sections && c.in_line_order && c.own_rows === 0 && c.native
+                       && c.ego_drawn && c.folded_extra === 0 && c.unfolded && c.unfolded.editor && c.unfolded.h > 100 && !c.unfolded.collapsed && c.refolded
+                       && c.cockpit_is_nested && c.cockpit_cards === 0 && c.reached && c.reached.nested && c.reached.free_cards === 0
                        && c.late_joined === true
-                       && planted.ego_drawn === false && planted.late_joined === false,
+                       && c.seamless.borders === 0 && c.seamless.own_scrollers === 0 && c.seamless.ego_full
+                       && planted.seamless.borders > 0 && planted.late_joined === false && planted.cockpit_cards >= 1 && !planted.cockpit_is_nested,
                  evidence: { clean, planted } };
       },
     },
@@ -15813,7 +15918,7 @@ export function makeChecks(env) {
     },
     {
       id: "PG-130",
-      asks: "the graph bar's sidecar trigger (PLUGIN_GOAL 130): where \"euclidean\" was, a button whose dot is the sidecar's state; a click verifies it (store counts, powers) -- answering, it reads sidecar ●; planted (health failing, no launch on record, so nothing is started) it reads sidecar ✕",
+      asks: "the graph bar's sidecar trigger (PLUGIN_GOAL 130): where \"euclidean\" was, a button whose dot is the sidecar's state; a click verifies it (store counts, powers) and heals a stale settings.sidecar port from sidecarLaunch without spawning a duplicate supervisor -- answering, it reads sidecar ●; planted (stale port + no launch on record) it reads sidecar ✕",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -15822,14 +15927,42 @@ export function makeChecks(env) {
           const b = document.querySelector("button.domvec-sidecar-trigger");
           const euclid = [...document.querySelectorAll("button")].some((x) => x.textContent === "euclidean");
           if (!b) return { error: "no sidecar button", euclid };
-          const h0 = P.sidecar.health, L0 = P.settings.sidecarLaunch, n0 = P.sidecarStats.checked;
+          const h0 = P.sidecar.health, L0 = P.settings.sidecarLaunch, s0 = P.settings.sidecar;
+          const n0 = P.sidecarStats.checked, st0 = P.sidecarStats.started;
+          const livePort = Number((String(s0).match(/:(\\d+)/) || [])[1]) || 8788;
+          // Plant a stale port on settings.sidecar while sidecarLaunch carries the real port (2026-11-17).
+          P.settings.sidecar = "http://127.0.0.1:1";
+          if (!P.settings.sidecarLaunch || !Array.isArray(P.settings.sidecarLaunch.argv)) {
+            P.settings.sidecarLaunch = { python: "python", argv: ["supervise", "--workspace", "build/corpus123", "--port", String(livePort)], cwd: "", workspace: "build/corpus123", supervised: true };
+          }
+          window.__domvecPlantStaleSidecarPort = ${planted};
           if (${planted}) { P.sidecar.health = () => Promise.reject(new Error("planted")); P.settings.sidecarLaunch = null; }
-          try { b.click(); for (let i = 0; i < 20 && /…/.test(b.textContent); i++) await sleep(250); await sleep(300);
-                return { planted: ${planted}, text: b.textContent, euclid, checked: P.sidecarStats.checked - n0 }; }
-          finally { P.sidecar.health = h0; P.settings.sidecarLaunch = L0; }
+          try {
+            b.click();
+            for (let i = 0; i < 20 && /…/.test(b.textContent); i++) await sleep(250);
+            await sleep(300);
+            return {
+              planted: ${planted},
+              text: b.textContent,
+              euclid,
+              healed_url: P.settings.sidecar,
+              checked: P.sidecarStats.checked - n0,
+              started: P.sidecarStats.started - st0,
+            };
+          } finally {
+            window.__domvecPlantStaleSidecarPort = false;
+            P.sidecar.health = h0;
+            P.settings.sidecarLaunch = L0;
+            P.settings.sidecar = s0;
+          }
         })()`, { timeout: 30000 });
         const clean = await arm(false), planted = await arm(true);
-        return { pass: clean.text === "sidecar ●" && !clean.euclid && clean.checked === 1 && planted.text === "sidecar ✕", evidence: { clean, planted } };
+        return {
+          pass: clean.text === "sidecar ●" && !clean.euclid && clean.checked === 1
+             && clean.started === 0 && !/:1$/.test(clean.healed_url)
+             && planted.text === "sidecar ✕" && /:1$/.test(planted.healed_url),
+          evidence: { clean, planted },
+        };
       },
     },
     {
@@ -16508,6 +16641,13 @@ export function makeChecks(env) {
               if (!first) { skipped++; continue; }
               await v.openBillboard(n);
               const e = v.billboards.get(String(n.id));
+              // The PAGE form draws in a same-origin srcdoc iframe
+              // (snapshot.ts), which el.textContent does not reach: run
+              // 2026-11-22 05:23 read three panels that had drawn the page's
+              // own snapshot as "not shown". Text = the panel's own plus its
+              // frames'; the form each panel drew rides along.
+              const shown = () => (e.el.textContent || "") + [...e.el.querySelectorAll("iframe")]
+                .map((f) => { try { return f.contentDocument?.body?.textContent || ""; } catch (x) { return ""; } }).join(" ");
               let ms = null;
               const until = performance.now() + 3000;
               while (e && performance.now() < until) { if (shown().includes(first)) { ms = performance.now() - t0; break; } await sleep(10); }
@@ -16522,6 +16662,12 @@ export function makeChecks(env) {
                      p90: ok[Math.max(0, Math.ceil(0.9 * ok.length) - 1)], times, forms, why, skipped_no_word: skipped };
           } finally { v.plantShortPayloadCache = false; if (opened) await v.togglePage(opened); }
         `);
+        // A discarded warm-up first: the first arm leaves page-form snapshots
+        // in the panel store (snapshot.ts STORE, which the plant does not
+        // empty), so whichever arm ran second drew the page form from memory
+        // -- run 34: planted p90 158 ms against clean 576, page forms 5 of 6
+        // against 2 of 6. Both measured arms now start from the same store.
+        await arm(false);
         const clean = await arm(false), planted = await arm(true);
         return { pass: !clean.error && clean.n >= 4 && !planted.error && planted.n >= 4 && clean.p90 < planted.p90, evidence: { clean, planted } };
       },
@@ -16539,13 +16685,6 @@ export function makeChecks(env) {
           try {
             if (chunks().length < 2) {
               const pg = v.graph.graphData().nodes.find((n) => n.level === "page" && !n.force && (n.members || 0) >= 5 && (n.members || 0) <= 200 && /^https:/.test(String(n.url)));
-              // The PAGE form draws in a same-origin srcdoc iframe
-              // (snapshot.ts), which el.textContent does not reach: run
-              // 2026-11-22 05:23 read three panels that had drawn the page's
-              // own snapshot as "not shown". Text = the panel's own plus its
-              // frames'; the form each panel drew rides along.
-              const shown = () => (e.el.textContent || "") + [...e.el.querySelectorAll("iframe")]
-                .map((f) => { try { return f.contentDocument?.body?.textContent || ""; } catch (x) { return ""; } }).join(" ");
               if (pg) { const r = await v.togglePage(pg); if (r && r.action === "expand") opened = pg; }
               for (let i = 0; i < 20 && chunks().length < 2; i++) await sleep(500);
             }
@@ -16557,12 +16696,6 @@ export function makeChecks(env) {
             for (const k of [...v.billboards.keys()]) v.closeBillboard(k);
             b.onRightChunk(id, String(n.url), id); await sleep(1500);
             const afterRight = v.billboards.has(id);
-        // A discarded warm-up first: the first arm leaves page-form snapshots
-        // in the panel store (snapshot.ts STORE, which the plant does not
-        // empty), so whichever arm ran second drew the page form from memory
-        // -- run 34: planted p90 158 ms against clean 576, page forms 5 of 6
-        // against 2 of 6. Both measured arms now start from the same store.
-        await arm(false);
             for (const k of [...v.billboards.keys()]) v.closeBillboard(k);
             return { mode: ${JSON.stringify(mode)}, hover_opened: afterHover, right_opened: afterRight };
           } finally { v.setPanelsOn(was); if (opened) await v.togglePage(opened); }
@@ -19082,11 +19215,15 @@ export function makeChecks(env) {
         };
         try {
           const pagesBefore = (await ask("/pages")).n;
+          // The urls themselves, so a page that appears is NAMED (2026-11-16:
+          // 1,138 -> 1,139 twice, purged 0 -- not under the fixture origin).
+          const urlsBefore = new Set(((await ask("/pages?contains=:")) || {}).urls || []);
           const got = await evaluate(paceProbe(pages, SIDECAR),
                                      { timeout: 900000 });
           got.purged = await tidyFixtures(fixtures.origin);
           got.pages_before = pagesBefore;
           got.pages_after = (await ask("/pages")).n;
+          got.pages_added = (((await ask("/pages?contains=:")) || {}).urls || []).filter((u) => !urlsBefore.has(u));
           if (got.error) return { pass: false, evidence: got };
           return {
             // **Different criteria per page, because they answer different
@@ -19104,8 +19241,13 @@ export function makeChecks(env) {
                && got.short.tuned.settled === true
                && got.tall.tuned.addresses >= got.tall.fixed.addresses
                && got.tall.tuned.settled === true
-               && got.tall.fixed.settled === false
-               && got.pages_after === got.pages_before,
+               // Where the fixed cadence does not finish, or finishes later
+               // (2026-11-21: it settled at 5,365 ms against tuned 4,438 --
+               // the page's timing, not the sensor's, decided the old bar).
+               && (got.tall.fixed.settled === false || got.tall.tuned.ms < got.tall.fixed.ms)
+               // Nothing left in the store, judged by URL: /health's count is
+               // served from a cache, and read 408 -> 409 with no url added.
+               && Array.isArray(got.pages_added) && got.pages_added.length === 0,
             evidence: got,
           };
         } finally {
@@ -20446,7 +20588,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-282",
-      asks: "readouts on the perimeter and the bisector (RESERVOIR_DESIGN §5, DM §6.6.4): a cell run with the real Run button puts its note -- the readout -- on the cloud's outer shell (1.05 x the 98th-percentile radius) along its own UMAP bearing, and ONE bisector node midway between its input and its readout, the signal drawn input -> bisector -> readout; a click on the bisector opens the cell in 2D graph form, a second closes it; a right-click on it folds what it dominates (its lines) and another unfolds (planted plantNoDominance: no fold); planted (plantNoPerimeter + plantNoBisector) the readout stays at its fit and no bisector is drawn",
+      asks: "readouts on the perimeter and the bisector (RESERVOIR_DESIGN §5, DM §6.6.4): a cell run with the real Run button puts its note -- the readout -- on the cloud's outer shell (1.05 x the 98th-percentile radius) along its own UMAP bearing, and ONE bisector node midway between its input and its readout, the signal drawn input -> bisector -> readout; a click on the bisector opens the cell on the 2D plane AS ITS PANEL -- never graph form, retired by PLUGIN_GOAL 183 (G-399) -- a second closes it; a right-click on it folds what it dominates (its lines) and another unfolds (planted plantNoDominance: no fold); planted (plantNoPerimeter + plantNoBisector) the readout stays at its fit and no bisector is drawn",
       async run() {
         const got = await evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -20500,7 +20642,11 @@ export function makeChecks(env) {
             const b = v.bisectors.get(cr.cellPath);
             const mid = b ? Math.hypot(b.at.x - (s.x + t.x) / 2, b.at.y - (s.y + t.y) / 2, b.at.z - ((s.z || 0) + (t.z || 0)) / 2) : null;
             const es = v.drawableSignalEdges(v.graph.graphData().nodes);
-            const clean = { shell_r: Math.round(sh.r), readout_r_ratio: Math.round(d / sh.r * 1000) / 1000, bearing_deg: Math.round(Math.acos(Math.min(1, cos)) * 1800 / Math.PI) / 10,
+            // Where the readout IS when it is off the shell: at its fit (a relayout
+            // put it back), or flagged placed but stale (the shell re-measured).
+            const fitOff = Math.hypot(t.x - t.fitX, t.y - t.fitY, (t.z || 0) - (t.fitZ || 0));
+            const clean = { shell_r: Math.round(sh.r), readout_r_ratio: Math.round(d / sh.r * 1000) / 1000,
+                            t_perim_flag: !!t.__perim, t_pinned: Number.isFinite(t.fx), t_off_fit: Math.round(fitOff * 10) / 10, shell_age_ms: Math.round(performance.now() - sh.at), bearing_deg: Math.round(Math.acos(Math.min(1, cos)) * 1800 / Math.PI) / 10,
                             bisector: !!b, bisector_off_mid: mid === null ? null : Math.round(mid * 100) / 100,
                             src_to_bis: !!b && es.some((e) => e.source === s && e.target === b.at), bis_to_readout: !!b && es.some((e) => e.source === b.at && e.target === t) };
             // A real click on the bisector: aim at it, then pointerdown/up on the canvas at its screen point.
@@ -20549,7 +20695,7 @@ export function makeChecks(env) {
         if (!got || got.error) return { pass: false, evidence: got };
         const c = got.clean, p = got.planted;
         return { pass: c && Math.abs(c.readout_r_ratio - 1.05) < 0.02 && c.bearing_deg < 1 && c.bisector && c.bisector_off_mid < 0.5
-                   && c.src_to_bis && c.bis_to_readout && c.picked && c.opened && c.graph_form && c.closed
+                   && c.src_to_bis && c.bis_to_readout && c.picked && c.opened && c.on_plane && !c.graph_form && c.closed
                    && c.lines_open >= 2 && c.lines_planted_fold === c.lines_open && c.lines_folded === 0 && c.lines_unfolded === c.lines_open
                    && p.at_fit && !p.bisector,
                  evidence: got };
@@ -22032,34 +22178,49 @@ export function makeChecks(env) {
     },
     {
       id: "G-77",
-      asks: "a chunk's shadow-DOM form is a billboard in the graph; there is no chunk pane",
+      asks: "a chunk's shadow-DOM form is a billboard in the graph; there is no chunk pane -- judged on a chunk the store HOLDS a form for (2026-11-16: the first chunk found had none, a 404, and the check read that as the feature failing); null arm: a chunk with no saved form draws none",
       async run() {
         const got = await inPane(`
           const d = window.__domvec;
-          const data = v.graph.graphData();
-          const node = data.nodes.find((n) => n.level === "chunk") ||
-                       data.nodes.find((n) => n.level !== "page");
-          if (!node) {
-            // Nothing unfolded: open the biggest page one step and use a chunk.
-            const page = data.nodes.slice().sort((a, b) => (b.members || 0) - (a.members || 0))[0];
-            await d.act("unfold", page && page.url);
+          const base = v.sidecar.base().trim().replace(/[/]+$/, "");
+          const get = (path) => fetch(base + path).then((r) => r.ok ? r.json() : null).catch(() => null);
+          // A page with saved forms, biggest first, at most 40 asked.
+          const pages = v.graph.graphData().nodes.filter((n) => n.level === "page" && n.url)
+            .sort((a, b) => (b.members || 0) - (a.members || 0)).slice(0, 40);
+          let page = null, cover = null;
+          for (const p of pages) { const c = await get("/snapshot_coverage?url=" + encodeURIComponent(p.url));
+            if (c && c.saved > 0 && c.saved < c.chunks) { page = p; cover = c; break; } }
+          if (!page) return { error: "no page with some saved forms and some not" };
+          await d.act("unfold", page.url);
+          await sleep(1500);
+          const chunks = v.graph.graphData().nodes.filter((n) => n.level === "chunk" && n.url === page.url);
+          let saved = null, unsaved = null, asked = 0;
+          for (const n of chunks) {
+            if (saved && unsaved) break;
+            if (++asked > 200) break;
+            const ok = await fetch(base + "/snapshot/" + n.id).then((r) => r.ok).catch(() => false);
+            if (ok && !saved) saved = n; else if (!ok && !unsaved) unsaved = n;
           }
-          const again = v.graph.graphData().nodes.find((n) => n.level === "chunk");
-          if (!again) return { error: "no chunk node to open" };
-          for (const b of v.billboardState()) v.closeBillboard(b.id);
-          await v.openBillboard(again);
-          await sleep(2500);
-          const bb = v.billboardState().find((b) => b.id === again.id) || null;
-          const host = [...(v.billboardLayer || v.containerEl).querySelectorAll(".domvec-bb")]
-            .map((e) => e.querySelector(".domvec-html-host")).find(Boolean);
-          const inside = host && host.shadowRoot
-            ? host.shadowRoot.querySelectorAll("*").length : (bb ? bb.elements : 0);
-          v.closeBillboard(again.id);
-          return { node: again.id, billboard: bb, shadow_elements: inside, form: bb ? bb.form : null,
+          const open = async (n) => {
+            if (!n) return null;
+            for (const b of v.billboardState()) v.closeBillboard(b.id);
+            await v.openBillboard(n);
+            await sleep(2500);
+            const bb = v.billboardState().find((b) => b.id === n.id) || null;
+            const host = [...(v.billboardLayer || v.containerEl).querySelectorAll(".domvec-bb")]
+              .map((e) => e.querySelector(".domvec-html-host")).find(Boolean);
+            const inside = host && host.shadowRoot ? host.shadowRoot.querySelectorAll("*").length : (bb ? bb.elements : 0);
+            v.closeBillboard(n.id);
+            return { node: n.id, shadow: !!(bb && bb.shadow), form: bb ? bb.form : null, shadow_elements: inside, opened: !!bb };
+          };
+          return { page: page.url, coverage: cover, chunks_drawn: chunks.length, asked,
+                   saved: await open(saved), unsaved: await open(unsaved),
                    chunk_panes: app.workspace.getLeavesOfType("domvec-chunk-view").length };
         `);
+        if (got.error) return { pass: false, evidence: got };
         return {
-          pass: !!got.billboard && got.billboard.shadow && got.shadow_elements > 1
+          pass: !!got.saved && got.saved.opened && got.saved.shadow && got.saved.shadow_elements > 1
+             && !!got.unsaved && got.unsaved.opened && !got.unsaved.shadow
              && got.chunk_panes === 0,
           evidence: got,
         };
@@ -22078,6 +22239,9 @@ export function makeChecks(env) {
           await d.act("navigate", "https://en.wikipedia.org/wiki/Radix_tree");
           await sleep(4000);
           const view = app.workspace.getLeavesOfType("domvec-browser-view")[0].view;
+          const gv = app.workspace.getLeavesOfType("domvec-graph-view")[0].view;
+          if (${planted}) view.plant.add("side-card"); else view.plant.delete("side-card");
+          try {
           await view.webview.executeJavaScript("window.scrollTo({top:0,behavior:'instant'}); true");
           await sleep(300);
           const pageShown = () => view.browserWrap.offsetWidth > 50 && view.browserWrap.offsetHeight > 50;
@@ -22100,7 +22264,10 @@ export function makeChecks(env) {
               pins_on_screen: here ? await onScreen(targetsHere) : 0,
               page_shown: pageShown(),
               side_shown: !!(u.pinned && u.pinned.side_shown),
-              cards: [...view.markdownWrap.querySelectorAll(".domvec-pin-card")].map((c) => c.dataset.cid),
+              // The slate (PLUGIN_GOAL 131/132, \`3b0136c\`): each pin is a section of
+              // one note with a handle; the old \`.domvec-pin-card\` is the planted
+              // plantStaticSide form. This read only the old one, so it saw no pin.
+              cards: [...view.markdownWrap.querySelectorAll(".domvec-pin-handle, .domvec-pin-card")].map((c) => c.dataset.cid),
               // A billboard shows its own chunk and any pinned chunk drawn
               // THROUGH it (a duplicate, a merge group's member).
               billboards: (u.billboards || []).filter((b) => b.fromBrowser).flatMap((b) => [b.id].concat(b.pins || [])),
@@ -22152,10 +22319,11 @@ export function makeChecks(env) {
           await d.act("navigate", "https://en.wikipedia.org/wiki/Radix_tree");
           await sleep(4000);
           const back = await state();
-          // Close the NEWEST from the side panel: its three forms go, the
-          // other pin's stay.
-          const newest = two.cards[0];
-          const x = view.markdownWrap.querySelector('.domvec-pin-card[data-cid="' + newest + '"] .domvec-pin-close');
+          // Close the NEWEST by its stuck panel's x (133: the panel IS the
+          // pin's card now): its forms go, the other pin's stay.
+          const newest = b.cid;
+          const ent = [...gv.billboards.entries()].find(([id, e]) => id === newest || (e.pins && e.pins.has(newest)));
+          const x = ent && ent[1].el.querySelector(".domvec-bb-close");
           if (x) x.click();
           targetsHere = [targets[0]];
           await sleep(1000);
@@ -22166,32 +22334,32 @@ export function makeChecks(env) {
           // Pins moved to the chunk that draws their address after a capture
           // retired theirs (G-82, 2026-10-17): the evidence the path ran.
           const now = (c) => { let k = 0; while (c && view.reanchored.has(c) && k++ < 8) c = view.reanchored.get(c); return c || null; };
-          return { targets, pinned: [now(a.cid), now(b.cid)], pinned_as: [a.cid || null, b.cid || null], toggle: toggle(),
-                   before, two, away, back, one, none, closed: newest,
+          return { planted: ${planted}, targets, pinned: [now(a.cid), now(b.cid)], pinned_as: [a.cid || null, b.cid || null], toggle: toggle(),
+                   before, two, away, back, one, none, closed: newest, closed_by_x: !!x,
                    reanchor: { reresolved: view.diffsApplied.pins_reresolved, lost: view.diffsApplied.pins_lost } };
+          } finally { view.plant.delete("side-card"); await d.act("unpin", "all"); }
         })()`, { timeout: 180000 });
-        if (got.error) return { pass: false, evidence: got };
-        const [a, b] = got.pinned;
-        const distinct = !!a && !!b && a !== b;
-        return {
-          pass: got.toggle === false
-             && [got.before, got.two, got.away, got.back, got.one, got.none].every((s) => s.page_shown)
-             && got.before.side_shown === false
-             // stacked, newest first, one billboard each
-             && distinct && got.two.side_shown && got.two.cards.join() === [b, a].join()
+        const clean = await arm(false);
+        const planted = await arm(true);
+        const ok = (got) => {
+          if (!got || got.error) return false;
+          const [a, b] = got.pinned;
+          const steps = [got.before, got.two, got.away, got.back, got.one, got.none];
+          return got.toggle === false && !!a && !!b && a !== b && got.closed_by_x
+             && steps.every((st) => st.page_shown && st.side_shown === false)
+             // one stuck panel per pin, an outline per pinned paragraph on screen
              && got.two.billboards.includes(a) && got.two.billboards.includes(b)
-             // one outline per pinned paragraph ON SCREEN -- both, just pinned
              && got.two.pins_on_screen === 2 && got.two.outlines_shown === 2
-             // away: the side keeps both, the page's outlines go
-             && got.away.cards.length === 2 && got.away.outlines_shown === 0
+             // away: the panels stay, the page's outlines go; back: they return
+             && got.away.billboards.includes(a) && got.away.billboards.includes(b) && got.away.outlines_shown === 0
              && got.back.outlines_shown === got.back.pins_on_screen
-             // closing one from the side closes its three forms only
-             && got.one.cards.join() === a && !got.one.billboards.includes(b)
-             && got.one.billboards.includes(a)
+             // the x lets go of its own pin only
+             && got.one.billboards.includes(a) && !got.one.billboards.includes(b)
              && got.one.outlines_shown === got.one.pins_on_screen
-             && got.none.side_shown === false && got.none.cards.length === 0,
-          evidence: got,
+             && got.none.billboards.length === 0;
         };
+        const sideSeen = (got) => !!got && !got.error && [got.two, got.away, got.back].some((st) => st.side_shown);
+        return { pass: ok(clean) && !ok(planted) && sideSeen(planted), evidence: { clean, planted } };
       },
     },
     {
@@ -22411,6 +22579,24 @@ export function makeChecks(env) {
       },
     },
   ];
+
+  // SUPERSEDED by PLUGIN_GOAL 183 (G-399: no graph form in 2D). These checks
+  // asked for the slate's graph form or the ground flip; both are retired, and
+  // the code is kept behind a planted flag. Each still runs -- against that
+  // RETAINED path, the plant on -- so the old form cannot rot unseen, and its
+  // evidence says it is superseded. G-399's own check asks the retirement.
+  const SUPERSEDED_BY_183 = new Set(["G-281", "G-296", "G-323", "PG-140", "PG-135-flip"]);
+  for (const c of CHECKS) {
+    if (!SUPERSEDED_BY_183.has(c.id)) continue;
+    const orig = c.run.bind(c);
+    c.asks = "[superseded by PLUGIN_GOAL 183; run on the retained graph form] " + c.asks;
+    c.run = async () => {
+      const set = (on) => env.evaluate(`(() => { window.__domvecPlantGraphForm = ${on}; if (window.__domvecPlane) window.__domvecPlane.plantFlipForm = ${on}; return true; })()`, { timeout: 10000 });
+      await set(true);
+      try { const r = await orig(); return { ...r, evidence: { superseded: "PLUGIN_GOAL 183 (G-399)", ...(r.evidence || {}) } }; }
+      finally { await set(false); }
+    };
+  }
 
   return { CHECKS, wakeProjector, tidyFixtures, ask, inPane };
 }

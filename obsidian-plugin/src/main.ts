@@ -141,15 +141,19 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // of its own starts one on its own fresh workspace.
     window.setTimeout(() => { this.installIntoNewVaults(); }, 5000);
     this.registerInterval(window.setInterval(() => this.installIntoNewVaults(), 15000));
-    window.setTimeout(() => { void this.autostartSidecar(); }, 4000);
+    window.setTimeout(() => { void this.autostartSidecar(); }, 2500);
     // The workspace button names the open workspace (144); the view's header
     // is built before the plugin hands it the menu, so it is labelled here.
+    // Every second tick also keeps the sidecar button's dot in step with the
+    // running sidecar and reloads an empty graph view as soon as the sidecar answers.
+    let barTick = 0;
     this.registerInterval(window.setInterval(() => {
       const name = (this.settings.activeWorkspace || this.workspaceNameOf(this.settings.sidecarLaunch?.workspace) || "workspace") + " ▾";
       for (const leaf of this.app.workspace.getLeavesOfType("domvec-graph-view")) {
         const b = (leaf.view as any).workspaceButton as HTMLElement | null;
         if (b && b.textContent !== name) b.setText(name);
       }
+      if (++barTick % 2 === 0) void this.pollSidecarStatus();
     }, 2000));
     // This load's generation (G-175): a view born in an earlier load whose
     // loop is still running reads a newer number and stops itself.
@@ -188,6 +192,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }
 
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());
+    await this.syncSidecarUrl();
     void this.loadAdblock();
     // A test workspace outlives a plugin reload (`session.ts`): put it back,
     // and badge it in the status bar for as long as it lasts.
@@ -614,14 +619,21 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       id: "domvec-check-sidecar",
       name: "Check sidecar connection",
       callback: async () => {
-        const health = await this.sidecar.health();
-        this.serverEnact = !!(health && health.enact);
-        new Notice(health
-          ? `domvec: sidecar at ${this.settings.sidecar} — ` +
-            `${health.pages} pages, ` +
-            (health.enact ? "CAN drive the live page" : "read-only")
-          : `domvec: no sidecar at ${this.settings.sidecar || "(unset)"} — ` +
-            "notes still read offline");
+        await this.sidecarTrigger(false);
+      },
+    });
+    this.addCommand({
+      id: "domvec-stop-sidecar",
+      name: "Stop sidecar gracefully",
+      callback: async () => {
+        await this.stopSidecar(false);
+      },
+    });
+    this.addCommand({
+      id: "domvec-restart-sidecar",
+      name: "Restart sidecar gracefully",
+      callback: async () => {
+        await this.restartSidecar();
       },
     });
 
@@ -657,6 +669,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
           return true;
         };
         view.onSidecarTrigger = () => this.sidecarTrigger();
+        view.onSidecarMenu = (e, b) => this.sidecarMenu(e, b);
         view.onWorkspaceMenu = (e, b) => this.workspaceMenu(e, b);
         view.onHalo = (path) => { void this.halo.toggle(path); };
         view.workspaceButton?.setText((this.settings.activeWorkspace || this.workspaceNameOf(this.settings.sidecarLaunch?.workspace) || "workspace") + " ▾");
@@ -738,8 +751,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         // sets uniformly; a panel opened after the change reads the store
         // fresh and could hardly be wrong, and that is exactly what hid the
         // one that was already open being stale.
-        (nodes, edges, trace) => {
-          this.eachGraph((view) => view.absorb(nodes, edges, trace));
+        (nodes, edges, trace, keep) => {
+          this.eachGraph((view) => view.absorb(nodes, edges, trace, keep && keep.size ? { keep } : {}));
         },
         // And so does the ranking (`G-55`, `G-56`): what the reader has
         // scrolled to is what the projector opens the page to.
@@ -1808,13 +1821,65 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       } catch { this.autoInstallStats.errors++; }
     }
   }
-  /** A vault with no sidecar of its own: start one on a fresh "default"
-   *  workspace, using only how this machine starts Python. */
+  /** Reconcile `settings.sidecar` with `sidecarLaunch` / `activeWorkspace` so a
+   *  stale port in `data.json` (2026-11-17: `sidecar` on 8788 while
+   *  `sidecarLaunch` ran `everyone-else-gets-the-office` on 8792) never leaves
+   *  the plugin polling the wrong port while its sidecar is already up.
+   *  Planted `__domvecPlantStaleSidecarPort`: leaves a mismatched port as-is. */
+  async syncSidecarUrl(): Promise<string> {
+    if ((window as any).__domvecPlantStaleSidecarPort) return String(this.settings.sidecar || "");
+    const sess = (window as any).__domvecSession;
+    if (sess && sess.kind === "empty") return String(this.settings.sidecar || "");
+    const cur = String(this.settings.sidecar || "").trim().replace(/\/+$/, "");
+    if (/:879[01]$/.test(cur)) return cur; // verifier (8790) or test session (8791)
+    const L: any = this.settings.sidecarLaunch;
+    const activeName = this.settings.activeWorkspace || "";
+    const activeDir = (activeName && this.settings.workspaces?.[activeName]) || L?.workspace || "";
+    let port = 0;
+    if (L && Array.isArray(L.argv) && (!activeDir || !L.workspace || L.workspace === activeDir)) {
+      const pi = L.argv.indexOf("--port");
+      if (pi >= 0 && pi + 1 < L.argv.length && /^\d+$/.test(String(L.argv[pi + 1]))) {
+        port = Number(L.argv[pi + 1]);
+      }
+    }
+    if (!port && activeDir) {
+      try {
+        const map = JSON.parse(window.localStorage.getItem("domvec-workspace-ports") || "{}");
+        if (map && typeof map[activeDir] === "number") port = map[activeDir];
+      } catch { /* ignore */ }
+    }
+    if (port > 0) {
+      const want = `http://127.0.0.1:${port}`;
+      if (cur !== want) {
+        this.settings.sidecar = want;
+        await this.saveSettings();
+      }
+      if (activeDir) this.claimPort(activeDir, port);
+      return want;
+    }
+    return cur;
+  }
+
+  /** A vault with no sidecar running: connect to its running sidecar, start its
+   *  recorded `sidecarLaunch`, or (for a brand-new vault) create "default". */
   async autostartSidecar(): Promise<void> {
+    if ((window as any).__domvecPlantNoAutostart || this.userStoppedSidecar) return;
+    await this.syncSidecarUrl();
+    const h: any = await this.sidecar.health().catch(() => null);
+    if (h && h.ok && h.backend !== "starting" && h.backend !== "dead") {
+      this.onSidecarReady(h);
+      return;
+    }
+    if (h && h.backend === "starting") {
+      void this.sidecarTrigger(false);
+      return;
+    }
+    if (this.settings.sidecarLaunch && this.settings.sidecarLaunch.python && Array.isArray(this.settings.sidecarLaunch.argv)) {
+      await this.sidecarTrigger(false);
+      return;
+    }
     if (this.settings.sidecarLaunch || this.settings.activeWorkspace) return;
     if (!this.launchTemplate()) return;
-    const h: any = await this.sidecar.health().catch(() => null);
-    if (h && h.ok) return;
     await this.useWorkspace("default", !this.workspaceList()["default"]);
   }
 
@@ -2174,48 +2239,241 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
    * which powers are on -- and, when none answers and a launch is on record,
    * start one (supervised) and wait for it. `quiet` only reads the state.
    */
-  sidecarStats = { checked: 0, started: 0, last: null as any };
+  sidecarStats = { checked: 0, started: 0, stopped: 0, last: null as any };
+  private sidecarStarting: Promise<string> | null = null;
+  userStoppedSidecar = false;
+
+  private setSidecarButtons(text: string): void {
+    for (const leaf of this.app.workspace.getLeavesOfType("domvec-graph-view")) {
+      const b = (leaf.view as any)?.sidecarButton as HTMLElement | null;
+      if (b && b.textContent !== text) b.setText(text);
+    }
+  }
+
+  private onSidecarReady(h: any): void {
+    this.serverEnact = !!(h && h.enact);
+    this.setSidecarButtons("sidecar ●");
+    if (this.sidecar?.vaultRoot) {
+      void this.sidecar.egoPost("vault_root", { root: this.sidecar.vaultRoot, name: this.app.vault.getName() });
+    }
+    if (h && h.launch && h.launch.python && Array.isArray(h.launch.argv)) {
+      try { window.localStorage.setItem("domvec-sidecar-launch", JSON.stringify(h.launch)); } catch { /* convenience */ }
+      const was = JSON.stringify(this.settings.sidecarLaunch || null);
+      if (was !== JSON.stringify(h.launch) && (!this.settings.activeWorkspace || h.launch.workspace === this.settings.sidecarLaunch?.workspace)) {
+        this.settings.sidecarLaunch = h.launch;
+        void this.saveSettings();
+      }
+    }
+    for (const leaf of this.app.workspace.getLeavesOfType("domvec-graph-view")) {
+      const v: any = leaf.view;
+      if (!v) continue;
+      const stText = String(v.statusEl?.textContent || v.containerEl?.querySelector?.(".domvec-graph-status")?.textContent || "");
+      if (v.layoutMode === "empty" || (typeof v.projEpoch === "number" && v.projEpoch < 0) || /no sidecar/i.test(stText)) {
+        try { void v.reload?.(); } catch { /* reload retries on its own */ }
+      }
+    }
+  }
+
+  private async pollSidecarStatus(): Promise<void> {
+    if (this.sidecarStarting) return;
+    // Do not disturb a check that temporarily nulled sidecarLaunch (PG-130 planted arm).
+    if (!this.settings.sidecarLaunch && this.settings.activeWorkspace) return;
+    await this.syncSidecarUrl();
+    const h: any = await this.sidecar.health().catch(() => null);
+    if (h && h.ok && h.backend !== "starting" && h.backend !== "dead") {
+      this.onSidecarReady(h);
+    } else if (h && (h.backend === "starting" || h.warming)) {
+      this.setSidecarButtons("sidecar …");
+    } else {
+      this.setSidecarButtons("sidecar ○");
+    }
+  }
+
+  sidecarMenu(e: MouseEvent, button: HTMLElement): void {
+    const menu = new Menu();
+    menu.addItem((it) => it.setTitle("Verify / start sidecar").setIcon("play")
+      .onClick(() => { button.setText("sidecar …"); void this.sidecarTrigger(false).then((t) => button.setText(t)); }));
+    menu.addItem((it) => it.setTitle("Restart sidecar gracefully").setIcon("refresh-cw")
+      .onClick(() => { button.setText("sidecar …"); void this.restartSidecar().then((t) => button.setText(t)); }));
+    menu.addItem((it) => it.setTitle("Stop sidecar gracefully").setIcon("square")
+      .onClick(() => { button.setText("sidecar …"); void this.stopSidecar(false).then((t) => button.setText(t)); }));
+    menu.showAtMouseEvent(e);
+  }
+
+  async stopSidecar(force = false): Promise<string> {
+    this.userStoppedSidecar = true;
+    await this.syncSidecarUrl();
+    const base = String(this.settings.sidecar || "").trim().replace(/\/+$/, "");
+    const port = Number((base.match(/:(\d+)$/) || [])[1]) || 8788;
+    this.setSidecarButtons("sidecar …");
+    try {
+      await fetch(`${base}/shutdown?stop=1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch { /* may already be down or starting */ }
+    let down = false;
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      const h = await this.sidecar.health().catch(() => null);
+      if (!h) { down = true; break; }
+    }
+    if (!down) {
+      const L = this.launchTemplate();
+      if (L && L.python) {
+        const cp = (window as any).require("child_process");
+        await new Promise<void>((done) => {
+          const p = cp.spawn(L.python, ["-c", `from domvec.obsidian.controls import stop_sidecar; print(stop_sidecar(port=${port}, force=${force ? "True" : "False"}))`],
+            { cwd: L.cwd || undefined, windowsHide: true });
+          p.on("exit", () => done()); p.on("error", () => done());
+          window.setTimeout(done, 15000);
+        });
+      }
+      for (let i = 0; i < 20; i++) {
+        const h = await this.sidecar.health().catch(() => null);
+        if (!h) { down = true; break; }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+    this.sidecarStats.stopped = (this.sidecarStats.stopped || 0) + 1;
+    this.sidecarStats.last = { ok: false, stopped: down, at: Date.now(), port };
+    const label = down ? "sidecar ○" : "sidecar ●";
+    this.setSidecarButtons(label);
+    new Notice(down ? `domvec sidecar ○ stopped (port ${port})` : `domvec sidecar: still running on port ${port}`, 5000);
+    return label;
+  }
+
+  async restartSidecar(): Promise<string> {
+    await this.stopSidecar(true);
+    return this.sidecarTrigger(false);
+  }
+
   async sidecarTrigger(quiet = false): Promise<string> {
     this.sidecarStats.checked++;
+    await this.syncSidecarUrl();
     const say = (h: any) => {
       const powers = ["capture", "kernel", "enact"].filter((k) => h[k]).join(" ");
-      return `pages ${h.pages} · chunks ${h.chunks_total} · no vector ${h.chunks_without_vector} · ${powers}`;
+      return `pages ${h.pages ?? "?"} · chunks ${h.chunks_total ?? "?"} · no vector ${h.chunks_without_vector ?? "?"} · ${powers}`;
     };
-    let h: any = await this.sidecar.health().catch(() => null);
-    if (h && h.ok) {
-      this.sidecarStats.last = { ok: true, at: Date.now() };
-      if (!quiet) new Notice("domvec sidecar ✓ " + say(h), 6000);
-      return "sidecar ●";
+    const isReady = (h: any) => !!(h && h.ok && h.backend !== "starting" && h.backend !== "dead");
+    const isStarting = (h: any) => !!(h && (h.backend === "starting" || h.warming));
+
+    if (quiet) {
+      if (this.sidecarStarting) return "sidecar …";
+      const h: any = await this.sidecar.health().catch(() => null);
+      if (isReady(h)) {
+        this.sidecarStats.last = { ok: true, at: Date.now() };
+        this.onSidecarReady(h);
+        return "sidecar ●";
+      }
+      if (isStarting(h)) return "sidecar …";
+      return "sidecar ○";
     }
-    if (quiet) return "sidecar ○";
-    // A vault with no sidecar of its own yet (a new vault): its own fresh
-    // workspace, "default", on its own port -- nothing inherited (144).
-    if (!this.settings.sidecarLaunch && this.launchTemplate() && !this.settings.activeWorkspace) {
-      await this.useWorkspace("default", !this.workspaceList()["default"]);
-      return (await this.sidecar.health().catch(() => null))?.ok ? "sidecar ●" : "sidecar ✕";
+
+    this.userStoppedSidecar = false;
+    if (this.sidecarStarting && !(window as any).__domvecPlantDuplicateSidecarSpawn) {
+      return this.sidecarStarting;
     }
-    const L = this.settings.sidecarLaunch;
-    if (!L || !L.python || !Array.isArray(L.argv)) {
-      new Notice("domvec sidecar ✕ not answering, and no launch on record -- start it once from the MCP or a terminal", 8000);
+
+    const run = (async (): Promise<string> => {
+      let h: any = await this.sidecar.health().catch(() => null);
+      if (isReady(h)) {
+        this.sidecarStats.last = { ok: true, at: Date.now() };
+        this.onSidecarReady(h);
+        new Notice("domvec sidecar ✓ " + say(h), 6000);
+        return "sidecar ●";
+      }
+      // A vault with no sidecar of its own yet (a new vault): its own fresh
+      // workspace, "default", on its own port -- nothing inherited (144).
+      if (!this.settings.sidecarLaunch && this.launchTemplate() && !this.settings.activeWorkspace) {
+        await this.useWorkspace("default", !this.workspaceList()["default"]);
+        const hDef: any = await this.sidecar.health().catch(() => null);
+        if (isReady(hDef)) { this.onSidecarReady(hDef); return "sidecar ●"; }
+        return "sidecar ✕";
+      }
+      const L = this.settings.sidecarLaunch;
+      if (!L || !L.python || !Array.isArray(L.argv)) {
+        new Notice("domvec sidecar ✕ not answering, and no launch on record -- start it once from the MCP or a terminal", 8000);
+        this.setSidecarButtons("sidecar ✕");
+        return "sidecar ✕";
+      }
+      const req = (window as any).require;
+      const fs = req("fs"), path = req("path"), cp = req("child_process");
+      const argv = ["supervise", ...L.argv.filter((a: string) => a !== "supervise" && a !== "serve")];
+      const activeName = this.settings.activeWorkspace || "";
+      const dir = (activeName && this.settings.workspaces?.[activeName]) || L.workspace;
+      if (dir) {
+        const wi = argv.indexOf("--workspace");
+        if (wi >= 0 && wi + 1 < argv.length) argv[wi + 1] = dir;
+        else argv.push("--workspace", dir);
+      }
+      let port = 0;
+      const pi = argv.indexOf("--port");
+      if (pi >= 0 && pi + 1 < argv.length && /^\d+$/.test(String(argv[pi + 1]))) {
+        port = Number(argv[pi + 1]);
+      } else if (dir) {
+        port = this.workspacePort(dir);
+        if (pi >= 0) argv[pi + 1] = String(port);
+        else argv.push("--port", String(port));
+      }
+      if (port > 0 && !(window as any).__domvecPlantStaleSidecarPort) {
+        const want = `http://127.0.0.1:${port}`;
+        if (this.settings.sidecar !== want) {
+          this.settings.sidecar = want;
+          await this.saveSettings();
+          h = await this.sidecar.health().catch(() => null);
+          if (isReady(h)) {
+            this.sidecarStats.last = { ok: true, at: Date.now() };
+            this.onSidecarReady(h);
+            new Notice("domvec sidecar ✓ " + say(h), 6000);
+            return "sidecar ●";
+          }
+        }
+      }
+      if (!isStarting(h) || (window as any).__domvecPlantDuplicateSidecarSpawn) {
+        const wsDir = dir || L.workspace;
+        if (wsDir) fs.mkdirSync(wsDir, { recursive: true });
+        const log = fs.openSync(path.join(wsDir, "sidecar.log"), "a");
+        const child = cp.spawn(L.python, ["-X", "faulthandler", "-m", "domvec.obsidian", ...argv],
+          { cwd: L.cwd || undefined, detached: true, windowsHide: true, stdio: ["ignore", log, log],
+            env: { ...(window as any).process.env, PYTHONIOENCODING: "utf-8" } });
+        child.unref();
+        this.sidecarStats.started++;
+        this.setSidecarButtons("sidecar …");
+        new Notice("domvec sidecar: starting (pid " + child.pid + ") ...", 4000);
+      } else {
+        this.setSidecarButtons("sidecar …");
+        new Notice("domvec sidecar: worker starting — waiting ...", 4000);
+      }
+      const deadline = Date.now() + 90000;
+      let step = 0;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, step++ < 20 ? 500 : 1000));
+        if (this.userStoppedSidecar) {
+          this.setSidecarButtons("sidecar ○");
+          return "sidecar ○";
+        }
+        h = await this.sidecar.health().catch(() => null);
+        if (isReady(h)) {
+          new Notice("domvec sidecar ✓ started -- " + say(h), 8000);
+          this.sidecarStats.last = { ok: true, started: true, at: Date.now() };
+          this.onSidecarReady(h);
+          return "sidecar ●";
+        }
+      }
+      new Notice("domvec sidecar ✕ started but not answering after 90 s -- see sidecar.log", 10000);
+      this.setSidecarButtons("sidecar ✕");
       return "sidecar ✕";
+    })();
+
+    this.sidecarStarting = run;
+    try {
+      return await run;
+    } finally {
+      if (this.sidecarStarting === run) this.sidecarStarting = null;
     }
-    const req = (window as any).require;
-    const fs = req("fs"), path = req("path"), cp = req("child_process");
-    const argv = ["supervise", ...L.argv.filter((a: string) => a !== "supervise" && a !== "serve")];
-    const log = fs.openSync(path.join(L.workspace, "sidecar.log"), "a");
-    const child = cp.spawn(L.python, ["-X", "faulthandler", "-m", "domvec.obsidian", ...argv],
-      { cwd: L.cwd || undefined, detached: true, windowsHide: true, stdio: ["ignore", log, log],
-        env: { ...(window as any).process.env, PYTHONIOENCODING: "utf-8" } });
-    child.unref();
-    this.sidecarStats.started++;
-    new Notice("domvec sidecar: starting (pid " + child.pid + ") ...", 4000);
-    for (let i = 0; i < 90; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      h = await this.sidecar.health().catch(() => null);
-      if (h && h.ok && h.backend !== "starting") { new Notice("domvec sidecar ✓ started -- " + say(h), 8000); this.sidecarStats.last = { ok: true, started: true, at: Date.now() }; return "sidecar ●"; }
-    }
-    new Notice("domvec sidecar ✕ started but not answering after 90 s -- see sidecar.log", 10000);
-    return "sidecar ✕";
   }
 
   // ---- retrieval links drawn (G-7) -----------------------------------------

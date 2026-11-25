@@ -212,7 +212,7 @@ def _kill(proc, ps) -> None:
 
 def _run_child(command: List[str], env: dict, port: Optional[int], *,
                capture: bool = False, timeout: Optional[float] = None,
-               fatal_log: Optional[Path] = None):
+               fatal_log: Optional[Path] = None, front_state: object = None):
     """The child, run to its exit -- or killed as a STALLED start (early: no
     CPU to speak of after `EARLY_S`; late: no /health in `START_DEADLINE_S`
     and no CPU for `START_STALL_S`). With `capture`, (code, stdout)."""
@@ -257,6 +257,9 @@ def _run_child(command: List[str], env: dict, port: Optional[int], *,
             return done(code)
         except subprocess.TimeoutExpired:
             pass
+        if front_state is not None and getattr(front_state, "stop_requested", False):
+            _kill(proc, ps); proc.wait()
+            return done(0)
         if timeout and time.time() - started > timeout:
             _kill(proc, ps); proc.wait()
             return done(STUCK_CODE)
@@ -382,6 +385,40 @@ def _compact_logged(workspace: Path, why: str) -> dict:
     return got
 
 
+def _file_size(p: Path) -> int:
+    try:
+        return p.stat().st_size if p.exists() else 0
+    except OSError:
+        return 0
+
+
+def _store_locked(workspace: Path, log_pos: int, err_pos: int) -> bool:
+    """True when the child died because another process already holds graph.kuzu.
+
+    2026-11-17: a duplicate supervisor spawned while the first was running saw
+    its child fail with 'Could not set lock on file' / 'is held by another
+    process', treated that as a corrupt store, ran compaction, and quarantined
+    the live worker's WAL (`graph.kuzu.wal.unreplayable-...`). Planted
+    `DOMVEC_PLANT_QUARANTINE_ON_LOCK=1`: lock conflicts are treated as crashes.
+    """
+    if os.environ.get("DOMVEC_PLANT_QUARANTINE_ON_LOCK") == "1":
+        return False
+    for name, pos in (("sidecar.log", log_pos), ("sidecar.err.log", err_pos)):
+        p = workspace / name
+        size = _file_size(p)
+        if size <= pos:
+            continue
+        try:
+            with p.open("rb") as fh:
+                fh.seek(max(0, pos - 64))
+                tail = fh.read(size - max(0, pos - 64)).decode("utf-8", "replace")
+            if "Could not set lock on file" in tail or "is held by another process" in tail:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def supervise(workspace: Path, serve_args: List[str], *,
               command: Optional[List[str]] = None, pause: float = 1.0) -> int:
     """Run `serve` with `serve_args` in a child process; restart it on a crash.
@@ -392,15 +429,22 @@ def supervise(workspace: Path, serve_args: List[str], *,
     # answers; the worker serves on an internal one. Planted
     # DOMVEC_NO_FRONT=1: the worker on the public port, as before.
     public = _port_of(serve_args)
+    if public and os.environ.get("DOMVEC_PLANT_DUPLICATE_SUPERVISOR") != "1" and _healthy(public):
+        print("sidecar already running on %d; duplicate supervisor exiting" % public, flush=True)
+        return 0
+    front_state = None
     if public and command is None and os.environ.get("DOMVEC_NO_FRONT") != "1":
         from .front import BACKEND_OFFSET, start_front, supervisor_launch
         backend = public + BACKEND_OFFSET
         serve_args = list(serve_args)
         serve_args[serve_args.index("--port") + 1] = str(backend)
         try:
-            start_front(public, backend, supervisor_launch(str(workspace)))
+            front_state = start_front(public, backend, supervisor_launch(str(workspace)))
             print("front on %d -> worker on %d" % (public, backend), flush=True)
-        except OSError as exc:                      # the port is taken: run as before
+        except OSError as exc:                      # the port is taken: check if a sidecar already serves it
+            if os.environ.get("DOMVEC_PLANT_DUPLICATE_SUPERVISOR") != "1" and _healthy(public):
+                print("sidecar already running on %d; duplicate supervisor exiting" % public, flush=True)
+                return 0
             print("front not started (%s); worker on %d" % (exc, public), flush=True)
             serve_args[serve_args.index("--port") + 1] = str(public)
     command = command or [sys.executable, "-X", "faulthandler", "-m",
@@ -412,16 +456,21 @@ def supervise(workspace: Path, serve_args: List[str], *,
     log = workspace / "crashes.log"
     while True:
         started = time.time()
+        log_pos = _file_size(workspace / "sidecar.log")
+        err_pos = _file_size(workspace / "sidecar.err.log")
         # The child knows a supervisor will act on COMPACT_CODE.
         code = _run_child(command, {**os.environ, "DOMVEC_SUPERVISED": "1"}, _port_of(serve_args),
-                          fatal_log=workspace / "sidecar.err.log")
-        if code == 0:
+                          fatal_log=workspace / "sidecar.err.log", front_state=front_state)
+        if code == 0 or (front_state is not None and getattr(front_state, "stop_requested", False)):
             return 0                           # a clean stop is not a crash
         if code == RESTART_CODE:
             continue                           # asked for (POST /shutdown): not a crash
         if code == COMPACT_CODE:               # asked for: outgrown, or its pool refused
             _compact_logged(workspace, "asked")
             continue
+        if _store_locked(workspace, log_pos, err_pos):
+            print("store held by another process -- not restarting or touching WAL", flush=True)
+            return code or 1
         now = time.time()
         stalls_in_a_row = stalls_in_a_row + 1 if code == STUCK_CODE else 0
         if stalls_in_a_row >= GIVE_UP_STALLS:

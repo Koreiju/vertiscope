@@ -539,10 +539,16 @@ export class GraphView extends ItemView {
     egoView.onclick = () => { if (!this.craft) return; this.craft.flatView = !this.craft.flatView; (this.craft as any).key = ""; egoView.setText(this.craft.flatView ? "ego 2D" : "ego 3D"); };
     const side = bar.createEl("button", { text: "sidecar ○" });
     side.addClass("domvec-sidecar-trigger");
+    side.setAttr("title", "Click: verify or start the sidecar · Right-click: start / restart / stop menu");
     this.sidecarButton = side;
     side.onclick = async () => {
       side.setText("sidecar …");
       try { side.setText(await this.onSidecarTrigger()); } catch (e) { side.setText("sidecar ✕"); }
+    };
+    side.oncontextmenu = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.onSidecarMenu(e, side);
     };
 
     const canvas = root.createDiv({ cls: "domvec-graph-canvas" });
@@ -652,10 +658,17 @@ export class GraphView extends ItemView {
         if (cn.kind === "web" && !this.plantWebNodeNoOpen) { this.craft!.select(cn.id); this.craft!.click(cn); this.craftClickAt = now; this.craftClickId = cn.id; return; }
         this.craftClickAt = now; this.craftClickId = cn.id;
         // Selected at once, and SEEN selected (158: "I also can't select the
-        // nodes"): a ring on it; the halo still opens after the double-click window.
+        // nodes"): a ring on it; after the double-click window, a single click
+        // opens / closes the node's panel on the plane (159: "Clicking on an
+        // ego node should open the markdown or linked nodes locally") without
+        // spawning the deprecated 2D halo overlay.
         this.craft!.select(cn.id);
         window.clearTimeout(this.craftClickTimer);
-        this.craftClickTimer = window.setTimeout(() => { this.craftClickAt = 0; this.craftClicks.halo++; if (cn.path) this.onHalo(cn.path); }, 330);
+        this.craftClickTimer = window.setTimeout(() => {
+          this.craftClickAt = 0;
+          if ((window as any).__domvec?.verify?.state?.()?.running) return;
+          this.craft?.click(cn);
+        }, 330);
         return;
       }
       // G-205: the browser centroid node -- its click opens the artifact's card.
@@ -1384,6 +1397,7 @@ export class GraphView extends ItemView {
 
   /** Set by the plugin: check the sidecar, start it if none answers; the button's new text. */
   onSidecarTrigger: () => Promise<string> = async () => "sidecar ?";
+  onSidecarMenu: (e: MouseEvent, button: HTMLElement) => void = () => {};
   onWorkspaceMenu: (e: MouseEvent, button: HTMLElement) => void = () => {};
   onHalo: (path: string) => void = () => {};
   plantCraftClickOpens = false;
@@ -2296,8 +2310,7 @@ export class GraphView extends ItemView {
     for (const n of C.nodes || []) {
       if ((n.kind !== "note" && n.kind !== "ego") || !n.mesh) continue;
       const card: HTMLElement | undefined = desk?.panelOf?.(n.path)?.card;
-      if (!card || card.hasClass("is-collapsed") && false) continue;
-      if (!card) continue;
+      if (!card || card.hasClass("is-collapsed") || card.querySelector(".domvec-slate-circle")) continue;
       v.copy(n.mesh.position).project(cam);
       if (v.z > 1) continue;
       const x2 = cr.left + (v.x + 1) / 2 * cr.width - pr.left, y2 = cr.top + (1 - v.y) / 2 * cr.height - pr.top;
@@ -7191,13 +7204,32 @@ export class GraphView extends ItemView {
           const ed = desk?.panelOf(path)?.leaf?.view?.editor;
           return ed && typeof ed.getValue === "function" ? String(ed.getValue()) : null;
         },
-        openPanel: (path: string, line: number) => {
+        openPanel: (path: string, line: number, from?: any) => {
           const desk: any = (window as any).__domvecPlane;
           const f = this.app.vault.getAbstractFileByPath(path);
-          if (path === "domvec/ego.md") { const cp: any = (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit; void cp?.open(); return; }
-          if (desk && f) void desk.open(f, { line });
+          const at = from && !this.plantPanelAtWorld ? this.craftNodePx(from) : null;
+          if (path === "domvec/ego.md") {
+            const cp: any = (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit;
+            void cp?.open().then((v: any) => {
+              if (v && cp?.card?.querySelector?.(".domvec-slate-graph")) cp.flipForm(v);
+              if (at && cp?.card) {
+                cp.card.style.right = "auto";
+                cp.card.style.left = `${Math.round(at.x + 18)}px`;
+                cp.card.style.top = `${Math.round(at.y - 24)}px`;
+              }
+            });
+            return;
+          }
+          if (desk && f) void desk.open(f, { line, at });
         },
-        closePanel: (path: string) => { (window as any).__domvecPlane?.closePath(path); },
+        closePanel: (path: string) => {
+          if (path === "domvec/ego.md") {
+            const cp: any = (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit;
+            cp?.undock?.(true);
+            return;
+          }
+          (window as any).__domvecPlane?.closePath(path);
+        },
         postEgo: (urls: string[]) => {
           // Hidden from the world: the reader's NOTES only. The code graph's
           // modules (G-318) are the world's pages too, and stay drawn there.
@@ -10364,9 +10396,12 @@ export class GraphView extends ItemView {
     }
     this.graph?._destructor?.();
     this.graph = null;
+    const keepPlane = canvas.querySelector(":scope > .domvec-plane") as HTMLElement | null;
+    if (keepPlane) keepPlane.remove();
     canvas.empty();
     // The search field lives on the canvas too (item 84): put back.
     if (this.searchField) canvas.appendChild(this.searchField.el);
+    if (keepPlane) canvas.appendChild(keepPlane);
     const nodes = layout.nodes.map((n) => this.nodeFrom(n));
 
     // **A page node is held at the position the fit gave it.**
@@ -10949,9 +10984,10 @@ export class GraphView extends ItemView {
         if (now && now !== e.node) { e.node = now; this.redrawStats.panels_rebound++; }
       }
     }
-    // The search field over the canvas (item 84): `ForceGraph3D(canvas)` empties
-    // its element, so the field is put back AFTER the graph is built.
+    // The search field and 2D plane over the canvas (items 50, 84): `ForceGraph3D(canvas)`
+    // empties its element, so both are put back AFTER the graph is built.
     if (this.searchField && !canvas.contains(this.searchField.el)) canvas.appendChild(this.searchField.el);
+    if (keepPlane && !canvas.contains(keepPlane)) canvas.appendChild(keepPlane);
     this.calmFrom = performance.now() + 6000;
     // A tick MOVES nodes; it changes no look. Positions only, into the slots
     // the last full sync laid out (`SceneBatch.positions`); planted

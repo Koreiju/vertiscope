@@ -93,7 +93,7 @@ export interface CraftHost {
   egoProjection?(): Promise<{ method: string; places: Record<string, number[]> } | null>;
   /** The code graph's most central modules and the edges among them (G-318). */
   codeNet?(): Promise<{ nodes: { name: string; url: string; rank: number }[]; edges: { a: string; b: string; n: number }[] } | null>;
-  openPanel(path: string, line: number): void;
+  openPanel(path: string, line: number, from?: CraftNode): void;
   closePanel(path: string): void;
 }
 
@@ -347,7 +347,7 @@ export class Craft {
    *  that holds its readout, not the one built before the output existed. */
   async fresh(): Promise<void> {
     window.clearTimeout(this.dirtyTimer);
-    for (let i = 0; this.building && i < 150; i++) await new Promise((r) => window.setTimeout(r, 20));
+    for (let i = 0; this.building && i < 600; i++) await new Promise((r) => window.setTimeout(r, 20));
     this.stale = true; this.key = "";
     this.builtAt = performance.now();
     await this.build();
@@ -403,7 +403,8 @@ export class Craft {
       let keptOff = 0;
       for (const f of app.vault.getMarkdownFiles()) {
         if (f.path === COCKPIT_PATH) continue;
-        if (!this.plantCheckNotesOnEgo && !run && f.path.startsWith(CHECKS_FOLDER + "/") && !this.host.isOpen(f.path)) { keptOff++; continue; }
+        const isCheckScratch = f.path.startsWith(CHECKS_FOLDER + "/") || /^domvec\/graph\/(g\d+|pg\d+|t\d+|flip )/i.test(f.path);
+        if (!this.plantCheckNotesOnEgo && !run && isCheckScratch && !this.host.isOpen(f.path)) { keptOff++; continue; }
         const cache = app.metadataCache.getFileCache(f);
         const kind = String(cache?.frontmatter?.domvec || "");
         if (kind === "chunk") continue;
@@ -433,9 +434,19 @@ export class Craft {
         // made by its tools, a note is an ego artifact with or without a cell.
         if (!slate && !ran && !onPlane) continue;
         const id = "craft:" + f.path;
-        const note: CraftNode = { id, kind: "note", path: f.path, line: -1, label: f.basename, local: { x: 0, y: 0, z: 0 } };
+        let noteLabel = f.basename;
+        if (/^(slate|notebook)\s+\d+$/i.test(f.basename)) {
+          const bodyText = text.replace(/^---[\s\S]*?\n---\n?/, "");
+          const firstLine = (bodyText.split("\n").find((l) => l.trim() && !/^\s*(```|~~~|<!--)/.test(l)) || "")
+            .replace(/^#+\s*/, "").split("\t")[0].trim();
+          if (firstLine && firstLine.toLowerCase() !== f.basename.toLowerCase().replace(/\s+/g, "_")) {
+            noteLabel = firstLine;
+          }
+        }
+        const note: CraftNode = { id, kind: "note", path: f.path, line: -1, label: noteLabel, local: { x: 0, y: 0, z: 0 } };
         nodes.push(note);
         names.set(f.basename.toLowerCase(), id);
+        if (noteLabel !== f.basename) names.set(noteLabel.toLowerCase(), id);
         edges.push({ a: ego.id, b: id, kind: "root" });
         const fenced = new Set<number>();
         for (const x of findFences(text)) for (let i = x.openLine; i <= x.closeLine; i++) fenced.add(i);
@@ -488,6 +499,15 @@ export class Craft {
         nodes.push(code);
         edges.push({ a: ego.id, b: code.id, kind: "root" });
         for (const b of browsers) edges.push({ a: code.id, b: b.id, kind: "instance" });
+      }
+      // On a cold start (!this.nodes.length), draw the vault's ego at once
+      // before waiting up to 8s on sidecar tags/projection (the ego is the
+      // vault's first; the sidecar only adds places).
+      if (!this.nodes.length) {
+        this.nodes = nodes.map((n) => ({ ...n, local: { ...n.local } }));
+        this.edges = this.plantNoLinks ? [] : edges.slice();
+        this.layout();
+        this.rebuildScene();
       }
       // Web chunks tagged into the ego (item 74b): each a `web` node of the
       // craft, its I/O line to its world node.
@@ -1032,11 +1052,16 @@ export class Craft {
     if (!this.plantCraftDepthTested) {
       this.group.traverse((o: any) => {
         o.renderOrder = 1000;
+        o.frustumCulled = false;
         const ms = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
         for (const m of ms) { m.depthTest = false; m.depthWrite = false; m.transparent = true; }
       });
     }
     this.key = "";
+    try {
+      this.frame(true);
+      if (!this.plantStaleMatrices && this.group) this.group.updateMatrixWorld(true);
+    } catch { /* placed on next frame */ }
   }
 
   private label(n: CraftNode, R: number): any {
@@ -1090,7 +1115,13 @@ export class Craft {
     // at the ego node, inside its own map ("zoom ... into the microscope of
     // the ego", PG 4909). Planted `plantHiddenInEgo`: hidden in the ego view.
     const egoView = this.host.mode() === "ego";
-    const show = this.plantAlwaysDrawn || !this.plantHiddenInEgo || !egoView;
+    // RETIRED from view (G-405; 182 "completely do away with the graph view",
+    // 183 "circles gone", 186 "leftover edge and the deprecated node-based
+    // graph view artifacts"): the craft's circles and dashed edges are not
+    // drawn; its records stay (I/O, pulses, the vehicle) until G-400 draws the
+    // ego as world nodes. Planted `__domvecPlantCraft`: drawn, as before.
+    const retired = !(window as any).__domvecPlantCraft;
+    const show = !retired && (this.plantAlwaysDrawn || !this.plantHiddenInEgo || !egoView);
     this.group.visible = show;
     this.stats.visible = show;
     // Placed and counted drawn or not: hidden in the ego view, its I/O still
@@ -1359,12 +1390,12 @@ export class Craft {
       return "opened";
     }
     if (n.kind === "code") return "opened";   // its panel is elsewhere
-    if (n.kind !== "ego" && this.host.isOpen(n.path) && (n.kind === "note")) {
+    if ((n.kind === "note" || n.kind === "ego") && this.host.isOpen(n.path)) {
       this.host.closePanel(n.path);
       this.stats.closed++;
       return "closed";
     }
-    this.host.openPanel(n.path, n.line);
+    this.host.openPanel(n.path, n.line, n);
     this.stats.opened++;
     return "opened";
   }

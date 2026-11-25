@@ -340,3 +340,55 @@ def test_compacting_a_store_that_was_never_created_says_so(tmp_path):
     from domvec.obsidian.compact import compact
     got = compact(tmp_path)
     assert got["swapped"] is False and "no store" in got["why_not"]
+
+
+def test_duplicate_supervisor_exits_when_public_port_already_healthy(tmp_path, monkeypatch):
+    """2026-11-17: clicking the sidecar button while a supervisor was already
+    serving port 8792 spawned a second supervisor; start_front failed with
+    OSError on port 8792, which was caught and ignored, so the second
+    supervisor spawned a competing worker against the same Kuzu store.
+    Clean: it exits 0 without running a child. Planted: it runs the child."""
+    import domvec.obsidian.supervise as sv
+    from domvec.obsidian.front import start_front
+    port = _free_port()
+    st = start_front(port, port + 100, {})
+    ran = tmp_path / "child_ran.txt"
+    cmd = [sys.executable, "-c", "open(%r, 'w').write('1')" % str(ran)]
+    try:
+        assert sv.supervise(tmp_path, ["--port", str(port)], command=cmd, pause=0.0) == 0
+        assert not ran.exists()
+        monkeypatch.setenv("DOMVEC_PLANT_DUPLICATE_SUPERVISOR", "1")
+        assert sv.supervise(tmp_path, ["--port", str(port)], command=cmd, pause=0.0) == 0
+        assert ran.exists()
+    finally:
+        st.server.shutdown()
+        st.server.server_close()
+
+
+def test_store_lock_conflict_does_not_quarantine_wal_or_compact(tmp_path, monkeypatch):
+    """2026-11-17: when a competing process failed with 'Could not set lock on
+    file : ...\\graph.kuzu', the supervisor ran compaction and quarantined the
+    live WAL out from under the running sidecar. Clean: exits without touching
+    the WAL or compacting. Planted: quarantines the WAL."""
+    import domvec.obsidian.supervise as sv
+    (tmp_path / "graph.kuzu.wal").write_bytes(b"live-wal")
+    compacted = []
+    monkeypatch.setattr(sv, "_compact_in_child", lambda ws, **k: compacted.append(1) or {"swapped": False})
+    err_log = tmp_path / "sidecar.err.log"
+    lock_err = (
+        "import sys; open(%r, 'a', encoding='utf-8').write("
+        "'RuntimeError: IO exception: Could not set lock on file : graph.kuzu\\n'); "
+        "sys.exit(1)"
+    ) % str(err_log)
+    cmd = [sys.executable, "-c", lock_err]
+    code = sv.supervise(tmp_path, [], command=cmd, pause=0.0)
+    assert code == 1
+    assert (tmp_path / "graph.kuzu.wal").read_bytes() == b"live-wal"
+    assert list(tmp_path.glob("graph.kuzu.wal.unreplayable-*")) == []
+    assert compacted == []
+
+    monkeypatch.setenv("DOMVEC_PLANT_QUARANTINE_ON_LOCK", "1")
+    sv.supervise(tmp_path, [], command=cmd, pause=0.0)
+    assert not (tmp_path / "graph.kuzu.wal").exists()
+    assert len(list(tmp_path.glob("graph.kuzu.wal.unreplayable-*"))) == 1
+
