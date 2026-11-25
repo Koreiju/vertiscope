@@ -392,8 +392,10 @@ export class BrowserView extends ItemView {
     // The chat (`G-43`..`G-45`): a strip on the cell that opens on hover; its
     // context is the pins made since the last reply, each sent once.
     // In the page area, not the cell: on the cell it sat over the status line.
-    this.split.addClass("domvec-has-chat");
-    this.chat = new ChatPanel(this.app, this as unknown as Component, this.split, this.sidecar,
+    // Replaced 2026-11-24 by the ```chat cell at the foot of the markdown
+    // note (chatcell.ts, G-422); planted `__domvecPlantChatStrip`: the strip.
+    if ((window as any).__domvecPlantChatStrip) this.split.addClass("domvec-has-chat");
+    if ((window as any).__domvecPlantChatStrip) this.chat = new ChatPanel(this.app, this as unknown as Component, this.split, this.sidecar,
       () => [...this.pinned.values()], () => { void this.renderSide(); });
 
     // Built with `createElement` rather than `createEl`: Obsidian's helper
@@ -1647,10 +1649,16 @@ export class BrowserView extends ItemView {
       }
       const chat = this.chat && (this.chat.turns.length || this.chat.pending().length) ? this.chat.markdown() : "";
       if (chat) parts.push("## chat" + NL + NL + chat);
-      const body = parts.join(NL + NL + "---" + NL + NL);
       const vault = this.app.vault, folder = "domvec/chunks", path = this.slatePath;
       if (!vault.getAbstractFileByPath(folder)) await vault.createFolder(folder).catch(() => undefined);
       let f: any = vault.getAbstractFileByPath(path);
+      // The chat cell and the turns it wrote are the note's own: kept across
+      // pin changes, the cell always at the foot.
+      if (!this.chat) {
+        const old = f ? await vault.read(f) : "", at = old.indexOf(NL + "## chat" + NL);
+        parts.push(at >= 0 ? old.slice(at).trim() : "## chat" + NL + NL + "```chat" + NL + "```");
+      }
+      const body = parts.join(NL + NL + "---" + NL + NL);
       if (f) { if ((await vault.read(f)) !== body) await vault.modify(f, body); } else f = await vault.create(path, body);
       const ws: any = this.app.workspace;
       const Leaf: any = ws.activeLeaf?.constructor ?? ws.getMostRecentLeaf()?.constructor;

@@ -72,6 +72,7 @@ import { PlaneHalo } from "./planehalo";
 import { slateFolds } from "./slatefold";
 import { NotebookChats } from "./notebookchat";
 import { NoteMarks } from "./marks";
+import { chatCell } from "./chatcell";
 import { slateLint, slateLintStats } from "./slatelint";
 import { EditorView as CmView } from "@codemirror/view";
 
@@ -291,6 +292,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // PLUGIN_GOAL 195 (c): a ```tool block names an app tool and draws it in
     // its base canvas form -- the calls-only string an agent sees -- read-only,
     // in the same editor as the canvases (G-421). Planted `plantNoToolPanel`.
+    // The chat input cell (2026-11-24): a ```chat block streams its reply
+    // inline and writes the turn into the note above it (chatcell.ts, G-422).
+    try {
+      this.registerMarkdownCodeBlockProcessor("chat", chatCell(this.app, (p, c, on) => this.sidecar.chatStream(p, c, on)));
+    } catch (e) { console.warn("domvec: chat block", e); }
     try {
       this.registerMarkdownCodeBlockProcessor("tool", async (src, el) => {
         const name = src.trim().split(/\s+/)[0] || "";

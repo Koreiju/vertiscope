@@ -6838,6 +6838,28 @@ Added to the standing goal while 193-195 were being built:
   The boxes still never take the pointer, nothing is written into the page,
   and a reader asking for reduced motion gets them still.*
 
+Corrected the same day, then withdrawn:
+
+> also, the sparkles were supposed to be effects on the ascii pixels of the text
+> and the *outlines* like the silver borders around the canvases in the 2D graph
+> editor and stuff. The regular overlay boxes on the browser were okay, you did
+> the wrong update.
+
+> also, the 'chat' bar that hovered on panels should be replaced with a formal
+> "chat input" cell as a canvas that then streams the chat output inline in the
+> same obsidian panel exactly as how we have it. We can then cover dragging the
+> sub-panels in and out of the main panels as their own cells and canvas
+> (groupings) later. do that more so than the sparkles fix, perhaps just revert
+> the sparkles altogether.
+
+*Read as (197), mine: the sparkles are reverted everywhere (the overlay boxes
+were right plain; the border/text version was built, passed, and removed on
+this word). The browser cell's hover chat strip is replaced by a ```chat block
+at the foot of its markdown note, usable in any note: the reply streams into
+the cell, then the turn is written into the note above it, so the conversation
+is the note's own markdown. Its context is the note above the cell. Dragging
+sub-panels in and out as cells and groupings is deferred, by name.*
+
 ### Recovered verbatim (2026-11-22 inventory)
 
 *Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,

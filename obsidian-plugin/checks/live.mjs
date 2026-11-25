@@ -14210,9 +14210,14 @@ export function makeChecks(env) {
           const P = app.plugins.getPlugin("domvec-bridge");
           document.body.classList.toggle("domvec-plant-slate-chips", ${planted});
           try {
-            const cv = await P.cockpit.open(); await sleep(800);
-            const root = cv && cv.containerEl;
-            if (!root) return { error: "no cockpit" };
+            // Any remaining slate (the cockpit is a plain note since G-418).
+            const NL = String.fromCharCode(10), T = String.fromCharCode(9);
+            const sp = "domvec-checks/g415 slate.md";
+            let sf = app.vault.getAbstractFileByPath(sp);
+            if (!sf) sf = await app.vault.create(sp, ["---", "domvec: slate", "---", "g415 {a} {b}", T + "a" + T + "1", T + "b" + T + "{a}", T + "c" + T + "{nowhere_g415}", ""].join(NL));
+            const leaf = app.workspace.getLeaf("tab"); await leaf.openFile(sf); await sleep(1200);
+            const cv = leaf.view, root = cv && cv.containerEl;
+            if (!root) return { error: "no slate" };
             // Obsidian's own link colour, resolved in the same place.
             const probe = root.createSpan(); probe.style.color = "var(--link-color)";
             const link = getComputedStyle(probe).color; probe.remove();
@@ -14227,57 +14232,49 @@ export function makeChecks(env) {
               errors: errs.length, errors_titled: errs.filter((e) => !!e.getAttribute("title")).length,
               squiggles: errs.filter((e) => getComputedStyle(e).textDecorationLine.includes("underline")).length,
             };
-          } finally { document.body.classList.remove("domvec-plant-slate-chips"); }
+          } finally { document.body.classList.remove("domvec-plant-slate-chips"); app.workspace.getLeavesOfType("markdown").filter((l) => l.view?.file?.path === "domvec-checks/g415 slate.md").forEach((l) => l.detach()); }
         })()`, { timeout: 30000 });
         const clean = await arm(false), planted = await arm(true);
-        const ok = !!clean && !clean.error && clean.names >= 3 && clean.link_colour === clean.names
+        const ok = !!clean && !clean.error && clean.names >= 2 && clean.link_colour === clean.names
           && clean.tinted === 0 && clean.boxed === 0 && clean.squiggles === 0 && clean.errors_titled === clean.errors;
         const caught = !!planted && !planted.error && planted.tinted >= 1 && (planted.errors === 0 || planted.squiggles >= 1);
         return { pass: ok && caught, evidence: { clean, planted } };
       },
     },
     {
-      id: "G-417",
-      asks: "the outlines sparkle (PLUGIN_GOAL 196: 'make each of the outline things ... sparkle with something like the @sparkle.gif'): a real hover over a page's chunk shows its outline with two star layers (yellow-green and lavender four-point stars) whose opacity twinkles over time, never taking the pointer; every box class (hover, structure, diff, pin) carries them; planted (body.domvec-plant-no-sparkle) no stars",
+      id: "G-422",
+      asks: "the chat is a formal chat input cell in the note, not a strip hovering on the panel (2026-11-24: 'replaced with a formal chat input cell as a canvas that then streams the chat output inline in the same obsidian panel'): a ```chat block in a note draws an input; Enter streams the reply into the cell token by token, then writes the turn into the note above the block, which stays at the foot; the context sent is the note above the cell; planted (__domvecPlantChatStrip) no cell",
       async run() {
-        const PAGE = "https://en.wikipedia.org/wiki/Trie";
         const arm = (planted) => evaluate(`(async () => {
-          ${PREP}
-          document.body.classList.toggle("domvec-plant-no-sparkle", ${planted});
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          window.__domvecPlantChatStrip = ${planted}; window.__domvecChatDryMs = 900;
+          const path = "domvec-checks/g422 chat.md";
+          const text = "Tries are prefix trees, keyed by the path from the root." + NL + NL + F + "chat" + NL + F + NL;
+          if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+          let f = app.vault.getAbstractFileByPath(path);
+          if (f) await app.vault.modify(f, text); else f = await app.vault.create(path, text);
+          const leaf = app.workspace.getLeaf("tab");
           try {
-            if (!(await land(${JSON.stringify(PAGE)}, 30000))) return { error: "did not land" };
-            await sleep(2500);
-            const wv = b.webview, r = wv.getBoundingClientRect(), wrap = wv.parentElement;
-            const ol = wrap.querySelector(".domvec-chunk-outline");
-            let shown = false;
-            for (let i = 0; i < 12 && !shown; i++) {
-              wv.sendInputEvent({ type: "mouseMove", x: Math.round(200 + i * 37), y: Math.round(160 + i * 41) });
-              const t0 = performance.now();
-              while (performance.now() - t0 < 900) { if (ol && ol.offsetWidth > 0 && ol.offsetHeight > 0) { shown = true; break; } await sleep(40); }
-            }
-            if (!shown) return { error: "no outline shown", planted: ${planted} };
-            const layer = (el, which) => { const st = getComputedStyle(el, which); return { content: st.content, anim: st.animationName, svg: st.backgroundImage.includes("svg"), pe: st.pointerEvents }; };
-            const before = layer(ol, "::before"), after = layer(ol, "::after");
-            const ops = [];
-            for (let i = 0; i < 14; i++) { ops.push(+getComputedStyle(ol, "::before").opacity); await sleep(120); }
-            // Every box class: the same layers, read from a probe of each class.
-            const classes = {};
-            for (const c of ["domvec-chunk-outline", "domvec-chunk-struct", "domvec-diff-box", "domvec-chunk-pin"]) {
-              const pr = wrap.createDiv({ cls: c }); pr.style.left = "-9999px";
-              const bf = getComputedStyle(pr, "::before"), af = getComputedStyle(pr, "::after");
-              classes[c] = bf.content !== "none" && af.content !== "none" && bf.animationName === "domvec-sparkle" && af.backgroundImage.includes("svg");
-              pr.remove();
-            }
-            return { planted: ${planted}, shown, before, after,
-                     twinkle: Math.round((Math.max(...ops) - Math.min(...ops)) * 100) / 100,
-                     classes: Object.values(classes).filter(Boolean).length, class_detail: classes };
-          } finally { document.body.classList.remove("domvec-plant-no-sparkle"); }
-        })()`, { timeout: 90000 });
+            await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(900);
+            const ta = leaf.view.containerEl.querySelector(".domvec-chat-cell textarea");
+            if (!ta) return { planted: ${planted}, cell: false };
+            const out = leaf.view.containerEl.querySelector(".domvec-chat-cell-out");
+            const before = window.__domvecChatCell.turns, lens = new Set();
+            ta.value = "What is a trie?";
+            ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+            for (let k = 0; k < 60 && window.__domvecChatCell.turns === before; k++) { if (out) lens.add(out.textContent.length); await sleep(100); }
+            const body = await app.vault.read(f), last = window.__domvecChatCell.last || {};
+            const you = body.indexOf("> **You** What is a trie?"), fence = body.indexOf(F + "chat");
+            return { planted: ${planted}, cell: true, streamed_states: lens.size, tokens: last.tokens, context_chars: last.context_chars,
+                     turn_written: you >= 0, turn_above_cell: you >= 0 && you < fence, cell_at_foot: body.trim().endsWith(F),
+                     no_strip: !document.querySelector(".domvec-chat:not(.domvec-chat-cell)") };
+          } finally { leaf.detach(); window.__domvecPlantChatStrip = false; window.__domvecChatDryMs = 0; }
+        })()`, { timeout: 60000 });
         const clean = await arm(false), planted = await arm(true);
-        const has = (x) => !!x && !x.error && x.before.anim === "domvec-sparkle" && x.before.svg && x.after.svg && x.before.pe === "none";
-        const ok = has(clean) && clean.twinkle >= 0.25 && clean.classes === 4;
-        const caught = !!planted && !planted.error && planted.before.content === "none" && planted.classes === 0;
-        return { pass: ok && caught, evidence: { clean, planted } };
+        const ok = !!clean && clean.cell && clean.streamed_states >= 3 && clean.tokens >= 3 && clean.context_chars >= 40
+          && clean.turn_above_cell && clean.cell_at_foot && clean.no_strip;
+        return { pass: ok && !!planted && planted.cell === false, evidence: { clean, planted } };
       },
     },
     {
