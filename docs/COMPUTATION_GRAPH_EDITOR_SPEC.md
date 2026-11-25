@@ -21,7 +21,8 @@ cite the latest series by bare number, under the rule at §13's head.
 > chips go. A Python cell is Obsidian's own code block. One "interface"
 > generalizes every canvas type. Where §12-§13 build a renderer of their own
 > (the slate's chips and field rows, §12b-§12c; litegraph's nodes, ports
-> and widgets, §13d'-§13g), they are suspended until the reader answers
+> and widgets, §13d'-§13g; §13h's search node, a slate field drawn as a
+> node), they are suspended until the reader answers
 > one question: are links between plain notes wiki links (over 136 and T-4,
 > and O-7's finding), or compiled links shown only as highlighting? O-1,
 > O-6, O-10, G-401, G-409 and G-411 wait on that answer. The live objects
@@ -1212,7 +1213,7 @@ A hook that throws fails that phase: abort, and report it.
   dataflow treats that report as a fresh definition of the object's name.
 - *Where a live object's state lives* (B6). Its traits are kernel state, as
   every variable is. What reaches the note is the cell's output: a text
-  snapshot of the traits (trie content, retrievable, NOTEBOOK §4b) and the
+  snapshot of the traits (trie content, retrievable, NOTEBOOK §6 steps 4-5) and the
   view's identity, so reopening the note can find the live object again
   while its kernel lives. Jupyter keeps widget state in the notebook's
   metadata, and this keeps it in the output block. Reading.
@@ -1221,7 +1222,7 @@ A hook that throws fails that phase: abort, and report it.
   view redraws.
 
 **The bridge that has to exist** (measured in `domvec/obsidian/kernel.py`):
-`JupyterKernel.run` reads iopub only while a cell runs, and keeps `stream`,
+`_JupyterKernel.run` reads iopub only while a cell runs, and keeps `stream`,
 `execute_result`, `display_data` (text/plain) and `error`. It drops
 `comm_open`, `comm_msg` and the widget mimetype
 `application/vnd.jupyter.widget-view+json`. So: an iopub reader thread per
@@ -1692,6 +1693,9 @@ with the app, **U** an unclear term or step.
 | F-116 | I | spec §14a (2026-11-08 17:41 row) vs O-3 | "the one decision for the reader is O-5" while O-3 records a second question asked of the reader | the design decision told apart from the layout question |
 | F-117 | I | spec §12c, §12h G-401 vs PRD G-401 and `planepanels.ts` `canvas.members` | the slate's fields are seeded from "the tool space (158)" in the spec, from "the craft membership" in the row and the code; the two sets differ (browsers, chats, tagged chunks), and the craft is retired | O-10 |
 | F-118 | I | spec §12b-§12c, §13d'-§13g, O-1, O-6, O-10; PRD G-401, G-409, G-411 vs 193 | the spec builds its own renderer: chip fields, a vendored node editor, ports and widgets. 193 asks for plain Obsidian notes and code blocks, the purple nodes removed | suspended at the spec's head, pending the reader's answer on links; nothing deleted until then |
+| F-119 | I | spec §13e | cited "NOTEBOOK §4b", the section F-103 found does not exist | NOTEBOOK §6 steps 4-5 |
+| F-120 | U | spec §13e | `JupyterKernel.run`; the class is `_JupyterKernel` (`kernel.py`) | named as in the code |
+| F-121 | I | spec head note (F-118) vs §13h | the suspension named §12b-§12c and §13d'-§13g, not §13h's search node, a slate field resolved external and drawn as a node | named |
 
 **Still open** -- O-1 to O-4 and O-6 to O-10 are work the design names; O-5 is a question for the reader:
 
