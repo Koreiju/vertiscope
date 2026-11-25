@@ -6885,7 +6885,10 @@ does. The dependency graph stopped at the note's edge: a compiled link
 (`Vault.read`, G-420) was drawn but never re-ran its reader, so editing one
 note now re-runs the cells in other notes that read it. Pull-apart -- a
 panel's cells dragged out into cards of their own and back -- is not built;
-it is the item deferred on 2026-11-24 and stays open.*
+it is the item deferred on 2026-11-24 and stays open.* *Built the same day*
+*(G-427) under the 2026-11-25 goal "building everything directly from the verbatim": a cell pulls*
+*out into a card of its own, the source keeping a compiled link in its place; the card*
+*dropped on a panel goes back in.*
 
 ### Recovered verbatim (2026-11-22 inventory)
 
@@ -7374,3 +7377,41 @@ them when it was written. Their bearing on the 2D editor is assessed in
 **2026-11-22 10:04**
 
 > done gaming, go ahead with the restart and re-runs
+
+**2026-11-23/24 (this session; exact times not kept)**
+
+> we need all these features implemented efficiently and within in the rest of our token limit. we're at 58%
+
+> Also, if you're not doing anything because you're making up decisions for me, I'm sure you can first better understand each of my own prompts before answering them yourself using your best judgement
+
+> please ensure you're taking the time to follow the token budget, the new pivot, and completing the goal on the pivot before you continue on anything else.
+
+> we're at 63% our usage limit. whatever you're doing is extremely wasteful. hence my clear instructions.
+
+> we're at 67% because you're not thinking clearly. stop the hook and follow my directions please.
+
+> we're at 68% because you're not thinking clearly. follow my directions clearly stated please.
+
+> so, do you remember the images I sent about the obsidian panels, links, the canvases, etc?
+
+> realize and build my prompts as fully as possible in as few tokens as possible. We're at 71% our usage limit now. focus only on building code and verifying live. only
+
+> Also, along with the task, I shouldn't be seeing double if it's not part of the actual panel's markdown
+
+> what is the full totality of what each of my prompts on our design pivot really all about in terms of compact and completeness... within our token budget of 26% of usage we have left?
+
+> /goal build and verify everything as compactly and efficiently as possible
+
+**2026-11-24 evening**
+
+> please also push to our vertiscope branch main
+
+**2026-11-25 (answers to questions put in the session)**
+
+> [on six new untracked files] Commit them separately
+
+> [on the 32 pre-existing paths] Commit them all
+
+> [on the unreproducible stdin test] Expected failure (Recommended)
+
+> /goal Please just wind up building everything directly from the verbatim to the code for all intents, purposes and interpretations. there are so many things that you will likely just keep going, making sure all my own prompts are recorded in the verbatim and the verbatim is followed directly with the code. just literally as much building on the verbatim as possible

@@ -14532,6 +14532,56 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-427",
+      asks: "pull-apart (2026-11-24: 'dragging the sub-panels in and out of the main panels as their own cells and canvas'; 2026-11-25: 'pull-apart with our clear slate'): the pull-out button on a cell moves it into a note of its own drawn as a card on the plane, the source keeping a compiled link (Vault.read) where it stood; dropping that card on the source panel puts the cell back in the link's place and trashes the card's note -- the text round-trips; planted (pull.plantNoPull) nothing moves",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const pl = app.plugins.getPlugin("domvec-bridge"), desk = pl.desk;
+          pl.pull.plantNoPull = ${planted};
+          const tag = (${planted} ? "p" : "c") + Date.now().toString(36), path = "domvec-checks/g427 src " + tag + ".md";
+          const text = "# src" + NL + NL + F + "python" + NL + "x = 41" + NL + "print('X', x)" + NL + F + NL + NL + "after" + NL;
+          let np = null;
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, text);
+            await desk.open(f); await sleep(1200);
+            const card = desk.panelOf(path) && desk.panelOf(path).card;
+            if (!card) return { error: "no card" };
+            const btn = card.querySelector(".domvec-pull-fence");
+            const out0 = pl.pull.stats.out;
+            if (btn) btn.click();
+            for (let k = 0; k < 20 && pl.pull.stats.out === out0; k++) await sleep(200);
+            await sleep(800);
+            np = pl.pull.stats.out > out0 ? pl.pull.stats.last.split(" -> ")[1] : null;
+            const src1 = await app.vault.read(f);
+            const res = { planted: ${planted}, button: !!btn, pulled: !!np, link_in_src: !!np && src1.includes("Vault.read(" + JSON.stringify("/" + np) + ")"),
+                          cell_left_src: !src1.includes("x = 41"), card_on_plane: !!np && !!desk.panelOf(np) };
+            if (!np) return res;
+            res.cell_in_new = (await app.vault.read(app.vault.getAbstractFileByPath(np))).includes("x = 41");
+            const r = card.getBoundingClientRect();
+            res.drop_taken = desk.wireDrop(np, r.left + r.width / 2, r.top + r.height / 2);
+            for (let k = 0; k < 20 && app.vault.getAbstractFileByPath(np); k++) await sleep(200);
+            await sleep(500);
+            const src2 = await app.vault.read(f);
+            res.back_in = src2.includes("x = 41") && !src2.includes("Vault.read(");
+            res.in_place = src2.indexOf("x = 41") < src2.indexOf("after");
+            res.card_gone = !desk.panelOf(np); res.note_trashed = !app.vault.getAbstractFileByPath(np);
+            return res;
+          } finally {
+            pl.pull.plantNoPull = false;
+            try { desk.closePath(path); } catch {}
+            for (const p of [path, np]) { const g = p && app.vault.getAbstractFileByPath(p); if (g) { try { desk.closePath(p); } catch {} await app.vault.delete(g).catch(() => 0); } }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.button && clean.pulled && clean.link_in_src && clean.cell_left_src && clean.card_on_plane && clean.cell_in_new
+          && clean.drop_taken && clean.back_in && clean.in_place && clean.card_gone && clean.note_trashed;
+        return { pass: ok && !!planted && !planted.error && planted.button && !planted.pulled, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-408",
       asks: "the comm bridge (spec 13e; the live objects of 187 and 194's 'measuring the changes instantly'): a cell run with the plugin's own runCell opens a comm; the plugin's comm() reads its open and its message from the note kernel's log; a comm_msg the plugin sends reaches the object, whose state the next run reads back; planted (__domvecPlantNoComm) the traffic is never seen",
       async run() {

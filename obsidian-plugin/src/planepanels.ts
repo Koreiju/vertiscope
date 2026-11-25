@@ -59,6 +59,8 @@ export interface PlaneHost {
   intoCraft?(path: string): boolean;
   /** The chat cell's model, streamed (PLUGIN_GOAL 134). */
   chatStream?(prompt: string, context: string[], onToken: (t: string) => void): Promise<string>;
+  /** Pull-apart: a pulled cell's card dropped at (x, y) goes back into the panel there. */
+  pullInto?(from: string, x: number, y: number): Promise<boolean>;
   /** The soft-link field's query: the halo laid out for it (item 90). */
   haloQuery?(path: string, query: string): void;
   /** The ego's notes (the craft's), for the sooner / later fans (item 90). */
@@ -1084,6 +1086,12 @@ export class PlaneDesk {
   plantNoWiring = false;
   wireStats = { wired: 0, refused: 0, last: null as any };
   wireDrop(from: string, x: number, y: number): boolean {
+    // A pulled cell's card (pullapart.ts) dropped on a panel goes back in.
+    const ff = this.app.vault.getAbstractFileByPath(from);
+    if (ff instanceof TFile && String(this.app.metadataCache.getFileCache(ff)?.frontmatter?.domvec || "") === "cell" && this.host.pullInto) {
+      const hit = this.panels.some((q) => { if (q.path === from) return false; const c = q.card.getBoundingClientRect(); return x >= c.left && x <= c.right && y >= c.top && y <= c.bottom; });
+      if (hit) { void this.host.pullInto(from, x, y); return true; }
+    }
     // A card dropped on another card is PLACEMENT, never a link (136: "magnetizing
     // new panels together doesn't create new links between panels. That comes
     // from the compilation aspect"; G-404). Links come only from compilation

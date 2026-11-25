@@ -66,6 +66,7 @@ import { BrowseCard } from "./browsecard";
 import { EditorCalls } from "./editorcalls";
 import { DataflowRun, noteTextOf } from "./dataflowrun";
 import { AutoRun, CrossRun } from "./autorun";
+import { PullApart } from "./pullapart";
 import { CodeRows } from "./coderows";
 import { BrowserPanel } from "./browserpanel";
 import { PlaneHalo } from "./planehalo";
@@ -985,6 +986,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     headerClick: (path) => { void this.halo.toggle(path); },
     intoCraft: (path) => { const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view; return !!g?.flyToCraft?.(path); },
     chatStream: (prompt: string, ctx: string[], onTok: (t: string) => void) => this.sidecar.chatStream(prompt, ctx, onTok),
+    pullInto: (from: string, x: number, y: number) => this.pull.into(from, x, y),
     codeNodes: (q: string) => this.sidecar.codeNodes(q),
     typeNodes: (q: string) => this.minedTypes(q),
     openType: (pattern: string) => { void this.typeFromPattern(pattern, this.typeName(pattern)); },
@@ -1558,6 +1560,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   /** A python block's typed rows under it, wherever it is drawn (182). */
   onRowsFence(pre: HTMLElement, req: RunRequest): Promise<void> {
     return this.codeRows.mountUnder(pre, { path: req.path, line: req.line }, req.code);
+  }
+
+  pull: PullApart = new PullApart(this.app, () => this.desk || null);
+  async onPullFence(req: RunRequest): Promise<void> {
+    if (req.path) await this.pull.out(req.path, req.line);
   }
 
   async onUnnestFence(req: RunRequest): Promise<void> {

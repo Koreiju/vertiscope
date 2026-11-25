@@ -56,6 +56,8 @@ export interface RunHost {
   onOpenFence?(req: RunRequest): void | Promise<void>;
   /** G-329: the cell unnested into a black-box panel on the plane. */
   onUnnestFence?(req: RunRequest): void | Promise<void>;
+  /** Pull-apart: the cell out of its note into a card of its own (pullapart.ts). */
+  onPullFence?(req: RunRequest): void | Promise<void>;
   /** G-322 / 182: the block's typed rows, drawn UNDER the rendered block --
    *  the same rows a code card has, wherever the block is drawn. */
   onRowsFence?(pre: HTMLElement, req: RunRequest): void | Promise<void>;
@@ -82,6 +84,15 @@ function unnestButton(doc: Document, onClick: () => void): HTMLButtonElement {
   btn.textContent = "⊞ unnest";
   btn.addEventListener("mousedown", (e) => e.preventDefault());
   btn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); onClick(); });
+  return btn;
+}
+
+/** `⇱ pull out` beside unnest: the cell into a card of its own (pull-apart). */
+function pullButton(doc: Document, onClick: () => void): HTMLButtonElement {
+  const btn = unnestButton(doc, onClick);
+  btn.className = "domvec-open-fence domvec-pull-fence";
+  btn.setAttribute("aria-label", "Pull this cell out into a card of its own");
+  btn.textContent = "⇱ pull out";
   return btn;
 }
 
@@ -181,6 +192,7 @@ export function readingViewRunButtons(host: RunHost) {
       if (term) pre.appendChild(term);
       if (host.onOpenFence) pre.appendChild(openButton(el.ownerDocument, () => host.onOpenFence!(req())));
       if (host.onUnnestFence) pre.appendChild(unnestButton(el.ownerDocument, () => host.onUnnestFence!(req())));
+      if (host.onPullFence) pre.appendChild(pullButton(el.ownerDocument, () => host.onPullFence!(req())));
       if (host.onRowsFence && /^py(thon3?)?$/.test(lang)) {
         const r = req();
         // After the block is in the document: a chat block is rendered first, attached after.
@@ -230,6 +242,7 @@ class RunWidget extends WidgetType {
     if (term) wrap.appendChild(term);
     if (this.host.onOpenFence) wrap.appendChild(openButton(view.dom.ownerDocument, () => this.host.onOpenFence!(req())));
     if (this.host.onUnnestFence) wrap.appendChild(unnestButton(view.dom.ownerDocument, () => this.host.onUnnestFence!(req())));
+    if (this.host.onPullFence) wrap.appendChild(pullButton(view.dom.ownerDocument, () => this.host.onPullFence!(req())));
     if (this.host.onRolloutFence && (this.fence.refs || []).length) {
       wrap.appendChild(playButton(view.dom.ownerDocument, () => this.host.onRolloutFence!(req())));
     }
