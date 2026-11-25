@@ -30,8 +30,11 @@
 >     the Jupyter protocol; fixed 2026-11-24 (F-104).
 >   - §7's "no cell reordering, folding": overridden. A record's fold state
 >     and its fields' compile order are the record (spec §12a, §12c).
->   - §7's "hovering SLM bar is the next deliverable": the chat panel and the
->     retrieval bar carry it now (spec §13h, 133 d).
+>   - §7's "hovering SLM bar is the next deliverable": the record never says
+>     by name what became of that bar. My reading (F-113): its parts arrived
+>     as the chat panel, which runs the SLM (spec §13h), and the naked search
+>     field at the 3D panel's middle-bottom (84). 133 d's retrieval bar is a
+>     different thing, a bar over typed nodes.
 >   - §4a's `content-detection: output` is spelled `text.output` everywhere
 >     it was built (§6 step 4); the body now says so (F-102).
 

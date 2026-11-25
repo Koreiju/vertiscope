@@ -1673,6 +1673,7 @@ with the app, **U** an unclear term or step.
 | F-110 | I | PRD G-401, G-404, G-405 vs O-3 (F-109) | the rows still said "not seen live" after the rebuild deployed them | each row says deployed, and what was seen |
 | F-111 | U | PLUGIN_GOAL 192 "Read as" (a) | "the hover's own path, as a browser hover does": a browser hover flies the camera (G-215), the 3D hover (G-414) does not | the billboard path named (`hoverPanel`), the flight excluded, the reason marked as my reading |
 | F-112 | M | spec O-3, F-109, PRD G-401 (my wording) | the plane's `domvec/ego canvas.md` card was attributed to G-401; `egocanvas.ts` reads that note once as a seed (`OLD_CANVAS_PATH`) and opens only the cockpit (`openCanvas`). The card is a panel left open on the plane from the G-396 era | O-3 and G-401 say so |
+| F-113 | M | NOTEBOOK head note (my pass-19 wording) | "the chat panel and the retrieval bar carry" the hovering SLM bar, citing 133 d: the record never names the bar's fate, and 133 d's retrieval bar is over typed nodes | marked as my reading; the parts named (the chat panel, 84's naked search field) |
 
 **Still open** -- O-1 to O-4 and O-6 to O-9 are work the design names; O-5 is a question for the reader:
 
