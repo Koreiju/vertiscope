@@ -15119,6 +15119,50 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-437",
+      asks: "cell-defined tools handed to the agent (G-412; spec 13h, B20: 'a tool defined in a cell is a node on the plane AND a tool the agent is handed'): a note's python cell defines triple(x: int) -> int and is run; the note's ```agent block's run hands the agent triple as a tool that calls the live definition in that note's kernel -- the agent's step print(triple(5)) prints 15 into the run's note; planted plantNoCellTools: no such tool, the step fails on the name",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10), Q = String.fromCharCode(34).repeat(3);
+          const pl = app.plugins.getPlugin("domvec-bridge"), desk = pl.desk;
+          window.__domvecAgentDry = { pace_s: 0.3, plantNoCellTools: ${planted}, replies: [
+            "Thought: use the note's function." + NL + F + "python" + NL + "print('TRIPLED', triple(5))" + NL + F,
+            "Thought: done." + NL + F + "python" + NL + "final_answer('ok')" + NL + F ] };
+          const path = "domvec-checks/g437 " + (${planted} ? "p" : "c") + Date.now().toString(36) + ".md";
+          const cell = "def triple(x: int) -> int:" + NL + "    " + Q + "Three times x." + Q + NL + "    return 3 * x";
+          const leaf = app.workspace.getLeaf("tab");
+          let note = "";
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, F + "python" + NL + cell + NL + F + NL + NL + F + "agent" + NL + "triple five" + NL + F + NL);
+            await pl.onRunFence({ path, lang: "python", code: cell, line: 0, refs: [] });
+            await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(800);
+            const btn = leaf.view.containerEl.querySelector(".domvec-agent-run");
+            if (!btn) return { planted: ${planted}, button: false };
+            btn.click();
+            let t = "", status = "";
+            for (let k = 0; k < 80; k++) {
+              await sleep(250);
+              status = document.querySelector(".domvec-agent-status")?.textContent || "";
+              const m = status.match(/running into (.+[.]md)$/); if (m) note = m[1];
+              if (/^(done|stopped)/.test(status)) break;
+            }
+            await sleep(500);
+            if (note && app.vault.getAbstractFileByPath(note)) t = await app.vault.adapter.read(note);
+            const st = await (await fetch(String(pl.settings.sidecar).replace(/[/]+$/, "") + "/agent_status", { method: "POST", headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" }, body: JSON.stringify({ note }) })).json();
+            return { planted: ${planted}, button: true, status, cell_tools: st.cell_tools || null, tripled_15: /TRIPLED 15/.test(t), name_error: /triple/.test(t) && /(NameError|not defined|Forbidden|InterpreterError)/.test(t) };
+          } finally {
+            window.__domvecAgentDry = null; leaf.detach(); await sleep(800);
+            for (const p of [path, note]) { const g = p && app.vault.getAbstractFileByPath(p); if (g) { try { desk.closePath(p); } catch {} await app.vault.delete(g).catch(() => 0); } }
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && clean.button && (clean.cell_tools || []).includes("triple") && clean.tripled_15;
+        return { pass: ok && !!planted && planted.button && !(planted.cell_tools || []).includes("triple") && !planted.tripled_15, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-431",
       asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
       async run() {

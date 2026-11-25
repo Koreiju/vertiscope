@@ -17,7 +17,7 @@ export function agentBlock(app: App, sidecar: () => string, openNote: (f: TFile)
                            /** An editor ask the agent made (create/link/invoke/commit/review), carried out
                             *  by the reader's own gesture methods (`EditorCalls.carry`). */
                            carry: (ask: any) => Promise<string | null> = async () => null) {
-  return (src: string, el: HTMLElement) => {
+  return (src: string, el: HTMLElement, ctx?: { sourcePath: string }) => {
     const task = src.trim();
     const box = el.createDiv({ cls: "domvec-agent-block" });
     box.createDiv({ cls: "domvec-agent-task", text: task || "(write the agent's task in this block)" });
@@ -28,7 +28,9 @@ export function agentBlock(app: App, sidecar: () => string, openNote: (f: TFile)
       const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
       const note = `domvec/agents/${task.replace(/[^\w\s-]/g, "").trim().slice(0, 40)} ${stamp}.md`;
       const dry = (window as any).__domvecAgentDry;
-      const body: any = { task, note, ...(dry ? { dry_replies: dry.replies, pace_s: dry.pace_s || 0, plant_write_at_end: !!dry.plant, plant_no_editor_tools: !!dry.plantNoTools } : {}) };
+      // G-412: the functions this note's cells define are the agent's tools too.
+      const body: any = { task, note, tools_from: ctx?.sourcePath || "",
+        ...(dry ? { dry_replies: dry.replies, pace_s: dry.pace_s || 0, plant_write_at_end: !!dry.plant, plant_no_editor_tools: !!dry.plantNoTools, plant_no_cell_tools: !!dry.plantNoCellTools } : {}) };
       btn.disabled = true; say.setText("starting...");
       try {
         const r = await (await fetch(sidecar().replace(/[/]+$/, "") + "/agent_run", { method: "POST",

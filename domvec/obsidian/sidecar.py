@@ -3914,7 +3914,14 @@ class _Handler(BaseHTTPRequestHandler):
                             etools = _at.editor_tools(asks)
                         finally:
                             _at.PLANT_NO_EDITOR_TOOLS[0] = False
-                        agent = CodeAgent(tools=_at.tools(base) + etools, model=model, code_block_tags="markdown",
+                        # G-412: the functions the agent block's own note defines, live in its kernel.
+                        ctools, src_note = [], str(body.get("tools_from") or "")
+                        if src_note and self.kernel_pool is not None and not body.get("plant_no_cell_tools"):
+                            from .. import nodedefs as _nd
+                            got = _nd.parse(self.kernel_pool.run(src_note, _nd.SRC))
+                            ctools = _at.cell_tools(lambda code: self.kernel_pool.run(src_note, code), got.get("defs") or [])
+                        AGENT_RUNS[note]["cell_tools"] = [t.name for t in ctools]
+                        agent = CodeAgent(tools=_at.tools(base) + etools + ctools, model=model, code_block_tags="markdown",
                                           max_steps=int(body.get("max_steps") or 6), verbosity_level=LogLevel.OFF)
                         _as.PLANT_WRITE_AT_END[0] = bool(body.get("plant_write_at_end"))
                         try:

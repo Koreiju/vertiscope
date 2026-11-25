@@ -134,3 +134,58 @@ def editor_tools(asks: list) -> List[Tool]:
     if PLANT_NO_EDITOR_TOOLS[0]:
         return []
     return [_ask_tool(n, d, i, m)(asks) for n, d, i, m in _EDITOR]
+
+
+# Cell-defined tools (G-412; spec 13h, B20: "a tool defined in a cell is a node
+# on the plane AND a tool the agent is handed in the next step"). Each function
+# a note's cells define (`nodedefs`, G-409) becomes a Tool whose forward CALLS
+# IT IN THAT NOTE'S KERNEL -- the live definition, not a copy. Planted
+# `PLANT_NO_CELL_TOOLS`: the agent is handed none.
+PLANT_NO_CELL_TOOLS = [False]
+_JSON_TYPE = {"int": "integer", "float": "number", "str": "string", "bool": "boolean", "list": "array", "dict": "object"}
+_MARK = "\x1edomvec-tool\x1e"
+
+
+def cell_tools(run, defs: list) -> List[Tool]:
+    """`run(code) -> kernel reply`; `defs` from `nodedefs.parse`. One Tool per function."""
+    if PLANT_NO_CELL_TOOLS[0]:
+        return []
+    import json as _json
+    out: List[Tool] = []
+    for d in defs:
+        if d.get("node") != "function" or not d.get("name", "").isidentifier():
+            continue
+        fname = d["name"]
+        ins = {}
+        for p in d.get("inputs", []):
+            spec = {"type": _JSON_TYPE.get(p.get("type") or "", "any"), "description": p["name"]}
+            if "default" in p:
+                spec["nullable"] = True
+            ins[p["name"]] = spec
+
+        class _C(Tool):
+            name = fname
+            description = (d.get("doc") or "A function defined in a cell of the note.")
+            inputs = ins
+            output_type = "any"
+            skip_forward_signature_validation = True
+
+            def _call(self, **kw):
+                kw = {k: v for k, v in kw.items() if v is not None}
+                code = ("import json as _dj\n_dr = %s(**_dj.loads(%r))\nprint(%r + _dj.dumps(_dr, default=repr))"
+                        % (self.name, _json.dumps(kw), _MARK))
+                rep = run(code)
+                if not rep.get("ok"):
+                    raise RuntimeError((rep.get("error") or "the cell's function failed").strip().splitlines()[-1])
+                for line in (rep.get("stdout") or "").split("\n"):
+                    if line.startswith(_MARK):
+                        return _json.loads(line[len(_MARK):])
+                return None
+
+        args = ", ".join(("%s=None" % k) if v.get("nullable") else k for k, v in ins.items())
+        src = "def forward(self%s):\n    return _C._call(self, %s)\n" % ((", " + args) if args else "", ", ".join("%s=%s" % (k, k) for k in ins))
+        ns = {"_C": _C}
+        exec(src, ns)
+        _C.forward = ns["forward"]
+        out.append(_C())
+    return out

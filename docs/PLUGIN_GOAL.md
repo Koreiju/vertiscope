@@ -7423,3 +7423,7 @@ them when it was written. Their bearing on the 2D editor is assessed in
 **2026-11-25 (while G-402 was being read)**
 
 > you can likely work on batches of updates rather than one at a time to stay lean
+
+**2026-11-25 (repeated, while G-412 was being built)**
+
+> you can likely work on batches of updates rather than one at a time to stay lean

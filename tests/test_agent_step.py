@@ -158,3 +158,33 @@ def test_editor_calls_are_agent_tools_that_record_asks(tmp_path):
             assert asks == []
         else:
             assert asks == [{"create": {"name": "a", "body": "x = 1", "kind": "notebook"}}, {"link": ["a", "b"]}], asks
+
+
+def test_cell_tools_call_the_live_definition():
+    """G-412: a function a note's cells define is a Tool that calls it in the note's kernel."""
+    import io
+    from contextlib import redirect_stdout
+    from domvec import agent_tools as at, nodedefs
+    ns = {"__name__": "__main__"}
+    exec(compile('def triple(x: int) -> int:\n    """Three times x."""\n    return 3 * x\n', "<cell>", "exec"), ns, ns)
+
+    def run(code):
+        out = io.StringIO()
+        try:
+            with redirect_stdout(out):
+                exec(compile(code, "<cell>", "exec"), ns, ns)
+            return {"ok": True, "stdout": out.getvalue()}
+        except Exception as e:      # noqa: BLE001
+            return {"ok": False, "error": repr(e)}
+
+    defs = nodedefs.parse(run(nodedefs.SRC))["defs"]
+    (t,) = at.cell_tools(run, defs)
+    assert t.name == "triple" and t.inputs["x"]["type"] == "integer" and t.description == "Three times x."
+    assert t(x=5) == 15
+    ns["triple"] = lambda x: 4 * x          # the LIVE definition, not a copy
+    assert t(x=5) == 20
+    at.PLANT_NO_CELL_TOOLS[0] = True
+    try:
+        assert at.cell_tools(run, defs) == []
+    finally:
+        at.PLANT_NO_CELL_TOOLS[0] = False
