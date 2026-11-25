@@ -23,7 +23,7 @@
 >   default (DESIGN_VISION T-13); one interpreter for every workspace,
 >   nothing downloaded (148: "No, share one", over T-14's per-workspace
 >   environment).
-> - Read line by line (pass 19, F-102..F-104):
+> - Read line by line (pass 19, F-102..F-104; one wording corrected in pass 20b, F-113):
 >   - §1's third reason and §6 step 6's `runnable: false` for Jupyter
 >     kernels: superseded by 49 with the rest of "subprocesses first".
 >     `GET /interpreters` still said so after P-N1 drove `python3` over
