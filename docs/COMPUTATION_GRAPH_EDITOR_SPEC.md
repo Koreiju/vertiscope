@@ -1536,6 +1536,14 @@ Four boundaries make the scope exact:
    workspace definition that shadows an app name carries the name of the app
    tool it hides.
 
+**An installed library, unfolded (193 e).** Boundary 2 reads its definitions
+READ-ONLY and says nothing of the index. 193 (e): "general pypi packages
+could be recursively chunked, vectorized, and tooled as interfaces if we
+assume the unnesting on dependencies action is taken on the code canvas
+interface", by "a similar web stream dynamic". 166 has only browser-scanned
+code projected in 3D. 193 is the later word, but it says "could", so what
+an unnest indexes is O-11.
+
 Sources (read 2026-11-22):
 [anywidget AFM](https://anywidget.dev/en/afm/),
 [anywidget, Getting started](https://anywidget.dev/en/getting-started/),
@@ -1696,8 +1704,9 @@ with the app, **U** an unclear term or step.
 | F-119 | I | spec §13e | cited "NOTEBOOK §4b", the section F-103 found does not exist | NOTEBOOK §6 steps 4-5 |
 | F-120 | U | spec §13e | `JupyterKernel.run`; the class is `_JupyterKernel` (`kernel.py`) | named as in the code |
 | F-121 | I | spec head note (F-118) vs §13h | the suspension named §12b-§12c and §13d'-§13g, not §13h's search node, a slate field resolved external and drawn as a node | named |
+| F-122 | I | spec §13n boundary 2 vs 193 (e), 166 | an unfolded installed library is read-only and unindexed in §13n; 193 (e) says it "could" be chunked, vectorized and tooled by the web's stream; 166 projects only browser-scanned code | stated under §13n; O-11 |
 
-**Still open** -- O-1 to O-4 and O-6 to O-10 are work the design names; O-5 is a question for the reader:
+**Still open** -- O-1 to O-4 and O-6 to O-10 are work the design names; O-5 and O-11 are questions for the reader:
 
 - O-1. The pinned litegraph release's own licence file must be read before
   it is vendored (§13j); only third-party listings say MIT.
@@ -1759,6 +1768,11 @@ with the app, **U** an unclear term or step.
   and tagged chunks are not among them, and the craft itself is retired
   (G-405 hides it; its nodes are still computed). G-401 should read the
   tool space's own records (F-117).
+- O-11. **For the reader.** Does unnesting a code canvas's dependencies
+  index the installed library it reaches: chunked, vectorized and given
+  tool interfaces by the web's stream (193 e), so it is placed in 3D against
+  166's "only browser-scanned code"? Or does it stay a read-only unfold
+  (§13n boundary 2)? Its code models (193 f) wait on a download yes.
 
 ### 14a. The recovered prompts, one by one (F-59)
 
