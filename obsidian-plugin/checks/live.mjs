@@ -14628,13 +14628,13 @@ export function makeChecks(env) {
     },
     {
       id: "G-409",
-      asks: "node definitions from the live namespace (PLUGIN_GOAL 187, spec 13d'): a python cell that defines a function and a class is run; the note's kernel publishes each with its ports -- a primitive with a default a widget [8], a Literal a choice, an object type a socket, the return an output; an imported name is not a node -- and the card draws one row per node; planted __domvecPlantAllSockets: every port a socket",
+      asks: "node definitions from the live namespace (PLUGIN_GOAL 187, spec 13d'): a python cell that defines a function and a class is run; the note's kernel publishes each with its ports -- a primitive with a default a widget [8], a Literal a choice, an object type a socket, the return an output; an imported name is not a node -- and the card draws one row per node; its widgets and choices are edited in place (B14) and write that one default into the cell; planted __domvecPlantAllSockets + __domvecPlantNoWidgetEdit: every port a socket, nothing editable",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
           const pl = app.plugins.getPlugin("domvec-bridge"), desk = pl.desk;
-          window.__domvecPlantAllSockets = ${planted};
+          window.__domvecPlantAllSockets = ${planted}; window.__domvecPlantNoWidgetEdit = ${planted};
           const path = "domvec-checks/g409 " + (${planted} ? "p" : "c") + Date.now().toString(36) + ".md";
           const code = ["from typing import Literal", "from collections import OrderedDict",
             "def scan(url: str, k: int = 8, mode: Literal['fast', 'deep'] = 'fast', driver: object = None) -> list:",
@@ -14650,20 +14650,33 @@ export function makeChecks(env) {
             const defs = (window.__domvecNodeDefs || {})[path] || [];
             const scan = defs.find((d) => d.name === "scan"), box = defs.find((d) => d.name === "Box");
             const k = scan && scan.inputs.find((p) => p.name === "k"), mode = scan && scan.inputs.find((p) => p.name === "mode");
-            return { planted: ${planted}, names: defs.map((d) => d.name).sort(), rows,
+            // B14: the widget edited in place writes its default into the cell.
+            const card = desk.panelOf(path)?.card;
+            const kIn = card?.querySelector('.domvec-node-def[data-node="scan"] input[data-port="k"]');
+            const modeIn = card?.querySelector('.domvec-node-def[data-node="scan"] select[data-port="mode"]');
+            const sizeIn = card?.querySelector('.domvec-node-def[data-node="Box"] input[data-port="size"]');
+            if (kIn) { kIn.value = "12"; kIn.dispatchEvent(new Event("change")); await sleep(700); }
+            if (modeIn) { modeIn.value = JSON.stringify("deep"); modeIn.dispatchEvent(new Event("change")); await sleep(700); }
+            if (sizeIn) { sizeIn.value = "2.5"; sizeIn.dispatchEvent(new Event("change")); await sleep(700); }
+            const after = await app.vault.read(app.vault.getAbstractFileByPath(path));
+            const edited = { inputs: card ? card.querySelectorAll(".domvec-node-port").length : 0, k12: after.includes("k: int = 12,"),
+                             deep: after.includes("= " + JSON.stringify("deep") + ", driver"), size: after.includes("size: float = 2.5)"),
+                             rest_kept: after.includes("return [url] * k") && after.includes("driver: object = None") };
+            return { planted: ${planted}, edited, names: defs.map((d) => d.name).sort(), rows,
                      k_widget: !!k && k.kind === "widget" && k.default === 8, mode_choice: !!mode && mode.kind === "choice" && mode.options.join() === "fast,deep",
                      url_socket: !!scan && scan.inputs[0].kind === "socket", out_list: !!scan && scan.output.type === "list",
                      box_area: !!box && box.outputs.some((o) => o.name === "area" && o.type === "float") };
           } finally {
-            window.__domvecPlantAllSockets = false;
+            window.__domvecPlantAllSockets = false; window.__domvecPlantNoWidgetEdit = false;
             try { desk.closePath(path); } catch {}
             const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0);
           }
         })()`, { timeout: 90000 });
         const clean = await arm(false), planted = await arm(true);
         const ok = !!clean && clean.names.join() === "Box,scan" && clean.k_widget && clean.mode_choice && clean.url_socket && clean.out_list && clean.box_area
-          && clean.rows.length === 2 && clean.rows.some((r) => r.includes("k [8]") && r.includes("‹fast|deep›") && r.includes("→ list"));
-        return { pass: ok && !!planted && planted.names.length === 2 && !planted.k_widget, evidence: { clean, planted } };
+          && clean.rows.length === 2 && clean.rows.some((r) => r.startsWith("scan(url ●str, k ") && r.includes("→ list"))
+          && clean.edited.inputs === 3 && clean.edited.k12 && clean.edited.deep && clean.edited.size && clean.edited.rest_kept;
+        return { pass: ok && !!planted && planted.names.length === 2 && !planted.k_widget && planted.edited.inputs === 0 && !planted.edited.k12, evidence: { clean, planted } };
       },
     },
     {

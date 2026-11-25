@@ -71,7 +71,7 @@ import { agentBlock } from "./agentblock";
 import { Slots } from "./slots";
 import { completeCell } from "./complete";
 import { watchTabDrags } from "./tabdrag";
-import { drawDefs, nodeDefs } from "./nodedefs";
+import { drawDefs, nodeDefs, setDefault } from "./nodedefs";
 import { markProblems, problemExtension } from "./dfproblems";
 import { CodeRows } from "./coderows";
 import { BrowserPanel } from "./browserpanel";
@@ -980,6 +980,22 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     const plane = g && typeof g.plane === "function" ? g.plane() : null;
     return plane ? this.browseCard.open(plane, query, scope) : null;
   }
+  /** B14 (G-409): a widget edited in place writes that one default into the
+   *  note's own cell -- through the open editor when there is one. */
+  nodeEdits = { written: 0, last: "" };
+  async setNodeDefault(note: string, node: string, port: string, lit: string): Promise<boolean> {
+    const f = this.app.vault.getAbstractFileByPath(note);
+    if (!(f instanceof TFile)) return false;
+    const v = this.markdownLeaves().map((l) => l.view as MarkdownView).find((x) => x?.file?.path === note);
+    const text = v?.editor ? v.editor.getValue() : await this.app.vault.read(f);
+    const next = setDefault(text, node, port, lit);
+    if (next === null || next === text) return false;
+    if (v?.editor && v.getMode() === "source") { v.editor.setValue(next); await v.save(); }
+    else await this.app.vault.modify(f, next);
+    this.nodeEdits.written++; this.nodeEdits.last = `${node}.${port} = ${lit}`;
+    return true;
+  }
+
   desk: PlaneDesk = new PlaneDesk(this.app, {
     plane: () => {
       const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;
@@ -1297,7 +1313,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       void this.sidecar.nodeDefs(note).then((r) => {
         if (!r || !Array.isArray(r.defs)) return;
         nodeDefs[note] = r.defs;
-        drawDefs((this as any).desk?.panelOf?.(note)?.card, r.defs);
+        drawDefs((this as any).desk?.panelOf?.(note)?.card, r.defs, (node, port, lit) => void this.setNodeDefault(note, node, port, lit));
       });
     }
     if (stored) notes.push(stored);
