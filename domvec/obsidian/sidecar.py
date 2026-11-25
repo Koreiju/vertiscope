@@ -6440,6 +6440,14 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, dict(self.shell_pool.status(), enabled=True))
             return
 
+        if segments[0] == "tool_panel":
+            # PLUGIN_GOAL 195 (c): an app tool in its base canvas form -- the
+            # calls-only listing an agent sees -- for a `tool` block in a note.
+            # A pure function of the kernel's bootstrap: no store, no gate.
+            from .. import tool_panels as _tp
+            self._send(200, {"panels": _tp.render()})
+            return
+
         if segments[0] == "interpreters":
             # Discovery, not a fixed list: what can be run is a property of the
             # machine, and a hardcoded list is wrong on every machine but the

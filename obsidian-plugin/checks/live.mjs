@@ -14434,6 +14434,29 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-421",
+      asks: "an app tool in its base canvas form, in the same editor (PLUGIN_GOAL 195: 'agent-facing smol-tools interfaces ... exposed in the same graphical editor for the user to verify ... rendered in their base canvas form that is likely the pure string form the agents/code would effectively see'): a ```tool block naming Database draws its calls-only listing, read-only, holding Database.search; planted (__domvecPlantNoToolPanel) only the raw block",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          window.__domvecPlantNoToolPanel = ${planted};
+          const path = "domvec-checks/g421 tool " + Date.now().toString(36) + ".md";
+          const f = await app.vault.create(path, ["# a tool, as an agent sees it", "", F + "tool", "Database", F, ""].join(NL));
+          const leaf = app.workspace.getLeaf("tab");
+          try {
+            await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(1500);
+            const box = leaf.view.containerEl.querySelector(".domvec-tool-panel");
+            const pre = box && box.querySelector("pre");
+            return { planted: ${planted}, drawn: !!box, calls: !!pre && pre.textContent.includes("Database.search("), readonly: !!box && !box.querySelector("[contenteditable=true], textarea, input") };
+          } finally { window.__domvecPlantNoToolPanel = false; leaf.detach(); await app.vault.delete(f); }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const pass = !!clean && clean.drawn && clean.calls && clean.readonly && !!planted && !planted.drawn;
+        return { pass, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-414",
       asks: "hovering a CHUNK node in the 3D view opens its billboard as a preview (PLUGIN_GOAL 192: 'I should be able to view the panel billboard previews when hovering'): in fly-to mode, a pointer move onto chunk nodes on screen -- through the pane's own pointer handler -- opens THAT node's panel (or its unit's) within the dwell, and a move off onto empty canvas lets it go; planted (plantNo3DHoverPanel) no hover opens anything",
       async run() {

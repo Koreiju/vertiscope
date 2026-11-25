@@ -288,6 +288,21 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       console.warn("domvec: a stale `domvec` fence processor is still registered; keeping it", e);
     }
     // The browser cell inside a notebook (G-36's second host, `nbbrowser.ts`).
+    // PLUGIN_GOAL 195 (c): a ```tool block names an app tool and draws it in
+    // its base canvas form -- the calls-only string an agent sees -- read-only,
+    // in the same editor as the canvases (G-421). Planted `plantNoToolPanel`.
+    try {
+      this.registerMarkdownCodeBlockProcessor("tool", async (src, el) => {
+        const name = src.trim().split(/\s+/)[0] || "";
+        if ((window as any).__domvecPlantNoToolPanel) { el.createEl("pre", { text: src }); return; }
+        const base = this.settings.sidecar.trim().replace(/[/]+$/, "");
+        let text = "";
+        try { const j = await (await fetch(base + "/tool_panel")).json(); text = (j.panels || {})[name] || ""; } catch { /* sidecar down */ }
+        const box = el.createDiv({ cls: "domvec-tool-panel" });
+        box.createDiv({ cls: "domvec-tool-panel-head", text: "\u{1F512} " + name + " -- app tool, read-only" });
+        box.createEl("pre", { text: text || "no app tool named " + name });
+      });
+    } catch (e) { console.warn("domvec: tool block", e); }
     try {
       this.registerMarkdownCodeBlockProcessor(BROWSER_FENCE, browserFence(this.app));
     } catch (e) {
