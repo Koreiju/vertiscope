@@ -202,6 +202,8 @@ PLANT_NO_REF_BINDING = [False]
 #: Planted (G-279): no base objects in a cell's kernel.
 PLANT_NO_BASE_OBJECTS = [False]
 #: Planted (P-N4): no vault facade -- a cell sees neither `Vault` nor its note's folder.
+#: Agent runs started by `POST /agent_run` (G-384), by note: done, steps written, error.
+AGENT_RUNS: dict = {}
 PLANT_NO_VAULT = [False]
 #: Planted (PLUGIN_GOAL 62): a note's markdown trees are not compiled into its kernel.
 PLANT_NO_TREES = [False]
@@ -3872,6 +3874,65 @@ class _Handler(BaseHTTPRequestHandler):
             got["ms"] = round((time.perf_counter() - t0) * 1000, 1)
             _profile("package", {k: v for k, v in got.items() if k != "failed"})
             self._send(200, got)
+            return
+
+        if route == "agent_run":
+            # G-384: an agent's run APPEARING in the app -- a smolagents
+            # CodeAgent over the kernel's own tool panels, each step appended to
+            # a vault note as it lands (`agent_step.run_into`). `dry_replies`:
+            # a scripted model, for the live check. Loopback only; one thread.
+            if self.client_address[0] not in ("127.0.0.1", "::1"):
+                self._send(403, {"error": "loopback only"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}") or {}
+                from . import refs as _refs
+                root, note, task = _refs.VAULT[0], str(body.get("note") or ""), str(body.get("task") or "").strip()
+                if not root or not note.endswith(".md") or ".." in note or not task:
+                    self._send(400, {"error": "needs the vault root, a .md note under it and a task"})
+                    return
+                target = Path(root) / note
+                base = "http://127.0.0.1:%d" % self.server.server_port
+                dry = body.get("dry_replies")
+                pace = float(body.get("pace_s") or 0)
+
+                def _go():
+                    AGENT_RUNS[note] = {"done": False, "steps": 0, "error": ""}
+                    try:
+                        from smolagents import CodeAgent
+                        from smolagents.monitoring import LogLevel
+                        from .. import agent_step as _as, agent_tools as _at
+                        if dry:
+                            model = _as.scripted_model([str(r) for r in dry])
+                        else:
+                            from ..agent_model import LlamaCppModel
+                            model = LlamaCppModel.for_task("code", max_tokens=256, temperature=0.0)
+                        agent = CodeAgent(tools=_at.tools(base), model=model, code_block_tags="markdown",
+                                          max_steps=int(body.get("max_steps") or 6), verbosity_level=LogLevel.OFF)
+                        _as.PLANT_WRITE_AT_END[0] = bool(body.get("plant_write_at_end"))
+                        try:
+                            AGENT_RUNS[note]["steps"] = _as.run_into(agent, task, target, pace_s=pace)
+                        finally:
+                            _as.PLANT_WRITE_AT_END[0] = False
+                    except Exception as exc:        # noqa: BLE001
+                        AGENT_RUNS[note]["error"] = "%s: %s" % (type(exc).__name__, exc)
+                    finally:
+                        AGENT_RUNS[note]["done"] = True
+
+                threading.Thread(target=_go, name="agent-run", daemon=True).start()
+                self._send(200, {"started": True, "note": note})
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+
+        if route == "agent_status":
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}") or {}
+                self._send(200, AGENT_RUNS.get(str(body.get("note") or ""), {"done": False, "steps": 0, "error": "unknown run"}))
+            except Exception as exc:                # noqa: BLE001
+                self._send(500, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
         if route == "chat_stream":

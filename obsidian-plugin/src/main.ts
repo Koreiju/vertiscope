@@ -67,6 +67,7 @@ import { EditorCalls } from "./editorcalls";
 import { DataflowRun, noteTextOf } from "./dataflowrun";
 import { AutoRun, CrossRun } from "./autorun";
 import { PullApart } from "./pullapart";
+import { agentBlock } from "./agentblock";
 import { markProblems, problemExtension } from "./dfproblems";
 import { CodeRows } from "./coderows";
 import { BrowserPanel } from "./browserpanel";
@@ -305,6 +306,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // in the same editor as the canvases (G-421). Planted `plantNoToolPanel`.
     // The chat input cell (2026-11-24): a ```chat block streams its reply
     // inline and writes the turn into the note above it (chatcell.ts, G-422).
+    // G-384: a ```agent block runs a CodeAgent whose steps appear in a note as they land.
+    try {
+      this.registerMarkdownCodeBlockProcessor("agent", agentBlock(this.app, () => this.settings.sidecar, (f) => this.desk.open(f)));
+    } catch (e) { console.warn("domvec: agent block", e); }
     try {
       this.registerMarkdownCodeBlockProcessor("chat", chatCell(this.app, (p, c, on) => this.sidecar.chatStream(p, c, on)));
     } catch (e) { console.warn("domvec: chat block", e); }

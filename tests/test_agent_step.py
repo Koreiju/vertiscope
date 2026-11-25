@@ -92,3 +92,46 @@ def _run_steps():
     a = _agent()
     a.run("find it")
     return a.memory.steps
+
+
+def test_run_into_writes_each_step_as_it_lands(tmp_path):
+    """G-384 'the run appearing live': the note grows step by step -- after the
+    first step is yielded the note already holds its cell. Planted
+    PLANT_WRITE_AT_END: nothing but the head until the run is over."""
+    import threading
+    p = tmp_path / "run.md"
+    seen = []
+
+    class Watch:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def __getattr__(self, k):
+            return getattr(self.inner, k)
+
+        def run(self, task, stream=False):
+            for st in self.inner.run(task, stream=True):
+                yield st
+                seen.append(p.read_text(encoding="utf-8").count("```python"))
+
+    for planted in (False, True):
+        ag.PLANT_WRITE_AT_END[0] = planted
+        seen.clear()
+        try:
+            n = ag.run_into(Watch(_agent()), "find the radix trie chunk", p)
+        finally:
+            ag.PLANT_WRITE_AT_END[0] = False
+        text = p.read_text(encoding="utf-8")
+        assert n == 2 and text.count("```python") == 2 and text.startswith("# find the radix trie chunk")
+        # `seen` is read mid-run, between yields: clean, cells are already in
+        # the note while the run goes on; planted, none until it is over.
+        if planted:
+            assert max(seen) == 0, seen
+        else:
+            assert max(seen) >= 1, seen
+
+
+def test_scripted_model_drives_a_real_code_agent(tmp_path):
+    m = ag.scripted_model(REPLIES)
+    a = CodeAgent(tools=[search], model=m, code_block_tags="markdown", max_steps=4)
+    assert ag.run_into(a, "find it", tmp_path / "r.md") == 2
