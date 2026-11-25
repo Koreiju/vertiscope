@@ -307,11 +307,13 @@ def rerun_plan(text: str, open_line: int, known: Iterable[str] = ()) -> dict:
     cell = next((c for c in g.cells if c.kind == "python" and c.line == open_line + 1), None)
     if cell is None:
         return {"cell": None, "rerun": [], "problems": [], "error": "no python cell opens at line %d" % open_line}
-    mine = [p.to_json() for p in g.problems if cell.index in p.cells]
+    by = {c.index: c for c in g.cells}
+    # Each problem's fences, by their opening line, for the editor to draw.
+    mine = [dict(p.to_json(), open_lines=[by[i].line - 1 for i in p.cells if i in by])
+            for p in g.problems if cell.index in p.cells]
     if mine:
         return {"cell": cell.index, "rerun": [], "problems": mine}
     after = [] if PLANT_NO_READERS[0] else g.descendants(cell.index)
-    by = {c.index: c for c in g.cells}
     rerun = [{"index": i, "open_line": by[i].line - 1, "source": by[i].source,
               "reads": sorted(by[i].refs & cell.defs)}
              for i in after if by[i].kind == "python" and not any(i in p.cells for p in g.problems)]

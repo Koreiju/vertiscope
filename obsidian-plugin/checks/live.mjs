@@ -14593,6 +14593,40 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-428",
+      asks: "the editor draws the dataflow's problems (G-380's open part: 'the editor drawing the problems'): in a note where two cells define x, running the first marks BOTH fences in the editor with the one-definition message; after the second is changed to define y, a run clears the marks; planted (__domvecPlantNoProblemMarks) nothing is drawn",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const pl = app.plugins.getPlugin("domvec-bridge");
+          window.__domvecPlantNoProblemMarks = ${planted};
+          const path = "domvec-checks/g428 " + (${planted} ? "p" : "c") + Date.now().toString(36) + ".md";
+          const text = F + "python" + NL + "x = 1" + NL + F + NL + NL + F + "python" + NL + "x = 2" + NL + F + NL;
+          const leaf = app.workspace.getLeaf("tab");
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, text);
+            await leaf.openFile(f, { state: { mode: "source" } }); await sleep(800);
+            const root = leaf.view.containerEl;
+            await pl.onRunFence({ path, lang: "python", code: "x = 1", line: 0, refs: [] }); await sleep(600);
+            const marked = root.querySelectorAll(".cm-line.domvec-df-problem").length;
+            const msg = (root.querySelector(".domvec-df-problem-msg") || {}).textContent || "";
+            const ed = leaf.view.editor; ed.setValue(ed.getValue().replace("x = 2", "y = 2")); await sleep(300);
+            await pl.onRunFence({ path, lang: "python", code: "x = 1", line: 0, refs: [] }); await sleep(600);
+            const after = root.querySelectorAll(".cm-line.domvec-df-problem").length;
+            return { planted: ${planted}, marked, msg: msg.slice(0, 80), cleared: after === 0 };
+          } finally {
+            window.__domvecPlantNoProblemMarks = false; leaf.detach();
+            const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0);
+          }
+        })()`, { timeout: 90000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && clean.marked === 2 && clean.msg.includes("one definition") && clean.cleared;
+        return { pass: ok && !!planted && planted.marked === 0, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-408",
       asks: "the comm bridge (spec 13e; the live objects of 187 and 194's 'measuring the changes instantly'): a cell run with the plugin's own runCell opens a comm; the plugin's comm() reads its open and its message from the note kernel's log; a comm_msg the plugin sends reaches the object, whose state the next run reads back; planted (__domvecPlantNoComm) the traffic is never seen",
       async run() {

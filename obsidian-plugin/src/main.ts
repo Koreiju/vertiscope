@@ -67,6 +67,7 @@ import { EditorCalls } from "./editorcalls";
 import { DataflowRun, noteTextOf } from "./dataflowrun";
 import { AutoRun, CrossRun } from "./autorun";
 import { PullApart } from "./pullapart";
+import { markProblems, problemExtension } from "./dfproblems";
 import { CodeRows } from "./coderows";
 import { BrowserPanel } from "./browserpanel";
 import { PlaneHalo } from "./planehalo";
@@ -341,7 +342,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // The `[]()` gesture (`R-1`..`R-4`): results in a block under the line,
     // a click infills the link between the parentheses.
     this.registerEditorExtension(linkGesture(this.gesture));
-    this.registerEditorExtension(chunkGutter());
+    this.registerEditorExtension(chunkGutter()); this.registerEditorExtension(problemExtension);
     // A note's trees checked as the Python module they are (PLUGIN_GOAL 62).
     this.registerEditorExtension(slateLint(() => this.sidecar));
     (window as any).__domvecSlateLint = slateLintStats;
@@ -1216,7 +1217,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   /** The editor's own calls from a cell -- create, link, invoke, commit, review (G-386). */
   editor: EditorCalls = new EditorCalls(this as any);
   /** Marimo-style re-runs: a cell's readers run after it (G-380). */
-  dataflow: DataflowRun = new DataflowRun(this as any, (p: string) => noteTextOf(this.app, p, () => this.markdownLeaves().map((l) => l.view)));
+  dataflow: DataflowRun = new DataflowRun(this as any, (p: string) => noteTextOf(this.app, p, () => this.markdownLeaves().map((l) => l.view)),
+    (p, marks) => { markProblems(this.markdownLeaves().map((l) => l.view), p, marks); });
   /** A code card's typed rows as fields on its plane card (G-378). */
   codeRows: CodeRows = new CodeRows(this as any);
   /** A cell's asks of the app, carried out (G-288). */

@@ -30,7 +30,9 @@ export class DataflowRun {
   private active = new Set<string>();
 
   /** `noteText`: the note's text as the reader sees it (the editor's when open). */
-  constructor(private host: DataflowHost, private noteText: (path: string) => Promise<string>) {}
+  constructor(private host: DataflowHost, private noteText: (path: string) => Promise<string>,
+              /** Draw (or clear) the problems in the note's open editors (dfproblems.ts). */
+              private mark: (path: string, marks: { line: number; message: string }[]) => void = () => undefined) {}
 
   /** Called after a cell's run; the line for its notice, or "". */
   async after(req: RunRequest, reply: any): Promise<string> {
@@ -47,10 +49,12 @@ export class DataflowRun {
     } catch (e) { return ""; }
     this.stats.plans++;
     if (plan.problems && plan.problems.length) {
+      this.mark(note, plan.problems.flatMap((p: any) => (p.open_lines || []).map((line: number) => ({ line, message: p.message || p.kind }))));
       this.stats.refused++;
       this.stats.last = { note, problems: plan.problems };
       return "not re-run: " + plan.problems.map((p: any) => p.message || p.kind).join("; ");
     }
+    this.mark(note, []);
     const todo: any[] = plan.rerun || [];
     if (!todo.length) { this.stats.last = { note, line: req.line, rerun: [] }; return ""; }
     const ran: number[] = [];

@@ -1547,3 +1547,7 @@ body.domvec-chatui-pulling, body.domvec-chatui-pulling * { user-select: none !im
 
 /* The plain cockpit's prose wraps as any note's does (193-194). */
 .domvec-cockpit-card .cm-line:not(.HyperMD-codeblock) { white-space: break-spaces; }
+
+/* The dataflow's problems drawn in the editor (dfproblems.ts, G-380). */
+.cm-line.domvec-df-problem { box-shadow: inset 3px 0 0 var(--text-error); }
+.domvec-df-problem-msg { color: var(--text-error); font-size: var(--font-ui-smaller); }
