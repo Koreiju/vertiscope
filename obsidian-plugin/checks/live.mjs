@@ -14202,6 +14202,41 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-415",
+      asks: "a slate is drawn as a plain Obsidian panel (PLUGIN_GOAL 193 a: 'remove the purple nodes and simply keep the highlighting as regular obsidian panels exactly'): on the open cockpit, every name and {ref} is Obsidian's link colour with no tint, no border and no padding, and no lint squiggle is drawn (the message stays in the element's title); planted (body.domvec-plant-slate-chips) the pills and squiggles return",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const P = app.plugins.getPlugin("domvec-bridge");
+          document.body.classList.toggle("domvec-plant-slate-chips", ${planted});
+          try {
+            const cv = await P.cockpit.open(); await sleep(800);
+            const root = cv && cv.containerEl;
+            if (!root) return { error: "no cockpit" };
+            // Obsidian's own link colour, resolved in the same place.
+            const probe = root.createSpan(); probe.style.color = "var(--link-color)";
+            const link = getComputedStyle(probe).color; probe.remove();
+            const vars = [...root.querySelectorAll(".domvec-slate .domvec-var")].filter((e) => e.offsetWidth > 0);
+            const tinted = (e) => { const c = getComputedStyle(e).backgroundColor; if (c === "transparent") return false; const p = c.replace(/[^0-9.,]/g, "").split(",").map(Number); return p.length === 4 ? p[3] > 0 : true; };
+            const boxed = (e) => { const st = getComputedStyle(e); return parseFloat(st.borderTopWidth) > 0 || parseFloat(st.paddingLeft) > 0; };
+            const errs = [...root.querySelectorAll(".domvec-slate-error")];
+            return {
+              planted: ${planted}, names: vars.length,
+              link_colour: vars.filter((e) => getComputedStyle(e).color === link).length,
+              tinted: vars.filter(tinted).length, boxed: vars.filter(boxed).length,
+              errors: errs.length, errors_titled: errs.filter((e) => !!e.getAttribute("title")).length,
+              squiggles: errs.filter((e) => getComputedStyle(e).textDecorationLine.includes("underline")).length,
+            };
+          } finally { document.body.classList.remove("domvec-plant-slate-chips"); }
+        })()`, { timeout: 30000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.names >= 3 && clean.link_colour === clean.names
+          && clean.tinted === 0 && clean.boxed === 0 && clean.squiggles === 0 && clean.errors_titled === clean.errors;
+        const caught = !!planted && !planted.error && planted.tinted >= 1 && (planted.errors === 0 || planted.squiggles >= 1);
+        return { pass: ok && caught, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-414",
       asks: "hovering a CHUNK node in the 3D view opens its billboard as a preview (PLUGIN_GOAL 192: 'I should be able to view the panel billboard previews when hovering'): in fly-to mode, a pointer move onto chunk nodes on screen -- through the pane's own pointer handler -- opens THAT node's panel (or its unit's) within the dwell, and a move off onto empty canvas lets it go; planted (plantNo3DHoverPanel) no hover opens anything",
       async run() {
