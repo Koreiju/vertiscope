@@ -1478,7 +1478,7 @@ where it comes from. A term not listed is used in its plain sense.
 | **port / widget / socket** | a node's input or output; a WIDGET when its value is a literal edited in place, a SOCKET when it is linked by a name | the comm protocol's "widget" (a live object) | §13d' |
 | **live object** | a Python object with typed, observed state synced to its views over the kernel's comm channel (a Jupyter widget, front end per AFM) | a widget port | §13b, §13e |
 | **view** | one drawing of a live object's model; many views share one model | a placement of a markdown record | §13e |
-| **interface** | 193 (d): ONE interface that generalizes every canvas type -- code (editor tools, a terminal), web chunks (components acting on the live browser), the rest. Retrieval ranks over interface types and over content, two embeddings | a tool surface; a UI widget | 193 |
+| **interface** | 193 (d): ONE interface that generalizes every canvas type -- code (editor tools, a terminal), web chunks (components acting on the live browser), the rest. A query makes two embeddings; 193 names one, natural language over the interface types, and the other (over content) is my reading | a tool surface; a UI widget | 193 |
 | **canvas** | the interactive surface of an artifact (182's "interface canvases"). The EGO canvas is the cockpit's record ordering the ego's components (§12c) | a separate canvas note (retired, §12g) | 182, 183, §12c |
 | **plane** | the 2D surface fixed to the camera, in the 3D view, where nodes and panels sit; the editor's pan and zoom | an Obsidian pane | 50, 159 |
 | **ego / cockpit / craft** | the ego is the reader's tool space; the cockpit is its slate (`ego.md`); the craft WAS its 3D form (circles and dashed edges), retired from view (G-405) until G-400 draws the ego as world nodes on its own UMAP, flown first or third person | -- | 54, 67-69, 146, 158, 186 |
@@ -1714,6 +1714,7 @@ with the app, **U** an unclear term or step.
 | F-124 | I | spec §13m vs 193 (a), G-405, §12f | "panel" was Obsidian's view "extended"; the craft "is" the ego's 3D form while retired | panel cites 193; the craft WAS, until G-400 |
 | F-125 | U | spec §13m hard link vs 193 (b) | the retrieval link named only `[query](results)` | the `#` suggestion named; wiki links point to the open question |
 | F-126 | I | spec §13j, §13k vs the 193 head note | the build order and the packages still put G-409 and G-411 and litegraph on the path, and G-410 "a node body once G-411 lands" | each names its suspension; G-410 in a plain panel, as my reading |
+| F-127 | M | spec §13m `interface` (my pass-27 row) | the second of 193's two query embeddings stated as "over content"; 193 names only the one over interface types | the second marked as my reading |
 
 **Still open** -- O-1 to O-4 and O-6 to O-10 are work the design names; O-5 and O-11 are questions for the reader:
 
