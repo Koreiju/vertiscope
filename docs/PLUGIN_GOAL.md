@@ -7415,3 +7415,7 @@ them when it was written. Their bearing on the 2D editor is assessed in
 > [on the unreproducible stdin test] Expected failure (Recommended)
 
 > /goal Please just wind up building everything directly from the verbatim to the code for all intents, purposes and interpretations. there are so many things that you will likely just keep going, making sure all my own prompts are recorded in the verbatim and the verbatim is followed directly with the code. just literally as much building on the verbatim as possible
+
+**2026-11-25 (while G-238 was being built)**
+
+> please ensure all panels in regular obsidian tabs can be dragged into the 2D editor plane, and from the 2D editor plane to the obsidian tabs

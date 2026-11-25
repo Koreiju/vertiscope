@@ -69,6 +69,7 @@ import { AutoRun, CrossRun } from "./autorun";
 import { PullApart } from "./pullapart";
 import { agentBlock } from "./agentblock";
 import { Slots } from "./slots";
+import { completeCell } from "./complete";
 import { markProblems, problemExtension } from "./dfproblems";
 import { CodeRows } from "./coderows";
 import { BrowserPanel } from "./browserpanel";
@@ -1569,6 +1570,15 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   }
 
   pull: PullApart = new PullApart(this.app, () => this.desk || null);
+  async onCompleteFence(req: RunRequest): Promise<void> {
+    if (!req.path) return;
+    await completeCell(this.app, {
+      search: async (q) => ((await this.sidecar.search(q, { k: 4 }))?.hits || []).map((h: any) => ({ url: h.url, preview: h.preview || "" })),
+      stream: (p, c, on) => this.sidecar.chatStream(p, c, on),
+      viewOf: (p) => this.markdownLeaves().map((l: any) => l.view).find((v: any) => v?.file?.path === p) || this.desk.viewOf(p),
+    }, req.path, req.line, req.code);
+  }
+
   async onPullFence(req: RunRequest): Promise<void> {
     if (req.path) await this.pull.out(req.path, req.line);
   }

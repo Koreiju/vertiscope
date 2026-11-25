@@ -14739,6 +14739,51 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-432",
+      asks: "natural-language-first prototyping (G-238, Addendum XI 167): a python cell that is a wireframe -- def add(a, b) with a docstring and a ... body -- shows a complete control; pressing it retrieves from the store with the docstring, the local model completes the function, and the cell is rewritten with the docstring kept and a real body, which runs: add(2, 3) prints 5; a cell that is not a wireframe shows no control; planted (__domvecPlantNoComplete) the cell stays a wireframe",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10), Q = String.fromCharCode(34).repeat(3);
+          const pl = app.plugins.getPlugin("domvec-bridge");
+          window.__domvecPlantNoComplete = ${planted};
+          const path = "domvec-checks/g432 " + (${planted} ? "p" : "c") + Date.now().toString(36) + ".md";
+          const wire = "def add(a, b):" + NL + "    " + Q + "Return the sum of a and b." + Q + NL + "    ...";
+          const leaf = app.workspace.getLeaf("tab");
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, F + "python" + NL + wire + NL + F + NL + NL + F + "python" + NL + "print(add(2, 3))" + NL + F + NL);
+            await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(900);
+            let pres = [];
+            for (let k = 0; k < 30; k++) { pres = [...leaf.view.containerEl.querySelectorAll("pre")].filter((p) => p.textContent.includes("add(")); if (pres.length >= 2 && pres[0].querySelector(".domvec-run-fence, button")) break; await sleep(200); }
+            const per = pres.map((p) => p.querySelectorAll(".domvec-complete-fence").length);   // [wireframe, caller]
+            const btns = pres.length ? pres[0].querySelectorAll(".domvec-complete-fence") : [];
+            if (!btns.length) return { planted: ${planted}, buttons: 0 };
+            const w0 = window.__domvecCompleteWritten;
+            btns[0].click();
+            let t = "";
+            for (let k = 0; k < 120; k++) { await sleep(500); t = await app.vault.read(f); if (!t.includes("    ...") ) break; if (${planted} && k > 6) break; }
+            const completed = !t.includes("    ...") && t.includes("Return the sum of a and b.");
+            let out = "";
+            if (completed) {
+              const fences = t.split(F + "python");
+              const first = fences[1].split(F)[0].replace(/^\s+|\s+$/g, ""), second = "print(add(2, 3))";
+              await pl.onRunFence({ path, lang: "python", code: first, line: 0, refs: [] });
+              const r = await pl.onRunFence({ path, lang: "python", code: second, line: t.split(NL).findIndex((l) => l.includes("print(add(2, 3))")) - 1, refs: [] });
+              out = JSON.stringify(r && (r.stdout || r.output || r)).slice(0, 200);
+            }
+            return { planted: ${planted}, buttons: btns.length, per, completed, runs_5: out.includes("5"), body: t.slice(0, 260) };
+          } finally {
+            window.__domvecPlantNoComplete = false; leaf.detach();
+            const g = app.vault.getAbstractFileByPath(path); if (g) await app.vault.delete(g).catch(() => 0);
+          }
+        })()`, { timeout: 120000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && clean.buttons === 1 && clean.per[1] === 0 && clean.completed && clean.runs_5;
+        return { pass: ok && !!planted && planted.buttons === 1 && !planted.completed, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-408",
       asks: "the comm bridge (spec 13e; the live objects of 187 and 194's 'measuring the changes instantly'): a cell run with the plugin's own runCell opens a comm; the plugin's comm() reads its open and its message from the note kernel's log; a comm_msg the plugin sends reaches the object, whose state the next run reads back; planted (__domvecPlantNoComm) the traffic is never seen",
       async run() {
