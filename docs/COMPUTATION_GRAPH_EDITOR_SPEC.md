@@ -1728,6 +1728,8 @@ with the app, **U** an unclear term or step.
 | F-130 | I | PRD G-38 vs its live check (O-9) | Confirm while its check failed: the planted banner was added only on hover 2 and never measured when hover 2 found no new chunk | the plant moved to the first landed hover; passes both arms (`402c5a2`); O-9 closed |
 | F-131 | I | spec §13m (panel, field, hard link) vs 194 | the glossary still called the links question open and the panel's additions suspended | each cites 194's withdrawal |
 
+**Passes that found nothing new** (2026-11-24): pass 32 re-read pass 31's edits and every "suspend" left in the docs (only ledger history). Pass 33 read `egocanvas.ts` and `canvasparse.ts` whole against §12c: its disagreements are already F-115 (the migration runs only from `openCanvas`) and O-10 (the comment says tool space, `canvas.members` reads the craft). Field order is join order, appended, which is compile order (142). What remains waits on the reader: 194's reading, O-5, O-11, the covering cards.
+
 **Still open** -- O-1 to O-4, O-6 to O-8 and O-10 are work the design names (O-6 and O-10 withdrawn with the slate syntax if the reader confirms 194's reading; O-9 closed); O-5 and O-11 are questions for the reader:
 
 - O-1. The pinned litegraph release's own licence file must be read before
