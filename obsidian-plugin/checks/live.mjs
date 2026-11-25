@@ -14338,7 +14338,12 @@ export function makeChecks(env) {
             const card = document.querySelector(".domvec-cockpit-card");
             const plus = card && card.querySelector(":scope > .domvec-plus-chat");
             if (!plus) return { planted: ${planted}, plus: false };
-            plus.click(); await sleep(1500); plus.click(); await sleep(1200);
+            // Scrolled to the top first: the foot out of view is where the cell
+            // existed but was never drawn (confirm runs 27-28).
+            const sc = card.querySelector(".cm-scroller"); if (sc) { sc.scrollTop = 0; await sleep(200); }
+            plus.click();
+            for (let k = 0; k < 50 && !(card.querySelector(".domvec-chat-cell textarea") && document.activeElement === card.querySelector(".domvec-chat-cell textarea")); k++) await sleep(100);
+            plus.click(); await sleep(1200);
             const t = await app.vault.read(f), ta = card.querySelector(".domvec-chat-cell textarea");
             return { planted: ${planted}, plus: true, cells_in_note: t.split(F + "chat").length - 1, at_foot: t.trim().endsWith(F + "chat" + String.fromCharCode(10) + F),
                      drawn: !!ta, focused: !!ta && document.activeElement === ta };

@@ -16,6 +16,7 @@
  * browser cell's hover strip returns.
  */
 import type { App, MarkdownPostProcessorContext, TFile } from "obsidian";
+import { EditorView } from "@codemirror/view";
 
 const NL = String.fromCharCode(10);
 /** Context sent with a turn, from the foot of the note above the cell. */
@@ -79,8 +80,23 @@ export function plusChat(app: App, card: HTMLElement, path: string): void {
   b.onclick = async () => {
     const f = app.vault.getAbstractFileByPath(path) as TFile | null;
     if (!f) return;
-    await app.vault.process(f, (t) => new RegExp("(^|\n)" + "`".repeat(3) + "chat[ \\t]*(\\r?\\n|$)").test(t) ? t : t.replace(/\s*$/, "") + NL + NL + "```chat" + NL + "```" + NL);
-    for (let i = 0; i < 20; i++) {
+    const has = (t: string) => new RegExp("(^|\n)" + "`".repeat(3) + "chat[ \t]*(\r?\n|$)").test(t);
+    const add = (t: string) => t.replace(/\s*$/, "") + NL + NL + "```chat" + NL + "```" + NL;
+    // Into the card's open editor when there is one: it draws at once and its
+    // own save persists it (a file write under an open editor reaches it late
+    // and can race its autosave). Else the file.
+    const cmEl = card.querySelector(".cm-editor") as HTMLElement | null;
+    const cm = cmEl ? EditorView.findFromDOM(cmEl) : null;
+    if (cm) {
+      const t = cm.state.doc.toString();
+      const keep = t.replace(/\s*$/, "").length;
+      // Scrolled to: CodeMirror draws only the lines in view, so a cell at
+      // the foot of a scrolled card would exist and never be drawn.
+      const ins = has(t) ? "" : add(t).slice(keep);
+      cm.dispatch({ ...(ins ? { changes: { from: keep, to: t.length, insert: ins } } : {}),
+                    effects: EditorView.scrollIntoView(ins ? keep + ins.length : t.length, { y: "end" }) });
+    } else await app.vault.process(f, (t) => has(t) ? t : add(t));
+    for (let i = 0; i < 40; i++) {
       const ta = card.querySelector(".domvec-chat-cell textarea") as HTMLTextAreaElement | null;
       if (ta) { ta.scrollIntoView({ block: "nearest" }); ta.focus(); return; }
       await new Promise((r) => setTimeout(r, 100));
