@@ -6789,6 +6789,36 @@ compiled links shown as highlighting) was open:
   editors). That research is kept for its own question, not suspended with
   the markdown syntax.*
 
+### 195. (2026-11-24) Retrieval with the ego: results stay in their own canvases; where a graph begins and a canvas ends
+
+> I think the point on interlacing retrieval, as well, with the ego, is that
+> the results stay pure to the actual canvases that the results are situated
+> in, and presented as their own graphical items outside of the ego's own
+> canvas, but it's all still raveled in this link between code/object design
+> graphical interfaces with dynamic updates, our base UI canvases/smoltools,
+> so perhaps the graph side of showing specialized rendered canvases and
+> their agent-facing smol-tools interfaces that are themselves exposed in the
+> same graphical editor for the user to verify and for the agents/code to see
+> as these "callable objects" but rendered in their base canvas form that is
+> likely the pure string form the agents/code would effectively see. It also
+> touches on the boundaries of where a graph begins and a canvas ends, and
+> why, and when.
+
+*Read as (195), mine, to be corrected:*
+- *(a) A retrieval result stays in the canvas it belongs to (a web chunk in
+  its page's canvas, a cell in its note), and is drawn as its own item
+  OUTSIDE the ego's canvas. The ego does not absorb results.*
+- *(b) Results, code and objects are still joined: the graphical interfaces
+  for code and objects update live, and the base UI canvases are the
+  smol-tools (smolagents' tools, 166 c, §13h).*
+- *(c) The graph side shows each specialized rendered canvas together with
+  its agent-facing tool interface, in the same graphical editor. The reader
+  verifies it there. Agents and code see it as a "callable object". Its
+  base canvas form is likely the pure string an agent would see: the
+  calls-only listing (§13n).*
+- *(d) An open question, posed by the reader: where a graph begins and a
+  canvas ends, why, and when.*
+
 ### Recovered verbatim (2026-11-22 inventory)
 
 *Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,
