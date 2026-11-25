@@ -50,8 +50,10 @@ cite the latest series by bare number, under the rule at §13's head.
 > every real tag would fire a search; `[query]()` stays the gesture. O-5:
 > records and readouts cross notes, live values stay per note. O-11: an
 > unnest stays read-only; 166 holds until an unnest is built. G-416 (two
-> embeddings, one over interface types) and 194 (f) (composing groups) are
-> the next builds. Done in this pivot: G-415 (plain panels), G-408 (comm
+> embeddings, one over interface types) is built (G-416). 194 (f), composing
+> a group into a new thing, is `commit` (G-386, seen live); its member links
+> are still wiki links, O-7's owed change. The covering cards are gone from
+> the plane. Done in this pivot: G-415 (plain panels), G-408 (comm
 > bridge), G-417 (sparkle), G-38's check repaired.
 ---
 

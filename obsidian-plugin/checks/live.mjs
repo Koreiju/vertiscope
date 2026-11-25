@@ -14313,6 +14313,24 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-416",
+      asks: "one interface over every canvas type (PLUGIN_GOAL 193 d): a search names each hit's interface, and a second query embedding ranks the interface types -- a query about running python ranks 'code cell' first, one about a web page 'web chunk'",
+      async run() {
+        const r = await evaluate(`(async () => {
+          const P = app.plugins.getPlugin("domvec-bridge");
+          const base = P.settings.sidecar.replace(/[/]+$/, "");
+          const ask = async (q) => (await fetch(base + "/search?k=3&q=" + encodeURIComponent(q))).json();
+          const a = await ask("run python code in a kernel"), b = await ask("controls on a live web page in the browser");
+          return { code_first: a.interfaces && a.interfaces[0] && a.interfaces[0].interface,
+                   web_first: b.interfaces && b.interfaces[0] && b.interfaces[0].interface,
+                   named: (a.hits || []).filter((h) => !!h.interface).length, hits: (a.hits || []).length };
+        })()`, { timeout: 60000 });
+        // Non-vacuity: the two queries must rank DIFFERENT types first.
+        const pass = !!r && r.code_first === "code cell" && r.web_first === "web chunk" && r.named === r.hits && r.hits > 0;
+        return { pass, evidence: r };
+      },
+    },
+    {
       id: "G-414",
       asks: "hovering a CHUNK node in the 3D view opens its billboard as a preview (PLUGIN_GOAL 192: 'I should be able to view the panel billboard previews when hovering'): in fly-to mode, a pointer move onto chunk nodes on screen -- through the pane's own pointer handler -- opens THAT node's panel (or its unit's) within the dwell, and a move off onto empty canvas lets it go; planted (plantNo3DHoverPanel) no hover opens anything",
       async run() {
