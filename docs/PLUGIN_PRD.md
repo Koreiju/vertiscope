@@ -5,13 +5,24 @@ outranks this file. This is their decomposition: every requirement traced to a
 phrase in one of them, numbered so it can be argued about and measured.
 
 **Status vocabulary.** `Done` means built *and* verified in the running app
-over CDP, never by screenshot (X-2). `Partial` means built with a measured
-shortfall, and the shortfall is stated. `Open` means not started. **`Defect`**
-means something is built and CONTRADICTS the goal — those are not gaps to fill
-but code to change, and they are listed first because they are the only
-category where doing nothing makes things worse.
+over CDP, never by screenshot (X-2). `Confirm` means built and verified by a
+test or a live check, but not yet seen working by a person; nothing leaves it
+except the reader saying so (`CLAUDE.md`). `Partly` (older rows: `Partial`)
+means built with a measured shortfall, and the shortfall is stated. `Open`
+means not started. **`Defect`** means something is built and CONTRADICTS the
+goal — those are not gaps to fill but code to change, and they are listed
+first because they are the only category where doing nothing makes things
+worse. `Superseded` names the later item that replaced a row; `Standing`
+marks a rule kept as found. `build_analytics/design_state.md` computes the
+counts.
 
-**Part I** is the decomposition: 128 numbered requirements, plus section 0b recording every judgment where the two statements disagreed. **Part II** keeps the measured findings from
+**193 and 194 (2026-11-24).** Panels are plain Obsidian notes, and the
+custom slate syntax (`{ref}` fields, chips) is withdrawn; its work moves into
+code cells. That is my reading, awaiting the reader. Rows built on the slate
+syntax (G-372, G-379, G-401, G-403 among them) are read against
+COMPUTATION_GRAPH_EDITOR_SPEC's head note until the reader confirms it.
+
+**Part I** is the decomposition: numbered requirements (128 at first; 579 rows across both parts on 2026-11-24, as `design_state` counts them), plus section 0b recording every judgment where the two statements disagreed. **Part II** keeps the measured findings from
 the work so far, under their original `R-*` ids, as the evidence Part I cites.
 Those ids are retired as requirements and retained as anchors.
 
