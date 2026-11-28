@@ -117,6 +117,9 @@ TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+#: Planted: a draw (`peek`) pushes a stack frame like a call.
+PLANT_PEEK_PUSHES = [False]
+
 #: Per-cell navigation stacks in memory (`session_key -> {"entries": [...], "idx": int, "chunk_idx": int, "url": str}`).
 _CELL_STACKS: Dict[str, Dict[str, Any]] = {}
 
@@ -580,6 +583,13 @@ def execute(
         "history_line": history_line,
     }
 
+    # A DRAW is not a call (Item 201: "exiting the ``` fields would then produce
+    # the call"): `peek` shows the state and leaves the stack alone -- each
+    # re-render of a cell was pushing a frame (5/5 after reloads, 2026-11-28).
+    if body.get("peek") and not PLANT_PEEK_PUSHES[0]:
+        entry["stack"] = {"index": max(1, st["idx"] + 1), "total": max(1, len(st["entries"])),
+                          "can_back": st["idx"] > 0, "can_forward": st["idx"] < len(st["entries"]) - 1}
+        return entry
     # Push onto stack (truncating any forward branch when making a fresh call)
     if st["idx"] < len(st["entries"]) - 1:
         st["entries"] = st["entries"][:st["idx"] + 1]

@@ -16653,6 +16653,92 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-469",
+      asks: "a browser cell's bar is not jumbled on the 2D editor (Item 200: 'the buttons on the markdown panel are way too jumbled together'): in a narrow card or a tab it is ONE row with nothing overflowing -- back, forward, reload, address, and a '⋯' nothing covers -- and '⋯' opens the six toggles (scan, live, save offline, offline, desktop, boxes); the same note in a wide tab shows them in the row; planted __domvecPlantJumbledBar: the old bar (more than one row, or overflowing)",
+      async run() {
+        const arm = (planted, surface) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvecPlane, F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          window.__domvecPlantJumbledBar = ${planted};
+          const tag = (${planted} ? "p" : "c") + "${surface}" + Date.now().toString(36);
+          const path = "domvec-checks/g469 " + tag + ".md";
+          const out = { planted: ${planted}, surface: "${surface}" };
+          let leaf = null, root = null;
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, "# g469" + NL + NL + F + "browser" + NL + "https://example.org/" + NL + F + NL);
+            if ("${surface}" === "plane") { await d.open(f); await sleep(2500); root = d.panelOf(path)?.card; }
+            else { leaf = app.workspace.getLeaf("tab"); await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(2500); root = leaf.view.containerEl; }
+            const bar = root && root.querySelector(".domvec-browser-bar");
+            if (!bar) return { ...out, error: "no browser bar" };
+            const btns = [...bar.querySelectorAll("button")].filter((b) => b.offsetParent !== null);
+            const tops = new Set(btns.map((b) => Math.round(b.getBoundingClientRect().top / 8)));
+            out.rows = tops.size; out.overflow = bar.scrollWidth > bar.clientWidth + 2; out.width = Math.round(bar.getBoundingClientRect().width);
+            const t = bar.querySelector(".domvec-browser-more-toggle");
+            out.toggle = !!(t && t.offsetParent !== null);
+            if (out.toggle) {
+              const r = t.getBoundingClientRect();
+              out.uncovered = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === t || t.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+              t.click(); await sleep(200);
+              out.opened = [...bar.querySelectorAll(".domvec-browser-more button")].filter((b) => b.offsetParent !== null).length;
+            } else {
+              out.inline = [...bar.querySelectorAll(".domvec-browser-more button")].filter((b) => b.offsetParent !== null).length;
+            }
+            return out;
+          } finally {
+            window.__domvecPlantJumbledBar = false;
+            try { d.closePath(path); } catch {}
+            if (leaf) { try { leaf.detach(); } catch {} }
+            await sleep(500);
+            const x = app.vault.getAbstractFileByPath(path); if (x) await app.vault.delete(x).catch(() => 0);
+          }
+        })()`, { timeout: 60000 });
+        const plane = await arm(false, "plane"), tab = await arm(false, "tab"), planted = await arm(true, "plane");
+        const okPlane = !!plane && !plane.error && plane.rows === 1 && !plane.overflow && plane.toggle && plane.uncovered && plane.opened === 6;
+        const okTab = !!tab && !tab.error && tab.rows === 1 && !tab.overflow && (tab.toggle ? tab.opened === 6 : tab.inline === 6);
+        return { pass: okPlane && okTab && !!planted && !planted.error && (planted.rows > 1 || planted.overflow), evidence: { plane, tab, planted } };
+      },
+    },
+    {
+      id: "G-470",
+      asks: "drawing a ```tool cell is not a call (Item 201: 'exiting the ``` fields would then produce the call'): re-opening the same note's card three times leaves its tool stack where it was -- on the 2D editor card AND in a tab; planted __domvecPlantNoPeek: each draw pushes a frame",
+      async run() {
+        const arm = (planted, surface) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvecPlane, F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          window.__domvecPlantNoPeek = ${planted};
+          const tag = (${planted} ? "p" : "c") + "${surface}" + Date.now().toString(36);
+          const path = "domvec-checks/g470 " + tag + ".md";
+          const out = { planted: ${planted}, surface: "${surface}", totals: [] };
+          let leaf = null;
+          const stackOf = (root) => { const s = root && root.querySelector(".domvec-tool-step"); const m = s && /([0-9]+)[/]([0-9]+)/.exec(s.textContent); return m ? +m[2] : -1; };
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, "# g470" + NL + NL + F + "tool" + NL + JSON.stringify({ search: { search: "trie " + tag } }) + NL + F + NL);
+            for (let k = 0; k < 3; k++) {
+              // Each draw: the search differs, so a push would always be a NEW frame.
+              await app.vault.modify(f, "# g470" + NL + NL + F + "tool" + NL + JSON.stringify({ search: { search: "trie " + tag + " " + k } }) + NL + F + NL);
+              let root = null;
+              if ("${surface}" === "plane") { try { d.closePath(path); } catch {} await sleep(300); await d.open(f); await sleep(1800); root = d.panelOf(path)?.card; }
+              else { if (leaf) leaf.detach(); leaf = app.workspace.getLeaf("tab"); await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(1800); root = leaf.view.containerEl; }
+              out.totals.push(stackOf(root));
+            }
+            return out;
+          } finally {
+            window.__domvecPlantNoPeek = false;
+            try { d.closePath(path); } catch {}
+            if (leaf) { try { leaf.detach(); } catch {} }
+            await sleep(500);
+            const x = app.vault.getAbstractFileByPath(path); if (x) await app.vault.delete(x).catch(() => 0);
+          }
+        })()`, { timeout: 60000 });
+        const flat = (c) => !!c && c.totals.length === 3 && c.totals.every((t) => t >= 1 && t <= 1);
+        const plane = await arm(false, "plane"), tab = await arm(false, "tab"), planted = await arm(true, "plane");
+        const grew = !!planted && planted.totals.length === 3 && planted.totals[2] > planted.totals[0];
+        return { pass: flat(plane) && flat(tab) && grew, evidence: { plane, tab, planted } };
+      },
+    },
+    {
       id: "G-431",
       asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
       async run() {

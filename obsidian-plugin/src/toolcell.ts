@@ -267,7 +267,8 @@ export function toolBlockProcessor(app: App, host: ToolCellHost) {
       }
     };
 
-    await paint({ source: src });
+    // Drawing the cell PEEKS; only leaving the fence (or the call button) calls.
+    await paint({ source: src, peek: !(window as any).__domvecPlantNoPeek } as any);
   };
 }
 

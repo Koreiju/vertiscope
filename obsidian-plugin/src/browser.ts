@@ -362,24 +362,37 @@ export class BrowserView extends ItemView {
     this.address = bar.createEl("input", { cls: "domvec-browser-url" });
     this.address.type = "text";
     this.address.placeholder = "url";
-    const scan = bar.createEl("button", { text: "scan" });
-    this.liveButton = bar.createEl("button", { text: "live ●" });
+    // Item 200 ("the buttons on the markdown panel are way too jumbled"): the
+    // six toggles are one group. In a narrow host (a cell on the 2D editor) the
+    // group folds behind "⋯" (container query in styles.css); wide, it is one
+    // row as before. Every control stays one click away. Planted
+    // `__domvecPlantJumbledBar`: no group, the old wrap.
+    const plantJumble = !!(window as any).__domvecPlantJumbledBar;
+    let more: HTMLElement = bar;
+    if (!plantJumble) {
+      const toggle = bar.createEl("button", { cls: "domvec-browser-more-toggle", text: "⋯" });
+      toggle.title = "more: scan, live, save offline, offline, desktop, boxes";
+      more = bar.createDiv({ cls: "domvec-browser-more" });
+      toggle.onclick = () => { more.toggleClass("is-open", !more.hasClass("is-open")); };
+    }
+    const scan = more.createEl("button", { text: "scan" });
+    this.liveButton = more.createEl("button", { text: "live ●" });
     // `G-60`: save each page as presented, for offline use -- a toggle, as asked.
-    this.saveOfflineButton = bar.createEl("button");
+    this.saveOfflineButton = more.createEl("button");
     this.paintSaveOffline();
     this.saveOfflineButton.onclick = () => { void this.toggleSaveOffline(); };
     // `G-62`: the page with no connection -- saved as presented, or rebuilt
     // from the scan trace. Pressed again, back to the live page.
-    const offlineBtn = bar.createEl("button", { text: "offline" });
+    const offlineBtn = more.createEl("button", { text: "offline" });
     // Item 89: the outlines shown or not -- by ALPHA only (a class on the wrap,
     // opacity 0 on the boxes). Hover, the 3D flight, panels, pins and the
     // stream behave the same either way. Planted (plantBoxesStopHover): off
     // also stops the hover, which is what "the same" forbids.
-    this.widthButton = bar.createEl("button");
+    this.widthButton = more.createEl("button");
     this.widthButton.onclick = () => { this.nativeWidth = !this.nativeWidth; this.fitDesktopWidth(); };
     this.widthButton.setText("desktop");
     this.widthButton.title = "lay pages out at desktop width, scaled to the cell (click: native width)";
-    this.boxesButton = bar.createEl("button");
+    this.boxesButton = more.createEl("button");
     this.boxesButton.onclick = () => { void this.toggleBoxes(); };
     offlineBtn.onclick = () => {
       if (this.offlineFor) { const u = this.offlineFor; this.offlineFor = ""; this.go(u); }

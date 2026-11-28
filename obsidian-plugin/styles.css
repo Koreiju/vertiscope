@@ -1700,3 +1700,39 @@ body.domvec-field-holding, body.domvec-field-holding * { cursor: grabbing !impor
 
 /* G-448: distinguish cross-notebook Python variable dependency edges on the 2D plane. */
 .domvec-plane-links line.is-var-dep { stroke: #7aa2f7; stroke-dasharray: 3 3; stroke-opacity: 0.85; }
+
+/* G-456: cell-wise cursor-gated ```chunk unification (page view outside cursor; markdown + inline tool cells inside). */
+.domvec-chunk-cell { border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); background: var(--background-primary); overflow: hidden; margin: 4px 0; }
+.domvec-chunk-cell-page .domvec-bar .domvec-switch { display: none; }
+.domvec-chunk-cell-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 10px; border-top: 1px dashed var(--background-modifier-border); background: color-mix(in srgb, var(--background-secondary) 70%, transparent); font-size: 11px; color: var(--text-muted); }
+.domvec-chunk-cell-3d { font-size: 10px; height: 20px; padding: 1px 7px; cursor: pointer; }
+.domvec-chunk-inline-tool { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; padding: 1px 7px; border-radius: var(--radius-s); border: 1px solid var(--background-modifier-border); background: var(--background-secondary); font-size: 11px; vertical-align: middle; }
+.domvec-chunk-inline-badge { font-family: var(--font-monospace); font-size: 10px; color: var(--text-accent); font-weight: 600; text-transform: uppercase; }
+.domvec-chunk-inline-input { width: 120px; height: 20px; font-size: 11px; padding: 1px 5px; }
+.domvec-chunk-inline-btn { height: 20px; font-size: 11px; padding: 0 7px; cursor: pointer; }
+
+/* G-460: inline symbol rename popup inside fenced code cells (F2). */
+.domvec-rename-box { position: fixed; z-index: 9999; padding: 4px 6px; border-radius: var(--radius-s); border: 1px solid var(--interactive-accent); background: var(--background-primary); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); }
+.domvec-rename-input { width: 200px; height: 24px; font-family: var(--font-monospace); font-size: 12px; padding: 2px 6px; }
+
+/* Item 200: the browser bar's toggles as one group; folded behind ⋯ when the
+   browser sits in a narrow host (a cell on the 2D editor). */
+.domvec-browser { container-type: inline-size; }
+.domvec-browser-more { display: contents; }
+.domvec-browser-more-toggle { display: none; }
+@container (max-width: 900px) {
+  .domvec-browser-bar { flex-wrap: nowrap; }
+  .domvec-browser-bar .domvec-browser-url { min-width: 0; flex: 1 1 auto; }
+  .domvec-browser-more-toggle { display: inline-flex; }
+  .domvec-browser-more { display: none; }
+  .domvec-browser-more.is-open {
+    display: flex; flex-wrap: wrap; gap: 4px; position: absolute; z-index: 5;
+    top: 100%; right: 4px; padding: 6px; background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border); border-radius: 6px;
+  }
+  .domvec-browser-bar { position: relative; }
+}
+
+/* A browser cell embedded in a note: Obsidian's edit-block button and the
+   cell's pop-out sit in its top-right corner -- the bar leaves them room. */
+.cm-embed-block .domvec-browser-bar, .block-language-browser .domvec-browser-bar { padding-right: 60px; }
