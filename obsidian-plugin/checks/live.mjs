@@ -16529,6 +16529,51 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-466",
+      asks: "the chat -> tool loop in place (Item 201: 'linked calls on the tool-chain are rendered in-place from chat model outputs ... tool call histories ... just above the main tool cell'): a chat reply holding a ```tool block renders it as a tool cell, the call runs, and its compact history line is written just above that tool cell; the hits read as text (never '<bound method'); on the 2D editor card AND in a tab; planted __domvecPlantNoReplyTools: the block renders but never runs (no history line)",
+      async run() {
+        const arm = (planted, surface) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvecPlane, F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const tag = (${planted} ? "p" : "c") + "${surface}" + Date.now().toString(36);
+          const path = "domvec-checks/g466 " + tag + ".md";
+          window.__domvecPlantNoReplyTools = ${planted};
+          window.__domvecChatDryText = "I will search." + NL + NL + F + "tool" + NL + JSON.stringify({ search: { search: "patricia trie" } }) + NL + F + NL;
+          window.__domvecChatDryMs = 600;
+          const out = { planted: ${planted}, surface: "${surface}" };
+          let leaf = null, root = null;
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, "# g466" + NL + NL + F + "chat" + NL + F + NL);
+            if ("${surface}" === "plane") { await d.open(f); await sleep(1200); root = d.panelOf(path)?.card; }
+            else { leaf = app.workspace.getLeaf("tab"); await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(900); root = leaf.view.containerEl; }
+            const ta = root && [...root.querySelectorAll(".domvec-chat-cell textarea")].find((t) => t.offsetParent !== null);
+            if (!ta) return { ...out, error: "no chat cell" };
+            const t0 = window.__domvecChatCell.turns;
+            ta.value = "find tries"; ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+            for (let k = 0; k < 80 && window.__domvecChatCell.turns === t0; k++) await sleep(100);
+            let body = "";
+            for (let k = 0; k < 40; k++) { body = await app.vault.read(f); if (/[0-9]+ hits/.test(body) || ${planted} && k > 12) break; await sleep(250); }
+            await sleep(800);
+            const iTool = body.indexOf(F + "tool"), iHist = body.search(/search. [^]*?-> [0-9]+ hits/);
+            out.history_above = iHist >= 0 && iTool > iHist;
+            out.tool_cell = !!root.querySelector(".domvec-tool-cell, [class*=domvec-tool]");
+            out.bound_method = (root.innerText || "").includes("<bound method");
+            return out;
+          } finally {
+            window.__domvecPlantNoReplyTools = false; window.__domvecChatDryText = ""; window.__domvecChatDryMs = 0;
+            try { d.closePath(path); } catch {}
+            if (leaf) { try { leaf.detach(); } catch {} }
+            await sleep(500);
+            const x = app.vault.getAbstractFileByPath(path); if (x) await app.vault.delete(x).catch(() => 0);
+          }
+        })()`, { timeout: 60000 });
+        const good = (c) => !!c && !c.error && c.history_above && c.tool_cell && !c.bound_method;
+        const plane = await arm(false, "plane"), tab = await arm(false, "tab"), planted = await arm(true, "plane");
+        return { pass: good(plane) && good(tab) && !!planted && !planted.error && !planted.history_above && planted.tool_cell, evidence: { plane, tab, planted } };
+      },
+    },
+    {
       id: "G-431",
       asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
       async run() {

@@ -229,7 +229,7 @@ export function chatCell(
       chatCellStats.turns++;
       if (written) {
         window.dispatchEvent(new CustomEvent("domvec-tool-view", { detail: { tool: "chat", url: ctx.sourcePath } }));
-        if (hostCtx?.onToolReply && extractReplyToolBodies(reply).length) {
+        if (hostCtx?.onToolReply && !(window as any).__domvecPlantNoReplyTools && extractReplyToolBodies(reply).length) {
           chatCellStats.tool_replies++;
           await hostCtx.onToolReply(ctx.sourcePath, reply);
         }
@@ -388,7 +388,7 @@ export async function streamPromptIntoNote(
   chatCellStats.programmatic++;
   if (written) {
     window.dispatchEvent(new CustomEvent("domvec-tool-view", { detail: { tool: "chat", url: path } }));
-    if (hostCtx?.onToolReply && extractReplyToolBodies(reply).length) {
+    if (hostCtx?.onToolReply && !(window as any).__domvecPlantNoReplyTools && extractReplyToolBodies(reply).length) {
       chatCellStats.tool_replies++;
       await hostCtx.onToolReply(path, reply);
     }

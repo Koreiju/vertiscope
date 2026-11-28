@@ -437,7 +437,11 @@ def execute(
             try:
                 raw_hits = workspace.search(q, k=k)
                 for h in raw_hits or []:
-                    getf = (lambda key, default="": h.get(key, default)) if isinstance(h, dict) else (lambda key, default="": getattr(h, key, default))
+                    def getf(key, default="", h=h):
+                        # A store hit may carry `preview` as a METHOD (retrieve.Hit,
+                        # search.Hit): call it, never print "<bound method ...>".
+                        v = h.get(key, default) if isinstance(h, dict) else getattr(h, key, default)
+                        return v() if callable(v) else v
                     u = str(getf("url", "") or "")
                     if where == "ego" and not u.startswith("vault://"):
                         continue
