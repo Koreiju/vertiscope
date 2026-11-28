@@ -226,7 +226,7 @@ def _page_chunks_from_store(workspace: Any, url: str) -> List[Dict[str, Any]]:
     try:
         rows = workspace.store._rows(
             "MATCH (c:Chunk) WHERE c.url = $u OR c.url STARTS WITH $p "
-            "RETURN c.cid, c.url, c.xpath, c.markdown LIMIT 120",
+            "RETURN c.cid, c.url, c.xpath, c.md LIMIT 120",  # the store's column is md (graphstore.StoredChunk)
             {"u": base_url, "p": base_url + "#"},
         )
         out = []

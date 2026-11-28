@@ -16614,6 +16614,45 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-468",
+      asks: "a browser tool cell with chunks: true opens onto its page's stored chunks (Item 201: 'chunks:bool is meant to indicate the navigation to linked tools'; B2): for a page the store holds, the drawn tool cell lists that page's chunks -- not 'navigate or scan a page' -- on the 2D editor card AND in a tab; planted: a page the store does not hold shows exactly that message (the detector can tell the two apart)",
+      async run() {
+        const arm = (planted, surface) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvecPlane, F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const pl = app.plugins.getPlugin("domvec-bridge");
+          let url = ""; try { url = pl.activeBrowser().webview.getURL(); } catch {}
+          if (${planted}) url = "https://example.invalid/never-stored-" + Date.now();
+          if (!/^https?:/.test(url)) return { error: "no browsed page" };
+          const tag = (${planted} ? "p" : "c") + "${surface}" + Date.now().toString(36);
+          const path = "domvec-checks/g468 " + tag + ".md";
+          const call = { browser: { url, search: "", click: "", next_chunk: false, prev_chunk: false, back: false, forward: false, chunks: true } };
+          const out = { planted: ${planted}, surface: "${surface}", url };
+          let leaf = null, root = null;
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, "# g468" + NL + NL + F + "tool" + NL + JSON.stringify(call) + NL + F + NL);
+            if ("${surface}" === "plane") { await d.open(f); root = () => d.panelOf(path)?.card; }
+            else { leaf = app.workspace.getLeaf("tab"); await leaf.openFile(f, { state: { mode: "preview" } }); root = () => leaf.view.containerEl; }
+            let txt = "";
+            for (let k = 0; k < 40; k++) { await sleep(250); const r = root(); txt = r ? [...r.querySelectorAll(".domvec-tool-cell")].map((e) => e.innerText).join(NL) : ""; if (/chunk/i.test(txt) && txt.length > 300) break; }
+            out.no_chunks_msg = /navigate or scan a page/.test(txt);
+            out.chunk_rows = (txt.match(/\b(chunk|cid)\b/gi) || []).length;
+            out.chars = txt.length;
+            return out;
+          } finally {
+            try { d.closePath(path); } catch {}
+            if (leaf) { try { leaf.detach(); } catch {} }
+            await sleep(500);
+            const x = app.vault.getAbstractFileByPath(path); if (x) await app.vault.delete(x).catch(() => 0);
+          }
+        })()`, { timeout: 60000 });
+        const good = (c) => !!c && !c.error && !c.no_chunks_msg && c.chars > 400;
+        const plane = await arm(false, "plane"), tab = await arm(false, "tab"), planted = await arm(true, "plane");
+        return { pass: good(plane) && good(tab) && !!planted && !planted.error && planted.no_chunks_msg, evidence: { plane, tab, planted } };
+      },
+    },
+    {
       id: "G-431",
       asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
       async run() {
