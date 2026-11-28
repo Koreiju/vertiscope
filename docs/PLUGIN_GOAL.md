@@ -7211,6 +7211,72 @@ first doing its Step 0 (commit the verified `G-443`–`G-455` baseline).*
 200-201 -- carried into Track B, handed to Track A, or frozen -- and record the
 mapping in `AGENT_HANDOFF.md` §5.4 so both agents read one plan.*
 
+### 207. Cell-wise cursor-gated web-chunk unification, minimal gym Python API (`Browser.chunks` + action chains), `ego.md` as a plain toolspace notebook example, notebook/module <-> tool interlacing, and transcript cross-links (2026-11-28)
+
+> We also need to unify with our standard editor cells and web markdown chunks
+> much more closely. we'd need to somehow standardize our cell-wise ``` notation
+> that allows for the markdown to be rendered when the cursor is inside the
+> chunk and the actual page rendering when the cursor is outside. the
+> interactive components of the chunk would be the chunk's tool cells, and this
+> is where we could begin to interlace tool calls on per-cells and their
+> canvases and our dynamic rendering to be regular to how our computation graph
+> editor treats makrdown based rendering of interactive notebook cells like
+> browser, its chunks, other agents or language models more generally which
+> agents are composed of in their own tool cells... which then emphasizes the
+> need for an programming interface side to mirror our tool cells, following
+> some notes I left on my phone:
+>
+> ```note
+> The actual programming gym env is what the graphical editor is replaced by. How do we do complex and interactive workflows in simple code over interfaces and including agents? With a simple to understand api type of thing. Browser.chunks and soup like would work well with interactions inlaid. Routines on browsers could be coded similar to selenium action chains. So, like a tool space that doubles as a simple programming interface. Minimal most. 
+>
+> The amalgam of programming interfaces as code and docs for the full tool space replace the current ego. No fancy per view features on the ego. We represent the ego then as a notebook example. 
+>
+> How do we turn code modules and notebooks into tools? Because if we had a unified way of interlacing code and tools with an API, similar to for our regular cell interactions and our standard workspace tools (as a code api as well for more complex and interlaced links between tool calling and coding, where standard tools have parallels as api and code with similar context engineering and docstring notes). I think code UI suggestions and extensions for library interactions should actually be ephemeral so that we keep procedural tool calls to things only to do with code artifacts/cells in notebooks. So tool cells are the link between user, agents, and code. Wait.. i think procedural code extension gives the rag equivalent to docstrings, but then again isnt that another layer of our db search? Code editing tools will still be needed however also with cross-notebook and artifact links. Like docstrings *and* following module/markdown side links on artifacts. Retrieval is at least scoped to an embedding model. 
+> ```
+>
+> we can add this to your side's set of tasks while I get claude up to speed.
+> i'd also like you to link claude to this session's transcript, and you to
+> claude's, each in the handoff doc for you both to synchronize on over my
+> prompts.
+
+*(Sent with one screenshot: a web chunk panel `http://127.0.0.1:41090/busy_feed.html...`
+showing top bar `chat`, `+ ego`, `x`, `triples`, `page` and body `Topic 17: trie
+fold stream address ...`.)*
+
+*Read as (207), mine:*
+- *(a) `G-456`: Unify web markdown chunks and standard editor cells via cell-wise
+  ` ```chunk ` / ` ``` ` notation keyed by patricia-trie address: cursor **inside**
+  the fence exposes the distilled markdown + the chunk's interactive affordances
+  as ` ```tool ` sub-cells; cursor **outside** renders the actual distilled page
+  snapshot (`htmlform` / live chunk view), interlacing per-cell tool calls
+  uniformly across browsers, web chunks, language-model cells, and composed
+  agent tool cells.*
+- *(b) `G-457`: Replace graphical node-port editing with a minimal "gym" Python
+  programming interface mirroring every ` ```tool ` toolspace: `Browser.chunks`
+  provides BeautifulSoup-style selection/traversal (`find`, `select`, `.text`,
+  `.links`, `.controls`) with inlaid interactions (`.click()`, `.fill()`,
+  `.next_chunk()`, `.prev_chunk()`) plus fluent Selenium-style `ActionChain`
+  routines (`Browser.chain()...perform()`), with symmetric minimal Python APIs
+  for `Search`, `Chat`/LM cells, and `Tools`.*
+- *(c) `G-458`: Replace special per-view cockpit features on `domvec/ego.md`
+  (amending `G-418`): represent `ego.md` purely as a canonical **notebook
+  example** amalgamating the minimal Python programming interfaces and inline
+  docs/system-prompt examples for the full toolspace (plus typed `## <Type>
+  cells` links from `G-446`).*
+- *(d) `G-459`: Keep library completion/suggestion UI (`numpy`, third-party
+  packages) strictly **ephemeral** so procedural ` ```tool ` calls stay scoped
+  exclusively to workspace/notebook code artifacts and interactive cells; turn
+  notebooks and Python modules into dual Python API + ` ```tool ` surfaces
+  (derived from signatures, docstrings, and context notes) bridging user,
+  agents, and code.*
+- *(e) `G-460`: Treat procedural code/docstring retrieval as an
+  **embedding-model-scoped** layer of DB search (`search` scoped by embedding
+  model + artifact domain), paired with code-editing tools that traverse both
+  docstrings AND module/markdown `[title](link)` + cross-notebook AST links.*
+- *(f) Cross-link Antigravity's and Claude's live session `.jsonl` transcripts
+  directly in `AGENT_HANDOFF.md` so both agents synchronize over the user's
+  verbatim prompts.*
+
 ### Recovered verbatim (2026-11-22 inventory)
 
 *Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,
