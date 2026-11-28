@@ -16574,6 +16574,46 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-467",
+      asks: "+ tool in the cell bar (Item 201: 'instantiate the tool cell, which effectively exposes all actions that can be taken on a given cell's interactive components'): pressed in a note holding a ```browser cell, it appends a ```tool cell bound to THAT cell's page with chunks on, which draws as a tool cell -- on the 2D editor card AND in a tab; planted __domvecPlantNoCellBarTool: no + tool",
+      async run() {
+        const arm = (planted, surface) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvecPlane, F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const tag = (${planted} ? "p" : "c") + "${surface}" + Date.now().toString(36);
+          const path = "domvec-checks/g467 " + tag + ".md", url = "https://example.org/g467";
+          window.__domvecPlantNoCellBarTool = ${planted};
+          const out = { planted: ${planted}, surface: "${surface}" };
+          let leaf = null, root = null;
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            const f = await app.vault.create(path, "# g467" + NL + NL + F + "browser" + NL + url + NL + F + NL);
+            if ("${surface}" === "plane") { await d.open(f); await sleep(1500); root = d.panelOf(path)?.card; }
+            else { leaf = app.workspace.getLeaf("tab"); await leaf.openFile(f, { state: { mode: "source" } }); await sleep(1500); root = leaf.view.containerEl; }
+            const btn = root && [...root.querySelectorAll(".domvec-cellbar-add")].find((b) => b.textContent.trim() === "+ tool" && b.offsetParent !== null);
+            out.button = !!btn;
+            if (!btn) return out;
+            btn.click(); await sleep(1500);
+            const body = await app.vault.read(f);
+            const m = body.match(new RegExp(F + "tool" + NL + "(.*)" + NL + F));
+            let call = null; try { call = m ? JSON.parse(m[1]) : null; } catch {}
+            out.bound = !!(call && call.browser && call.browser.url === url && call.browser.chunks === true);
+            out.drawn = !!root.querySelector("[class*=domvec-tool]");
+            return out;
+          } finally {
+            window.__domvecPlantNoCellBarTool = false;
+            try { d.closePath(path); } catch {}
+            if (leaf) { try { leaf.detach(); } catch {} }
+            await sleep(500);
+            const x = app.vault.getAbstractFileByPath(path); if (x) await app.vault.delete(x).catch(() => 0);
+          }
+        })()`, { timeout: 60000 });
+        const good = (c) => !!c && c.button && c.bound && c.drawn;
+        const plane = await arm(false, "plane"), tab = await arm(false, "tab"), planted = await arm(true, "plane");
+        return { pass: good(plane) && good(tab) && !!planted && !planted.button, evidence: { plane, tab, planted } };
+      },
+    },
+    {
       id: "G-431",
       asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
       async run() {

@@ -28,6 +28,8 @@ export interface CellBarHost {
   openBrowser(): void | Promise<void>;
   addBrowserCell(view: MarkdownView): Promise<void>;
   addChatCell(view: MarkdownView): Promise<void>;
+  /** Item 201: a ```tool cell bound to this note's own interactive cell (`toolbind.ts`). */
+  addToolCell(view: MarkdownView): Promise<void>;
 }
 
 const CLS = "domvec-cellbar";
@@ -51,6 +53,9 @@ function build(doc: Document, view: MarkdownView, host: CellBarHost): HTMLElemen
   add("+ browser cell", "append a browser cell to this note", "is-browser", () => host.addBrowserCell(view));
   if (!(window as any).__domvecPlantNoCellBarChat) {
     add("+ chat", "append a chat cell to this note", "is-chat", () => host.addChatCell(view));
+  }
+  if (!(window as any).__domvecPlantNoCellBarTool) {
+    add("+ tool", "append a tool cell exposing this note's browser cell's actions", "is-tool", () => host.addToolCell(view));
   }
   return bar;
 }

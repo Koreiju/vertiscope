@@ -18,6 +18,7 @@
  * the native graph work for free.
  */
 
+import { toolCellFor } from "./toolbind";
 import { mdLink } from "./egolinks";
 import { UBLOCK_SHIM } from "./ublockshim";
 import { profiler } from "./profile";
@@ -1907,7 +1908,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   // ---- structural cells at the bottom of the note (P-M4) ------------------
   //
   // Planted `__domvecPlantNoCellBar`: no strip anywhere.
-  cellBarStats = { placed: 0, code_cells: 0, chat_cells: 0 };
+  cellBarStats = { placed: 0, code_cells: 0, chat_cells: 0, tool_cells: 0 };
 
   /** Pinned web chunks for a note's chat session: any notebook browser cell in
    *  `path`, a matching plane BrowserPanel, and the active browser (`G-444`). */
@@ -2039,6 +2040,19 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }
     return out;
   }
+  /** `+ tool` (Item 201): a ```tool cell bound to the note's own browser cell's
+   *  page (chunks on), else the open browser pane's, else search (`toolbind.ts`). */
+  async addToolCell(view: MarkdownView): Promise<void> {
+    const file = view.file;
+    if (!file) return;
+    let pane = "";
+    try { const u = (this.activeBrowser() as any)?.webview?.getURL?.(); if (u) pane = String(u); } catch { /* no pane */ }
+    const text = view.editor ? view.editor.getValue() : await this.app.vault.read(file);
+    const cell = toolCellFor(text, pane);
+    await this.app.vault.process(file, (t) => t.replace(/\s*$/, "") + "\n\n" + cell);
+    this.cellBarStats.tool_cells++;
+  }
+
   // ---- new vaults (PLUGIN_GOAL 147) -----------------------------------------
   //
   // "Opening new vaults should automatically have our plugin installed and
