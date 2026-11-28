@@ -7319,6 +7319,18 @@ verifying clean + planted arms across all checks.*
 
 *Read as (212), mine: a notebook check runs on the 2D graph editor's card first, and in a tab of the same note as well, and the two must agree; a check that only opens a tab has not tested the notebook.*
 
+### 213. Brace-free markdown syntax; review the recent verbatims in depth (2026-11-28)
+
+> we're going brace-free on our markdown syntax. review my more recent verbatims in more depth
+
+*Read as (213), mine: no `{ref}` braces anywhere the plugin writes or reads cell-to-cell links -- links are `[title](encodeURI(path))` and direct cross-notebook variable names (Items 200-201). `{ref}` parsing in `egoLinksOf` and the `{ref}`-based `G-403` hold-drop are retired, not frozen.*
+
+### 214. Latency on links drawn between panels (2026-11-28)
+
+> there's also significant latency on links drawing between panels
+
+*Read as (214), mine: a link on the 2D editor appears and follows a card on the next frame. Measured before: edit -> link 243 ms (the 250 ms poll), and 37 link layers on the plane, 36 of them drawn by dead desks left by reloads (`G-464`).*
+
 ### Recovered verbatim (2026-11-22 inventory)
 
 *Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,

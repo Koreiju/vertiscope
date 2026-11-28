@@ -16438,6 +16438,57 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-464",
+      asks: "links between panels on the 2D editor redraw on the next frame (2026-11-28: 'significant latency on links drawing between panels'): an edit that makes one notebook read another's variable shows the link in < 80 ms, and a dragged card's link follows it in < 80 ms, over 4 trials each; the plane holds ONE link layer (none left by a reloaded desk); planted __domvecPlantLinkPoll: only the 250 ms poll -- the slowest trial is >= 100 ms",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const d = window.__domvecPlane, F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          window.__domvecPlantLinkPoll = ${planted};
+          d.linksOff(); d.linksOn();
+          const tag = (${planted} ? "p" : "c") + Date.now().toString(36), v = "lv" + tag;
+          const a = "domvec-checks/g464 a " + tag + ".md", b = "domvec-checks/g464 b " + tag + ".md";
+          const out = { planted: ${planted}, edit_ms: [], drag_ms: [] };
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+            await app.vault.create(a, "# a" + NL + NL + F + "python" + NL + v + " = 1" + NL + F + NL);
+            await app.vault.create(b, "# b" + NL + NL + F + "python" + NL + "print(0)" + NL + F + NL);
+            for (const p of [a, b]) { await d.open(app.vault.getAbstractFileByPath(p)); await sleep(400); }
+            await sleep(600);
+            const linked = () => (d.linkStats.pairs || []).some(([x, y]) => (x === a && y === b) || (x === b && y === a));
+            const ed = d.viewOf(b).editor;
+            for (let t = 0; t < 4; t++) {
+              ed.setValue("# b" + NL + NL + F + "python" + NL + "print(0)" + NL + F + NL); await sleep(400 + 37 * t);
+              const t0 = performance.now();
+              ed.setValue("# b" + NL + NL + F + "python" + NL + "print(" + v + ")" + NL + F + NL);
+              let ms = 2000; for (let k = 0; k < 400; k++) { if (linked()) { ms = performance.now() - t0; break; } await sleep(5); }
+              out.edit_ms.push(Math.round(ms));
+            }
+            const card = d.panelOf(b).card, line = () => d.linkSvg && d.linkSvg.querySelector("line");
+            for (let t = 0; t < 4; t++) {
+              await sleep(300 + 41 * t);
+              const x0 = line() ? line().getAttribute("x2") + "," + line().getAttribute("x1") : "";
+              const t0 = performance.now();
+              card.style.left = (parseFloat(card.style.left) + (t % 2 ? -60 : 60)) + "px";
+              let ms = 2000; for (let k = 0; k < 400; k++) { const l = line(); if (l && l.getAttribute("x2") + "," + l.getAttribute("x1") !== x0) { ms = performance.now() - t0; break; } await sleep(5); }
+              out.drag_ms.push(Math.round(ms));
+            }
+            out.layers = d.host.plane().querySelectorAll(":scope > svg.domvec-plane-links").length;
+            return out;
+          } finally {
+            window.__domvecPlantLinkPoll = false; d.linksOff(); d.linksOn();
+            for (const p of [a, b]) { try { d.closePath(p); } catch {} }
+            await sleep(400);
+            for (const p of [a, b]) { const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.delete(f).catch(() => 0); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const max = (xs) => Math.max(...(xs || [2000]));
+        const ok = !!clean && max(clean.edit_ms) < 80 && max(clean.drag_ms) < 80 && clean.layers === 1;
+        return { pass: ok && !!planted && Math.max(max(planted.edit_ms), max(planted.drag_ms)) >= 100, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-431",
       asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
       async run() {
@@ -24956,9 +25007,11 @@ export function makeChecks(env) {
           let tabLeaf = null;
           try {
             // Seed legacy text first to prove cockpit.open() upgrades it cleanly to the reference notebook!
-            const F = String.fromCharCode(96).repeat(3);
+            const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
             if (egoFile) {
-              await app.vault.modify(egoFile, '# ego\\n\\nThe cockpit: what the craft flies.\\n\\n' + F + 'python\\nview = "ego"\\nthrottle = 20\\n' + F + '\\n\\n## System prompt\\n\\nKeep replies concise.\\n');
+              const legacySeed = ["# ego", "", "The cockpit: what the craft flies.", "", F + "python", 'view = "ego"', "throttle = 20", F, "", "## System prompt", "", "Keep replies concise.", ""].join(NL);
+              if (pl.cockpit?.planeLeaf?.view?.editor) pl.cockpit.planeLeaf.view.editor.setValue(legacySeed);
+              await app.vault.modify(egoFile, legacySeed);
             }
             window.__domvecPlantLegacyEgoCockpit = false;
             const v = await pl.cockpit.open(); await sleep(700);
@@ -24974,9 +25027,8 @@ export function makeChecks(env) {
 
             // Planted arm: legacy per-view cockpit restored behind __domvecPlantLegacyEgoCockpit.
             window.__domvecPlantLegacyEgoCockpit = true;
-            if (efNow) await app.vault.modify(efNow, '# ego\\n\\n' + F + 'python\\nview = "ego"\\nthrottle = 20\\n' + F + '\\n');
             const vp = await pl.cockpit.open(); await sleep(500);
-            const plantedText = efNow ? await app.vault.read(efNow) : (vp?.editor ? vp.editor.getValue() : "");
+            const plantedText = vp?.editor ? vp.editor.getValue() : (efNow ? await app.vault.read(efNow) : "");
 
             // Restore clean reference notebook!
             window.__domvecPlantLegacyEgoCockpit = false;

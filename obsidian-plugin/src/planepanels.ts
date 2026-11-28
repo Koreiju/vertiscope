@@ -1381,14 +1381,48 @@ export class PlaneDesk {
   linkStats = { edges: 0, pairs: [] as string[][] };
   private linkSvg: SVGSVGElement | null = null;
   private linkTimer = 0;
+  // Links redraw on the NEXT FRAME after anything that moves them -- a card's
+  // style (drag, resize), a card added or removed, an edit in a card's editor
+  // -- not on a 250 ms poll (2026-11-28: "significant latency on links drawing
+  // between panels": edit -> link measured 243 ms, the poll period). A 1 s
+  // poll stays as the fallback. Planted `__domvecPlantLinkPoll`: the poll only.
+  private linkRaf = 0;
+  private linkObs: MutationObserver | null = null;
+  private linkOffEdit: (() => void) | null = null;
+  linkStatsTiming = { frames: 0 };
+  scheduleLinks(): void {
+    if (this.linkRaf || (window as any).__domvecPlantLinkPoll) return;
+    this.linkRaf = window.requestAnimationFrame(() => { this.linkRaf = 0; this.linkStatsTiming.frames++; this.drawLinks(); });
+  }
   linksOn(): void {
     if (this.linkTimer) return;
-    this.linkTimer = window.setInterval(() => this.drawLinks(), 250);
+    this.linkTimer = window.setInterval(() => this.drawLinks(), (window as any).__domvecPlantLinkPoll ? 250 : 1000);
+    const plane = this.host.plane();
+    if (plane && !this.linkObs) {
+      this.linkObs = new MutationObserver((ms) => {
+        if (ms.some((m) => !(m.target as Element).closest?.("svg"))) this.scheduleLinks();
+      });
+      this.linkObs.observe(plane, { childList: true, attributes: true, attributeFilter: ["style", "class"], subtree: false });
+      for (const c of Array.from(plane.children)) this.linkObs.observe(c, { attributes: true, attributeFilter: ["style"] });
+    }
+    if (!this.linkOffEdit) {
+      const ref = this.app.workspace.on("editor-change", () => this.scheduleLinks());
+      this.linkOffEdit = () => this.app.workspace.offref(ref);
+    }
   }
-  linksOff(): void { window.clearInterval(this.linkTimer); this.linkTimer = 0; this.linkSvg?.remove(); this.linkSvg = null; }
+  linksOff(): void {
+    window.clearInterval(this.linkTimer); this.linkTimer = 0; this.linkSvg?.remove(); this.linkSvg = null;
+    this.linkObs?.disconnect(); this.linkObs = null; this.linkOffEdit?.(); this.linkOffEdit = null;
+    if (this.linkRaf) { window.cancelAnimationFrame(this.linkRaf); this.linkRaf = 0; }
+  }
   drawLinks(): void {
+    // A desk that is no longer the live one (its plugin was reloaded) stops.
+    if ((window as any).__domvecPlane && (window as any).__domvecPlane !== this) { this.linksOff(); return; }
     const plane = this.host.plane();
     if (!plane) return;
+    // Link layers left by dead desks are not ours to keep drawn.
+    for (const o of Array.from(plane.querySelectorAll(":scope > svg.domvec-plane-links"))) if (o !== this.linkSvg) o.remove();
+    if (this.linkObs) for (const c of Array.from(plane.querySelectorAll(":scope > .domvec-plane-card"))) this.linkObs.observe(c, { attributes: true, attributeFilter: ["style"] });
     // The plane takes notes dragged from tabs or the file list (tabdrag.ts).
     acceptTabDrops(this.app, plane, (f, at) => this.open(f, { at }), () => (window as any).__domvecPlane === this);
     const NS = "http://www.w3.org/2000/svg";
