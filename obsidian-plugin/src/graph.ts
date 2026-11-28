@@ -7281,8 +7281,13 @@ export class GraphView extends ItemView {
     const text: string = await this.app.vault.cachedRead(f);
     const byBase = new Map(egoPaths.map((p) => [p.split("/").pop()!.replace(/[.]md$/, "").toLowerCase(), p]));
     const to = new Set<string>();
-    for (const m of text.matchAll(/\{([^{}\n]+)\}/g)) { const p = byBase.get(m[1].split("#")[0].trim().toLowerCase()); if (p && p !== path) to.add(p); }
-    for (const m of text.matchAll(/Vault[.]read\(\s*["']\/?([^"'\n]+)["']/g)) { const p = m[1].endsWith(".md") ? m[1] : m[1] + ".md"; if (egoPaths.includes(p) && p !== path) to.add(p); }
+    // Brace-free (Item 213): `{name}` and `Vault.read(...)` are not links; only
+    // `[title](path)` and cross-notebook variables are. Planted
+    // `__domvecPlantBraceLinks`: the old parse.
+    if ((window as any).__domvecPlantBraceLinks) {
+      for (const m of text.matchAll(/\{([^{}\n]+)\}/g)) { const p = byBase.get(m[1].split("#")[0].trim().toLowerCase()); if (p && p !== path) to.add(p); }
+      for (const m of text.matchAll(/Vault[.]read\(\s*["']\/?([^"'\n]+)["']/g)) { const p = m[1].endsWith(".md") ? m[1] : m[1] + ".md"; if (egoPaths.includes(p) && p !== path) to.add(p); }
+    }
     for (const m of text.matchAll(/(?<!!)\[[^\]]*\]\(([^)\s]+)\)/g)) {
       if (/^(https?:|mailto:|code:)/i.test(m[1])) continue;
       let dec = m[1];

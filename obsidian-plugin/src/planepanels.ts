@@ -845,7 +845,10 @@ export class PlaneDesk {
     return removedCount;
   }
 
-  /** note path -> the open panels its `{name}`, `Vault.read`, or `[title](path)` references resolve to. */
+  /** note path -> the open panels its `[title](path)` links resolve to. Brace-free
+   *  (Item 213): a `{name}` or a `Vault.read(...)` in the text is NOT a link --
+   *  links are `[title](encodeURI(path))` and, separately, cross-notebook
+   *  variables (drawLinks). Planted `__domvecPlantBraceLinks`: the old parse. */
   private refCache = new Map<string, { at: number; names: Set<string>; paths: Set<string> }>();
   refTargets(path: string): Set<string> {
     const f = this.app.vault.getAbstractFileByPath(path);
@@ -857,11 +860,13 @@ export class PlaneDesk {
       hit = { at: f.stat.mtime, names, paths };
       this.refCache.set(path, hit);
       const parseText = (t: string) => {
-        for (const m of t.matchAll(/\{([^{}\n]+)\}/g)) names.add(m[1].split(".")[0].split("#")[0].trim());
-        for (const m of t.matchAll(/Vault\.read\(\s*["']([^"'\n]+)["']/g)) {
-          const raw = normVaultPath(m[1]);
-          paths.add(raw.endsWith(".md") ? raw : raw + ".md");
-          names.add(raw.replace(/^.*\//, "").replace(/\.md$/, "").trim());
+        if ((window as any).__domvecPlantBraceLinks) {
+          for (const m of t.matchAll(/\{([^{}\n]+)\}/g)) names.add(m[1].split(".")[0].split("#")[0].trim());
+          for (const m of t.matchAll(/Vault\.read\(\s*["']([^"'\n]+)["']/g)) {
+            const raw = normVaultPath(m[1]);
+            paths.add(raw.endsWith(".md") ? raw : raw + ".md");
+            names.add(raw.replace(/^.*\//, "").replace(/\.md$/, "").trim());
+          }
         }
         if (!this.plantNoEgoAttach) {
           for (const lk of parseInternalMdLinks(t)) paths.add(lk.path);

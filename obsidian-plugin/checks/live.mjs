@@ -15229,7 +15229,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-438",
-      asks: "the ego's artifacts' graph structure as links in 3D (G-400; PLUGIN_GOAL 183: 'glowing 3D nodes for chunks and the full graph structure of the ego's artifacts'): an ego note whose text names another ego note -- a {ref} or a Vault.read -- is linked to it; the lines drawn between the glowing world nodes are exactly the drawn pairs (two vertices each, in the ego's colour); planted plantNoEgoLinks: no pairs, no lines",
+      asks: "the ego's artifacts' graph structure as links in 3D (G-400; PLUGIN_GOAL 183: 'glowing 3D nodes for chunks and the full graph structure of the ego's artifacts'): an ego note whose text links another ego note by [title](encodeURI(path)) is linked to it (brace-free, Item 213: no {ref}, no Vault.read); the lines drawn between the glowing world nodes are exactly the drawn pairs (two vertices each, in the ego's colour); planted plantNoEgoLinks: no pairs, no lines",
       async run() {
         const arm = (planted) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -15241,9 +15241,9 @@ export function makeChecks(env) {
           const out = { planted: ${planted} };
           g.plantNoEgoLinks = ${planted};
           try {
-            await app.vault.create(b, ["---", "domvec: slate", "---", "b", T + "x" + T + "1", ""].join(NL));
+            await app.vault.create(b, "# b" + NL);
             await app.vault.create(c, "# c" + NL);
-            await app.vault.create(a, ["---", "domvec: slate", "---", "a", T + "uses" + T + "{g438 b " + tok + "}", ""].join(NL) + "x = Vault.read(" + JSON.stringify("/" + c) + ")" + NL);
+            await app.vault.create(a, "# a" + NL + NL + "uses [b](" + encodeURI(b) + ") and [c](" + encodeURI(c) + ")" + NL);
             const has = (p) => g.egoUrls.has("vault://" + app.vault.getName() + "/" + p);
             for (let k = 0; k < 40 && !(has(a) && has(b) && has(c)); k++) await sleep(250);
             out.in_ego = has(a) && has(b) && has(c);
@@ -16486,6 +16486,46 @@ export function makeChecks(env) {
         const max = (xs) => Math.max(...(xs || [2000]));
         const ok = !!clean && max(clean.edit_ms) < 80 && max(clean.drag_ms) < 80 && clean.layers === 1;
         return { pass: ok && !!planted && Math.max(max(planted.edit_ms), max(planted.drag_ms)) >= 100, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-465",
+      asks: "brace-free links (Item 213: 'we're going brace-free on our markdown syntax'): a note whose text holds {other} or Vault.read('other') is NOT linked to it -- not on the 2D editor, not in 3D -- while a [title](encodeURI(path)) link in the same kind of note is; planted __domvecPlantBraceLinks: the old brace/Vault.read parse links them again",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, d = window.__domvecPlane;
+          if (!g) return { error: "no graph" };
+          const NL = String.fromCharCode(10), L = String.fromCharCode(123), R = String.fromCharCode(125);
+          const tok = (${planted} ? "p" : "c") + Date.now().toString(36);
+          const t = "domvec/graph/g465 t " + tok + ".md", br = "domvec/graph/g465 br " + tok + ".md", md = "domvec/graph/g465 md " + tok + ".md";
+          window.__domvecPlantBraceLinks = ${planted};
+          const out = { planted: ${planted} };
+          try {
+            await app.vault.create(t, "# target" + NL);
+            await app.vault.create(br, "# braces" + NL + NL + "uses " + L + "g465 t " + tok + R + " and Vault.read(" + JSON.stringify(t) + ")" + NL);
+            await app.vault.create(md, "# link" + NL + NL + "uses [target](" + encodeURI(t) + ")" + NL);
+            for (const p of [t, br, md]) { await d.open(app.vault.getAbstractFileByPath(p)); await sleep(300); }
+            const has = (p) => g.egoUrls.has("vault://" + app.vault.getName() + "/" + p);
+            for (let k = 0; k < 40 && !(has(t) && has(br) && has(md)); k++) await sleep(250);
+            g.egoRefs.clear(); d.refCache && d.refCache.clear && d.refCache.clear();
+            out.brace_3d = (await g.egoLinksOf(br)).includes(t);
+            out.md_3d = (await g.egoLinksOf(md)).includes(t);
+            await sleep(300); d.drawLinks(); await sleep(300); d.drawLinks(); await sleep(100);
+            const pairs = d.linkStats.pairs || [];
+            const pair = (x, y) => pairs.some(([a, b]) => (a === x && b === y) || (a === y && b === x));
+            out.brace_2d = pair(br, t); out.md_2d = pair(md, t);
+            return out;
+          } finally {
+            window.__domvecPlantBraceLinks = false;
+            for (const p of [t, br, md]) { try { d.closePath(p); } catch {} }
+            await sleep(400);
+            for (const p of [t, br, md]) { const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.delete(f).catch(() => 0); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && !clean.brace_3d && !clean.brace_2d && clean.md_3d && clean.md_2d;
+        return { pass: ok && !!planted && !planted.error && planted.brace_3d && planted.brace_2d, evidence: { clean, planted } };
       },
     },
     {
