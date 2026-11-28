@@ -7201,6 +7201,16 @@ incomplete `np.` mid-typing with `SyntaxError` output + toast spam `[447]`,
 cell-graph dialect, panel toolspaces as ` ```tool ` cells, the chat <-> tool loop),
 first doing its Step 0 (commit the verified `G-443`–`G-455` baseline).*
 
+### 206. Aligning Claude's pre-pivot tasks with the pivot, for parallel work (2026-11-28)
+
+> review my most recent verbatims and the design pivots in the agent handoff
+> more closely. see how our previous and new tasks can align together for you to
+> work on in parallel with our antigravity agent.
+
+*Read as (206), mine: map each of Claude's open pre-pivot rows onto Items
+200-201 -- carried into Track B, handed to Track A, or frozen -- and record the
+mapping in `AGENT_HANDOFF.md` §5.4 so both agents read one plan.*
+
 ### Recovered verbatim (2026-11-22 inventory)
 
 *Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,
