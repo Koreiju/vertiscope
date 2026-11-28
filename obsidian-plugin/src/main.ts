@@ -18,6 +18,7 @@
  * the native graph work for free.
  */
 
+import { mdLink } from "./egolinks";
 import { UBLOCK_SHIM } from "./ublockshim";
 import { profiler } from "./profile";
 import {
@@ -429,11 +430,13 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       const NL = "\n", at = new Date().toISOString().slice(0, 19);
       const links = context.map((c) => {
         const u = String(c.url || "").split("#")[0];
-        if (u.startsWith("vault://")) return `[[${u.replace(/^vault:\/\/[^/]+\//, "").replace(/\.md$/, "")}]]`;
+        if (u.startsWith("vault://")) return mdLink(u.replace(/^vault:\/\/[^/]+\//, ""));
         return u.startsWith("http") ? `[${(c.head || u).slice(0, 60)}](${u})` : "";
       }).filter(Boolean);
       const given = links.length ? ` · given ${[...new Set(links)].join(", ")}` : "";
       // CHAT CELLS (PLUGIN_GOAL 159: "chat cells in prompts and responses in
+      // Links are standard `[title](encodeURI(path))` (G-446/G-448), never [[wiki]].
+      const toNote = mdLink(note), at_ = (n: string) => mdLink(`${folder}/${n}.md`);
       // their own cells, chained after one another with hard links"): each
       // turn is TWO notes of the ego -- the prompt's cell and the reply's --
       // linked prompt -> reply -> next prompt, so the conversation is a chain
@@ -448,24 +451,24 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         const n = (nums.length ? Math.max(...nums) : 0) + 1, pad = (k: number) => String(k).padStart(3, "0");
         const pName = `${prefix}${pad(n)} prompt`, rName = `${prefix}${pad(n)} reply`;
         const prev = n > 1 ? `${prefix}${pad(n - 1)} reply` : "";
-        await this.app.vault.create(`${folder}/${pName}.md`, `# prompt ${n} of [[${base}]]` + NL + NL
+        await this.app.vault.create(`${folder}/${pName}.md`, `# prompt ${n} of ${toNote}` + NL + NL
           + `> ${prompt.replace(/\n/g, NL + "> ")}` + NL + NL
-          + (prev ? `after [[${prev}]]` : "the chat's first turn") + NL + NL
+          + (prev ? `after ${at_(prev)}` : "the chat's first turn") + NL + NL
           + `context: ${context.length} item${context.length === 1 ? "" : "s"}${given}` + NL);
-        await this.app.vault.create(`${folder}/${rName}.md`, `# reply ${n} of [[${base}]]` + NL + NL
-          + `answers [[${pName}]]` + NL + NL + "*(awaiting the reply)*" + NL);
+        await this.app.vault.create(`${folder}/${rName}.md`, `# reply ${n} of ${toNote}` + NL + NL
+          + `answers ${at_(pName)}` + NL + NL + "*(awaiting the reply)*" + NL);
         cells = { prompt: `${folder}/${pName}.md`, reply: `${folder}/${rName}.md` };
         this.chatCellStats.turns++;
         this.chatCellStats.last = { ...cells, after: prev };
       }
       const name = (p: string) => p.split("/").pop()!.replace(/\.md$/, "");
       const entry = `## ${at}` + NL + NL + `> ${prompt.replace(/\n/g, NL + "> ")}` + NL + NL
-        + `from [[${base}]]` + given + NL + NL
-        + (cells ? `[[${name(cells.prompt)}]] -> [[${name(cells.reply)}]]` + NL + NL : "")
+        + `from ${toNote}` + given + NL + NL
+        + (cells ? `${mdLink(cells.prompt)} -> ${mdLink(cells.reply)}` + NL + NL : "")
         + "*(awaiting the reply)*" + NL;
       const f = this.app.vault.getAbstractFileByPath(path);
       if (f instanceof TFile) await this.app.vault.process(f, (t) => t.replace(/\s*$/, "") + NL + NL + entry);
-      else await this.app.vault.create(path, `# prompts of [[${base}]]` + NL + NL + entry);
+      else await this.app.vault.create(path, `# prompts of ${toNote}` + NL + NL + entry);
       this.promptStats.kept++;
       this.promptStats.last = { path, links: links.length };
       return path + "#" + at + (cells ? "#" + cells.reply + "#" + cells.prompt : "");
@@ -1810,7 +1813,7 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
     let path = `${folder}/unnest ${base} ${where}.md`.replace(/[\\:*?"<>|#]/g, " ");
     for (let n = 2; this.app.vault.getAbstractFileByPath(path); n++) path = `${folder}/unnest ${base} ${where} ${n}.md`.replace(/[\\:*?"<>|#]/g, " ");
-    const text = "---" + NL + "domvec: slate" + NL + "---" + NL + "# unnest " + where + " of [[" + base + "]]" + NL + NL + rows.join(NL) + NL;
+    const text = "---" + NL + "domvec: slate" + NL + "---" + NL + "# unnest " + where + " of " + mdLink(from) + NL + NL + rows.join(NL) + NL;
     const file = await this.app.vault.create(path, text);
     await this.desk.open(file);
     this.unnestStats.made++;

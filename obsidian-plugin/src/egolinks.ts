@@ -96,6 +96,14 @@ export function migrateDeprecatedSlateText(path: string, text: string): { migrat
   return { migrated: clean !== text, text: clean };
 }
 
+/** One standard inline link `[title](encodeURI(path))` to a vault note -- what
+ *  every note the plugin writes uses (G-446/G-448: never `[[wiki]]`). */
+export function mdLink(path: string, title?: string): string {
+  const np = normVaultPath(path);
+  const t = (title || titleOfNote(np)).replace(/[\[\]\r\n]+/g, " ").replace(/\s+/g, " ").trim() || titleOfNote(np);
+  return `[${t}](${encodeURI(np)})`;
+}
+
 /** Standard markdown link bullet `- [title](encodeURI(path))` (`vault.py` `_LINK`). */
 export function formatEgoCellBullet(title: string, path: string): string {
   const np = normVaultPath(path);

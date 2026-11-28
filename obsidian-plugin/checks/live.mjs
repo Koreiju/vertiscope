@@ -7249,6 +7249,9 @@ export function makeChecks(env) {
             try { const c = chats.forActive(); if (c) { await c.reset(); c.destroy(); chats.byView.clear(); } } catch (e) {}
             try { leaf.detach(); } catch (e) {}
             try { await window.__domvecPlane.trash(f); } catch (e) {}
+            // The turn notes its chat wrote (prompts / chat NNN prompt|reply) go with it.
+            const stem = path.split("/").pop().replace(/[.]md$/, "");
+            for (const x of app.vault.getMarkdownFiles().filter((x) => x.basename === "prompts " + stem || x.basename.startsWith(stem + " chat "))) { try { await app.vault.delete(x); } catch (e) {} }
             try { await fetch(plugin.settings.sidecar.replace(/[/]+$/, "") + "/purge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) }); } catch (e) {}
             plugin.settings.indexedNotes = (plugin.settings.indexedNotes || []).filter((p) => p !== path);
             await plugin.saveSettings();
@@ -14341,7 +14344,7 @@ export function makeChecks(env) {
     },
     {
       id: "G-422",
-      asks: "the chat is a formal chat input cell in the note, not a strip hovering on the panel (2026-11-24: 'replaced with a formal chat input cell as a canvas that then streams the chat output inline in the same obsidian panel'): a ```chat block in a note draws an input; Enter streams the reply into the cell token by token, then writes the turn into the note above the block, which stays at the foot; the context sent is the note above the cell; planted (__domvecPlantChatStrip) no cell",
+      asks: "the chat is a formal chat input cell in the note, not a strip hovering on the panel (2026-11-24: 'replaced with a formal chat input cell as a canvas that then streams the chat output inline in the same obsidian panel'): a ```chat block in a note draws an input; Enter streams the reply token by token INTO the note above the block (amended by Item 210: not into a box in the cell), which stays at the foot; the context sent is the note above the cell; planted (__domvecPlantChatStrip) no cell",
       async run() {
         const arm = (planted, dry = 900) => evaluate(`(async () => {
           const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -14357,11 +14360,10 @@ export function makeChecks(env) {
             await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(900);
             const ta = leaf.view.containerEl.querySelector(".domvec-chat-cell textarea");
             if (!ta) return { planted: ${planted}, cell: false };
-            const out = leaf.view.containerEl.querySelector(".domvec-chat-cell-out");
             const before = window.__domvecChatCell.turns, lens = new Set();
             ta.value = "What is a trie?";
             ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-            for (let k = 0; k < (${dry} ? 60 : 1800) && window.__domvecChatCell.turns === before; k++) { if (out) lens.add(out.textContent.length); await sleep(100); }
+            for (let k = 0; k < (${dry} ? 60 : 1800) && window.__domvecChatCell.turns === before; k++) { lens.add((await app.vault.read(f)).length); await sleep(100); }
             const body = await app.vault.read(f), last = window.__domvecChatCell.last || {};
             const you = body.indexOf("> **You** What is a trie?"), fence = body.indexOf(F + "chat");
             return { planted: ${planted}, cell: true, reply: body.slice(you, you + 220), ms: last.ms, streamed_states: lens.size, tokens: last.tokens, context_chars: last.context_chars,
@@ -16261,6 +16263,133 @@ export function makeChecks(env) {
           && clean.rank_badges >= 1 && clean.sim_btns >= 1 && clean.hover_delta >= 1 && clean.sim_delta >= 1;
         const caught = !!planted && !planted.error && !planted.is_vertical_twin && planted.k_inputs === 0 && planted.rank_badges === 0;
         return { pass: ok && caught, evidence: { clean, planted } };
+      },
+    },
+    {
+      id: "G-461",
+      asks: "every note the plugin writes links by the standard [title](encodeURI(path)) (G-446/G-448, AGENT_HANDOFF invariant 3: never [[wiki]]): a chat turn's prompt, reply and index notes link their notebook, each other and a vault context note in that form, and every such link resolves to a note; planted: the same detector over the legacy [[...]] text flags it",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const chats = window.__domvecNbChats;
+          if (!chats || !chats.record) return { error: "no record" };
+          const folder = "domvec-checks", stem = "g456-" + Date.now().toString(36);
+          if (!app.vault.getAbstractFileByPath(folder)) await app.vault.createFolder(folder).catch(() => 0);
+          const note = folder + "/" + stem + ".md", ctx = folder + "/" + stem + " ctx.md";
+          await app.vault.create(note, "# g456" + String.fromCharCode(10));
+          await app.vault.create(ctx, "# ctx" + String.fromCharCode(10));
+          const scan = (t, from) => {
+            const wiki = (t.match(/\\[\\[[^\\]]+\\]\\]/g) || []).length;
+            const links = [...t.matchAll(/(?<!!)\\[[^\\]]*\\]\\(([^)\\s]+)\\)/g)].map((m) => m[1]).filter((u) => !/^https?:/.test(u));
+            const dead = links.filter((u) => !app.metadataCache.getFirstLinkpathDest(decodeURIComponent(u).replace(/[.]md$/, ""), from));
+            return { wiki, links: links.length, dead };
+          };
+          const out = {};
+          const made = [];
+          try {
+            const at = await chats.record(note, "what links?", [{ url: "vault://" + app.vault.getName() + "/" + ctx, head: "ctx" }]);
+            const [idx, , reply, prompt] = String(at).split("#");
+            for (const p of [idx, prompt, reply]) made.push(p);
+            await sleep(500);
+            out.notes = {};
+            for (const p of [idx, prompt, reply]) { const f = app.vault.getAbstractFileByPath(p); out.notes[p.split("/").pop()] = f ? scan(await app.vault.read(f), p) : null; }
+            out.planted = scan("# prompt 1 of [[" + stem + "]]" + String.fromCharCode(10) + "after [[x chat 001 reply]]", note);
+            return out;
+          } finally {
+            await sleep(300);
+            for (const p of [...made, note, ctx]) { const f = p && app.vault.getAbstractFileByPath(p); if (f) await app.vault.delete(f).catch(() => 0); }
+          }
+        })()`, { timeout: 60000 });
+        if (!got || got.error) return { pass: false, evidence: got };
+        const ns = Object.values(got.notes || {});
+        const ok = ns.length === 3 && ns.every((n) => n && n.wiki === 0 && n.links >= 1 && n.dead.length === 0)
+          && ns.reduce((a, n) => a + n.links, 0) >= 6;
+        return { pass: ok && got.planted.wiki === 2, evidence: got };
+      },
+    },
+    {
+      id: "G-462",
+      asks: "a chat reply streams INTO the note and nowhere else (2026-11-28: 'duplicate outputs streamed to our markdown from chat responses ... stream everything into the markdown cell ... using special ``` based blocks'): while it streams, the note already holds the partial turn above the ```chat fence; at the end the reply's text is on screen exactly once, a ``` block in it renders as a cell, and the chat cell is still at the foot -- on the 2D graph editor's card AND in a tab of the same note, alike, and after the note is DRAGGED tab -> card and card -> tab (Item 212: the two views of one notebook stay uniform); planted __domvecPlantStreamAppend: each streamed rewrite is appended, not replaced -- the reply is in the note (and on screen) more than once",
+      async run() {
+        const arm = (planted, surface) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const mark = "MARKg457" + (${planted} ? "p" : "c") + Date.now().toString(36);
+          window.__domvecChatDryText = mark + " here is code:" + NL + NL + F + "python" + NL + "x457 = 1" + NL + F + NL + NL + "done.";
+          window.__domvecChatDryMs = 2500; window.__domvecPlantStreamAppend = ${planted};
+          const path = "domvec-checks/g457 " + (${planted} ? "p" : "c") + "${surface}" + Date.now().toString(36) + ".md";
+          if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+          const f = await app.vault.create(path, "# g457" + NL + NL + F + "chat" + NL + F + NL);
+          const desk = window.__domvecPlane, S = "${surface}", onPlane = S === "plane" || S === "dragged-in";
+          let leaf = S === "tab" ? app.workspace.getLeaf("tab") : null;
+          const tabsOf = () => { const a = []; app.workspace.iterateAllLeaves((l) => { if (l.view && l.view.file && l.view.file.path === path && l.tabHeaderEl && !desk.panelOf(path)?.card?.contains(l.containerEl)) a.push(l); }); return a; };
+          const out = { planted: ${planted}, surface: "${surface}" };
+          let root = null;
+          try {
+            if (S === "plane") { await desk.open(f); await sleep(1200); const pc = desk.panelOf(path); root = pc && pc.card; }
+            else if (S === "tab") { await leaf.openFile(f, { state: { mode: "preview" } }); await sleep(900); root = leaf.view.containerEl; }
+            else if (S === "dragged-in") {
+              // A tab, dragged onto the 2D editor: the chat runs on the card it became.
+              desk.drawLinks();
+              const plane = desk.host.plane(), cb = plane && plane.__domvecTabDropCb;
+              if (!cb) return { ...out, error: "plane takes no drops" };
+              const t = app.workspace.getLeaf("tab"); await t.openFile(f); await sleep(500);
+              t.tabHeaderEl.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true }));
+              const pr = plane.getBoundingClientRect();
+              cb({ clientX: pr.left + 240, clientY: pr.top + 180 }, { type: "file", file: f }, true);
+              cb({ clientX: pr.left + 240, clientY: pr.top + 180 }, { type: "file", file: f }, false);
+              for (let k = 0; k < 20 && !desk.panelOf(path); k++) await sleep(200);
+              await sleep(1000);
+              out.moved = !!desk.panelOf(path) && !tabsOf().length;
+              const pc = desk.panelOf(path); root = pc && pc.card;
+            } else {
+              // A card, dragged onto a tab bar: the chat runs in the tab it became.
+              await desk.open(f); await sleep(900);
+              const bars = [...document.querySelectorAll(".workspace-tab-header-container")].filter((b) => { const r = b.getBoundingClientRect(); return r.width > 40 && r.height > 5; });
+              if (!bars[0]) return { ...out, error: "no tab bar" };
+              const br = bars[0].getBoundingClientRect();
+              desk.wireDrop(path, br.right - 30, br.top + br.height / 2);
+              for (let k = 0; k < 20 && !tabsOf().length; k++) await sleep(200);
+              await sleep(900);
+              out.moved = tabsOf().length === 1 && !desk.panelOf(path);
+              leaf = tabsOf()[0] || null; root = leaf && leaf.view.containerEl;
+            }
+            if (!root) return { ...out, error: "no " + "${surface}" + " view" };
+            const ta = [...root.querySelectorAll(".domvec-chat-cell textarea")].find((t) => t.offsetParent !== null);
+            if (!ta) return { ...out, error: "no chat cell" };
+            const t0 = window.__domvecChatCell.turns, w0 = window.__domvecChatStream.writes;
+            ta.value = "Show code";
+            ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+            await sleep(1200);
+            out.partial_in_note = (await app.vault.read(f)).includes(mark);
+            const count = () => [...root.querySelectorAll("*")].filter((e) => e.offsetParent !== null && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.includes(mark))).length;
+            for (let k = 0; k < 100 && window.__domvecChatCell.turns === t0; k++) await sleep(100);
+            await sleep(150);
+            out.on_screen_at_end = count();
+            await sleep(1200);
+            const body = await app.vault.read(f);
+            out.in_note_once = body.split(mark).length - 1 === 1;
+            const vis = [...root.querySelectorAll("*")].filter((e) => e.offsetParent !== null && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.includes(mark)));
+            out.on_screen = vis.length;
+            // A reading view draws the block as <pre>; the plane's editor as code-block lines.
+            out.code_cell = [...root.querySelectorAll("pre, .HyperMD-codeblock")].some((p) => p.offsetParent !== null && p.textContent.includes("x457 = 1"));
+            out.cell_at_foot = body.trimEnd().endsWith(F) && body.lastIndexOf(mark) < body.lastIndexOf(F + "chat");
+            out.writes = window.__domvecChatStream.writes - w0;
+            return out;
+          } finally {
+            window.__domvecChatDryText = ""; window.__domvecChatDryMs = 0; window.__domvecPlantStreamAppend = false;
+            try { desk.closePath(path); } catch (e) {}
+            for (const l of tabsOf()) { try { l.detach(); } catch (e) {} }
+            if (leaf) { try { leaf.detach(); } catch (e) {} }
+            await sleep(800);
+            const x = app.vault.getAbstractFileByPath(path); if (x) await app.vault.delete(x).catch(() => 0);
+          }
+        })()`, { timeout: 60000 });
+        const good = (c) => !!c && !c.error && c.partial_in_note && c.in_note_once && c.on_screen === 1 && c.on_screen_at_end === 1 && c.code_cell && c.cell_at_foot && c.writes >= 2;
+        const plane = await arm(false, "plane"), tab = await arm(false, "tab");
+        const dragged_in = await arm(false, "dragged-in"), dragged_out = await arm(false, "dragged-out"), planted = await arm(true, "plane");
+        const moved = (c) => good(c) && c.moved;
+        return { pass: good(plane) && good(tab) && moved(dragged_in) && moved(dragged_out) && !!planted && !planted.error && !planted.in_note_once && planted.on_screen >= 2, evidence: { plane, tab, dragged_in, dragged_out, planted } };
       },
     },
     {

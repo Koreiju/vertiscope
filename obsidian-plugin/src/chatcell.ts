@@ -16,6 +16,7 @@
  * `__domvecPlantChatStrip`: no cell (the block stays raw) and the browser
  * cell's hover strip returns.
  */
+import { closeOpenFence } from "./streamtext";
 import type { App, MarkdownPostProcessorContext, TFile } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { DEFAULT_EGO_SYSTEM_PROMPT } from "./cockpit";
@@ -217,18 +218,14 @@ export function chatCell(
       const pins = hostCtx?.pins ? hostCtx.pins(ctx.sourcePath) : [];
       const effectiveSystem = (sysInput && customSys ? sysInput.value.trim() : customSys) || egoDefault();
       const t0 = performance.now(); let tokens = 0, reply = "";
+      const live = f ? noteStream(app, f, info?.lineStart, prompt, hostCtx) : null;
       try {
-        reply = await stream(prompt, context, (t) => { tokens++; out.appendText(t); }, stopper.signal,
+        reply = await stream(prompt, context, (t) => { tokens++; if (live) live.push(t); else out.appendText(t); }, stopper.signal,
           { session: ctx.sourcePath || "default", pins, history, ...(effectiveSystem ? { system: effectiveSystem } : {}) });
         if (stopper.signal.aborted) { reply = reply.trimEnd() + " *(stopped)*"; chatCellStats.stopped++; }
-      } catch (err) { reply = "*the chat did not answer: " + String((err as Error).message || err) + "*"; out.setText(reply); }
+      } catch (err) { reply = "*the chat did not answer: " + String((err as Error).message || err) + "*"; if (!live) out.setText(reply); }
       let written = false;
-      if (f) {
-        const said = (window as any).__domvecPlantReplyFlat ? reply.split("`".repeat(3)).join("'".repeat(3)) : reply;
-        const turn = "> **You** " + prompt.split(NL).join(NL + "> ") + NL + NL + said.trim() + NL + NL;
-        await writeTurnAboveChatFence(app, f, info?.lineStart, turn, hostCtx?.markdownViews);
-        written = true;
-      }
+      if (f && live) { await live.end(reply); written = true; }
       chatCellStats.turns++;
       if (written) {
         window.dispatchEvent(new CustomEvent("domvec-tool-view", { detail: { tool: "chat", url: ctx.sourcePath } }));
@@ -252,21 +249,63 @@ export function chatCell(
   };
 }
 
+/** The ONE place a reply lives is the note (2026-11-28: "stream everything into
+ *  the markdown cell"): the turn is written above the ```chat fence on the first
+ *  token and rewritten as tokens arrive (at most every STREAM_MS), so a ``` block
+ *  in the reply renders as its own cell while it streams. The cell's box keeps
+ *  no copy. Planted `__domvecPlantStreamAppend`: each rewrite is appended
+ *  instead of replacing the stream's previous state -- the reply lands twice. */
+const STREAM_MS = 150;
+export const chatStreamStats = { writes: 0, turns: 0 };
+(window as any).__domvecChatStream = chatStreamStats;
+function noteStream(app: App, f: TFile, hintLine: number | undefined, prompt: string, hostCtx?: ChatCellHost) {
+  const head = "> **You** " + prompt.split(NL).join(NL + "> ") + NL + NL;
+  const turnOf = (said: string) => head + said.trim() + NL + NL;
+  let acc = "", prev = "", timer = 0, chain: Promise<unknown> = Promise.resolve();
+  const box = () => Array.from(document.querySelectorAll(`.domvec-chat-cell[data-path="${CSS.escape(f.path)}"] .domvec-chat-cell-out`)) as HTMLElement[];
+  const flush = (said: string) => {
+    const turn = turnOf(said), was = (window as any).__domvecPlantStreamAppend ? "" : prev; prev = turn;
+    chain = chain.then(() => writeTurnAboveChatFence(app, f, hintLine, turn, hostCtx?.markdownViews, was)).then(() => { chatStreamStats.writes++; });
+    return chain;
+  };
+  for (const b of box()) b.setText("");
+  return {
+    push(tok: string) {
+      acc += tok;
+      if (!timer) timer = window.setTimeout(() => { timer = 0; void flush(closeOpenFence(acc) + " …"); }, prev ? STREAM_MS : 0);
+    },
+    async end(reply: string): Promise<boolean> {
+      if (timer) { window.clearTimeout(timer); timer = 0; }
+      await chain;
+      const said = (window as any).__domvecPlantReplyFlat ? reply.split("`".repeat(3)).join("'".repeat(3)) : reply;
+      await flush(said);
+      chatStreamStats.turns++;
+      return true;
+    },
+  };
+}
+
 async function writeTurnAboveChatFence(
   app: App,
   f: TFile,
   hintLine: number | undefined,
   turn: string,
   markdownViews?: () => any[],
+  prev = "",
 ): Promise<boolean> {
   const F = "`".repeat(3);
   const patch = (t: string): { next: string; ok: boolean } => {
     const lines = t.split(NL);
-    let at = hintLine !== undefined && lines[hintLine] !== undefined && lines[hintLine].trim().startsWith(F + "chat")
+    // The fence moves down as the turn grows: find it again rather than trust the hint.
+    let at = hintLine !== undefined && lines[hintLine] !== undefined && lines[hintLine].trim().startsWith(F + "chat") && !prev
       ? hintLine
       : lines.findIndex((l) => /^```chat\b/.test(l.trim()));
     if (at < 0) return { next: t, ok: false };
-    return { next: [...lines.slice(0, at), turn + lines.slice(at).join(NL)].join(NL), ok: true };
+    let head = lines.slice(0, at).join(NL) + (at > 0 ? NL : "");
+    const tail = lines.slice(at).join(NL);
+    // A streamed turn replaces its own previous state, so it is in the note once.
+    if (prev && head.endsWith(prev)) head = head.slice(0, head.length - prev.length);
+    return { next: head + turn + tail, ok: true };
   };
   const openView = (markdownViews ? markdownViews() : app.workspace.getLeavesOfType("markdown").map((l) => l.view as any))
     .find((v: any) => v?.file?.path === f.path && v.getMode?.() === "source" && v.editor);
@@ -329,30 +368,22 @@ export async function streamPromptIntoNote(
   const egoSys = (hostCtx?.systemPrompt ? hostCtx.systemPrompt() : DEFAULT_EGO_SYSTEM_PROMPT) || DEFAULT_EGO_SYSTEM_PROMPT;
   const effectiveSystem = (systemOverride || "").trim() || parseChatFenceSystem(fenceSrc) || egoSys;
 
-  const liveOut = Array.from(document.querySelectorAll(`.domvec-chat-cell[data-path="${CSS.escape(path)}"] .domvec-chat-cell-out`))[0] as HTMLElement | undefined;
-  if (liveOut) liveOut.setText("");
-
   const t0 = performance.now();
   let tokens = 0;
   let reply = "";
+  const live = noteStream(app, f, openIdx >= 0 ? openIdx : undefined, cleanPrompt, hostCtx);
   try {
     reply = await stream(
       cleanPrompt,
       context,
-      (tok) => {
-        tokens++;
-        if (liveOut) liveOut.appendText(tok);
-      },
+      (tok) => { tokens++; live.push(tok); },
       undefined,
       { session: path, pins, history, ...(effectiveSystem ? { system: effectiveSystem } : {}) },
     );
   } catch (err) {
     reply = "*the chat did not answer: " + String((err as Error).message || err) + "*";
-    if (liveOut) liveOut.setText(reply);
   }
-  const said = (window as any).__domvecPlantReplyFlat ? reply.split("`".repeat(3)).join("'".repeat(3)) : reply;
-  const turn = "> **You** " + cleanPrompt.split(NL).join(NL + "> ") + NL + NL + said.trim() + NL + NL;
-  const written = await writeTurnAboveChatFence(app, f, openIdx >= 0 ? openIdx : undefined, turn, hostCtx?.markdownViews);
+  const written = await live.end(reply);
   chatCellStats.turns++;
   chatCellStats.programmatic++;
   if (written) {

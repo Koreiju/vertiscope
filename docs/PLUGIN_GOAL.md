@@ -7277,6 +7277,48 @@ fold stream address ...`.)*
   directly in `AGENT_HANDOFF.md` so both agents synchronize over the user's
   verbatim prompts.*
 
+### 208. Standing `/goal`: synchronized buildout, legacy integration, and deep-dive live MCP + screenshot validation (2026-11-28)
+
+> /goal work on all tasks in our new agent handoff, most recent verbatims, and
+> legacy tasks from older verbatims carried in on the same target updates to
+> code, synchronizing with our claude agent continuously until all requirements
+> and verbatim interpretations and considerations are clearly tested and
+> manually validated by yourself and antigravity to the extent of MCP harness
+> interactions with the app itself to do deep-dives into using the app, taking
+> screenshots intermittently to catch flaws and errors that would be either
+> bugs, feature bloat/redundancy, and ambiguous behavior and things like that.
+
+*Read as (208), mine: execute Track A (`G-456`–`G-460` + legacy tasks on the
+same target modules such as `G-238`, `P-W1..P-W6`, `D-3`) in continuous
+synchronization with Claude's Track B, exercising the running Obsidian app
+deeply through the MCP harness with intermittent `app_screenshot` + visual/UX
+inspections to eliminate bugs, redundant chrome, and ambiguous behavior, and
+verifying clean + planted arms across all checks.*
+
+### 209. The standing goal, as sent to Claude (2026-11-28)
+
+> work on all tasks in our new agent handoff, most recent verbatims, and legacy tasks from older verbatims carried in on the same target updates to code, synchronizing with our antigravity agent continuously until all requirements and verbatim interpretations and considerations are clearly tested and manually validated by yourself and antigravity to the extent of MCP harness interactions with the app itself to do deep-dives into using the app, taking screenshots intermittently to catch flaws and errors that would be either bugs, feature bloat/redundancy, and ambiguous behavior and things like that.
+
+*Read as (209), mine (the same goal Item 208 records for Antigravity): every row is done only when it has been driven in the running app through the MCP harness, with screenshots read for bugs, bloat, redundancy and ambiguity -- not when a check is green.*
+
+### 210. Chat replies are duplicated; stream into the markdown cell (2026-11-28)
+
+> also, we get duplicate outputs streamed to our markdown from chat responses in chat-based cells, which needs to be fixed and unified to essentially stream everything into the markdown cell with its specialized markdown/interactive dualities using special ``` based blocks.
+
+*Read as (210), mine: a reply lives in one place, the note: it streams into the markdown above the ```chat fence, so a ``` block in it renders as its own cell while it streams; the cell's own output box holds no second copy (`G-462`).*
+
+### 211. The graph view panel broke (2026-11-28)
+
+> our graph view panel may have just broken too
+
+*Read as (211), mine: the 3D graph tab came back empty ("New tab", an unbound `domvec-graph-view` leaf) during a check run; reopened, and a plain reload keeps it. Cause not yet reproduced.*
+
+### 212. All notebook tests on the 2D editor, in tandem with tabs (2026-11-28)
+
+> all panel evals have to be in the 2D editor, and I saw you interacting with a full-panel tab form. While that view is nice, remember our requirements for interchangeable dragging of panels to and from standard obsidian tabs and likewise 2D graph editor notebooks, since the two views of the same notebook must remain uniform, and all tests on notebooks must be fully verified with the tandem tests and features and links and requirements that are present in our 2D graph editor.
+
+*Read as (212), mine: a notebook check runs on the 2D graph editor's card first, and in a tab of the same note as well, and the two must agree; a check that only opens a tab has not tested the notebook.*
+
 ### Recovered verbatim (2026-11-22 inventory)
 
 *Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,

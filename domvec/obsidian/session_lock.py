@@ -478,6 +478,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                 sys.stdout.flush()
                 time.sleep(args.hold)
             if cmd:
+                # Windows: `npm` is `npm.cmd`, which CreateProcess cannot find
+                # by its bare name; resolve it on PATH first.
+                import shutil
+                cmd = [shutil.which(cmd[0]) or cmd[0], *cmd[1:]]
                 proc = subprocess.run(cmd)
                 return int(proc.returncode)
             return 0
