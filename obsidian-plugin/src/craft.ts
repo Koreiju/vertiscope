@@ -40,6 +40,8 @@ import { findFences } from "./fences";
 import { COCKPIT_PATH } from "./cockpit";
 import { PLANE_FOLDER } from "./planepanels";
 import { dominatedBy } from "./dominance";
+import { parseInternalMdLinks, titleOfNote } from "./egolinks";
+import { extractNotePyDefsRefs } from "./fencecode";
 /** Where the live checks write their scratch notes. */
 export const CHECKS_FOLDER = "domvec-checks";
 
@@ -401,6 +403,7 @@ export class Craft {
       const run = this.checksRunning();
       this.builtDuringRun = run;
       let keptOff = 0;
+      const notePyDefs = new Map<string, { noteId: string; cellByDef: Map<string, string>; cellRefs: { cid: string; refs: Set<string> }[] }>();
       for (const f of app.vault.getMarkdownFiles()) {
         if (f.path === COCKPIT_PATH) continue;
         const isCheckScratch = f.path.startsWith(CHECKS_FOLDER + "/") || /^domvec\/graph\/(g\d+|pg\d+|t\d+|flip )/i.test(f.path);
@@ -410,49 +413,53 @@ export class Craft {
         if (kind === "chunk") continue;
         const slate = kind === "slate";
         const hasCode = (cache?.sections || []).some((s) => s.type === "code");
-        // Cheap first cut -- but never past a note on the plane or made by its
-        // tools: a markdown panel with no cell is the reader's own artifact
-        // (item 74c), and this cut once dropped it before the rule below.
         const planeNote = !this.plantPlaneNotCells && (f.path.startsWith(PLANE_FOLDER + "/") || this.host.isOpen(f.path));
         if (!slate && !hasCode && !planeNote) continue;
-        // Membership: G-291's rule for a computation-graph artifact -- a slate,
-        // or a note whose python cell has RUN (a stored readout) -- and any note
-        // the plane's tools made or the plane shows (item 65: its panel IS its
-        // node). The vault is a repository: a README's fenced example is not
-        // a kernel cell.
         if (f.path.includes("node_modules/") || f.path.startsWith(".")) continue;
         const onPlane = f.path.startsWith(PLANE_FOLDER + "/") || this.host.isOpen(f.path);
-        // The panel IS the node (item 65): an open panel's text is read as it
-        // stands, not as the disk had it at the last autosave -- a run's
-        // readout exists the moment its output is in the editor. Planted
-        // `plantDiskText`: the disk's, as before (the readout lags ~2 s).
         const live = this.plantDiskText ? null : (this.host.liveText?.(f.path) ?? null);
         const text = live ?? await app.vault.cachedRead(f);
-        const fences = findFences(text).filter((x) => PY.test(x.lang));
-        const ran = fences.length > 0 && /^\s*<!--\s*nb-output\s/m.test(text);
-        // The reader's own markdown panels too (item 74c): on the plane, or
-        // made by its tools, a note is an ego artifact with or without a cell.
+        const allFences = findFences(text);
+        const pyFences = allFences.filter((x) => PY.test(x.lang));
+        const specialFences = allFences.filter((x) => /^(python|py|python3|browser|chat|tool|agent)$/i.test(x.lang));
+        const ran = pyFences.length > 0 && /^\s*<!--\s*nb-output\s/m.test(text);
         if (!slate && !ran && !onPlane) continue;
         const id = "craft:" + f.path;
-        let noteLabel = f.basename;
-        if (/^(slate|notebook)\s+\d+$/i.test(f.basename)) {
-          const bodyText = text.replace(/^---[\s\S]*?\n---\n?/, "");
-          const firstLine = (bodyText.split("\n").find((l) => l.trim() && !/^\s*(```|~~~|<!--)/.test(l)) || "")
-            .replace(/^#+\s*/, "").split("\t")[0].trim();
-          if (firstLine && firstLine.toLowerCase() !== f.basename.toLowerCase().replace(/\s+/g, "_")) {
-            noteLabel = firstLine;
-          }
-        }
+        const noteLabel = titleOfNote(f.path, text) || f.basename;
         const note: CraftNode = { id, kind: "note", path: f.path, line: -1, label: noteLabel, local: { x: 0, y: 0, z: 0 } };
         nodes.push(note);
         names.set(f.basename.toLowerCase(), id);
         if (noteLabel !== f.basename) names.set(noteLabel.toLowerCase(), id);
         edges.push({ a: ego.id, b: id, kind: "root" });
         const fenced = new Set<number>();
-        for (const x of findFences(text)) for (let i = x.openLine; i <= x.closeLine; i++) fenced.add(i);
-        // A slate IS its one tree (fused): its name names the note.
+        for (const x of allFences) for (let i = x.openLine; i <= x.closeLine; i++) fenced.add(i);
+        // Recursive compilation over markdown `#` headings (containing text chunks & cells) + legacy trees (`G-448`).
         const trees = treesOf(text, fenced);
         const steps: { id: string; line: number }[] = [];
+        const headingStack: { level: number; id: string; line: number }[] = [];
+        const rawLines = text.split("\n");
+        let bodyStart = 0;
+        if (rawLines[0] === "---") { const e = rawLines.indexOf("---", 1); if (e > 0) bodyStart = e + 1; }
+        for (let li = bodyStart; li < rawLines.length; li++) {
+          if (fenced.has(li)) continue;
+          const hm = /^(#{1,3})\s+(.+?)\s*#*$/.exec(rawLines[li].trim());
+          if (!hm) continue;
+          const lvl = hm[1].length;
+          const hTitle = hm[2].replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").trim();
+          if (!hTitle) continue;
+          while (headingStack.length && headingStack[headingStack.length - 1].level >= lvl) headingStack.pop();
+          // Level-1 heading matching the note title is fused with the note node itself; deeper headings become child containment nodes.
+          if (lvl === 1 && !headingStack.length && hTitle.toLowerCase() === noteLabel.toLowerCase()) {
+            headingStack.push({ level: lvl, id, line: li });
+            continue;
+          }
+          const hid = `${id}#sec:${li}`;
+          const parentId = headingStack.length ? headingStack[headingStack.length - 1].id : id;
+          nodes.push({ id: hid, kind: "tree", path: f.path, line: li, label: hTitle, local: { x: 0, y: 0, z: 0 } });
+          edges.push({ a: parentId, b: hid, kind: "contains" });
+          headingStack.push({ level: lvl, id: hid, line: li });
+          steps.push({ id: hid, line: li });
+        }
         for (const t of trees) {
           if (slate) { names.set(t.name.toLowerCase(), id); for (const r of t.refs) pending.push({ from: id, ref: r }); continue; }
           const tid = `${id}#tree:${t.line}`;
@@ -462,20 +469,41 @@ export class Craft {
           for (const r of t.refs) pending.push({ from: tid, ref: r });
           steps.push({ id: tid, line: t.line });
         }
-        fences.forEach((x, i) => {
+        const containerForLine = (ln: number): string => {
+          let best = id;
+          let bestLine = -1;
+          for (const n of nodes) {
+            if (n.path === f.path && n.id.startsWith(`${id}#sec:`) && n.line < ln && n.line > bestLine) {
+              best = n.id;
+              bestLine = n.line;
+            }
+          }
+          return best;
+        };
+        specialFences.forEach((x, i) => {
           const cid = `${id}#cell:${x.openLine}`;
-          nodes.push({ id: cid, kind: "cell", path: f.path, line: x.openLine, label: `[${i + 1}]`, local: { x: 0, y: 0, z: 0 } });
-          edges.push({ a: id, b: cid, kind: "contains" });
+          const tag = PY.test(x.lang) ? `[${i + 1}]` : `[${i + 1}:${x.lang.toLowerCase()}]`;
+          nodes.push({ id: cid, kind: "cell", path: f.path, line: x.openLine, label: tag, local: { x: 0, y: 0, z: 0 } });
+          edges.push({ a: containerForLine(x.openLine), b: cid, kind: "contains" });
           for (const r of x.refs || []) pending.push({ from: cid, ref: r });
           steps.push({ id: cid, line: x.openLine });
         });
-        // The ego's MEMORY (item 96): a note whose cell has run holds a READOUT
-        // -- its own node, linked forward from the cell that produced it; the
-        // run's recorded inputs are its inverse lookups (lines into the world).
+        // Record Python `defs` and `refs` per cell for intra-note & cross-note variable dependency edges (`G-448`, `G-451`).
+        if (pyFences.length) {
+          const pyInfo = extractNotePyDefsRefs(text);
+          const cellByDef = new Map<string, string>();
+          const cellRefs: { cid: string; refs: Set<string> }[] = [];
+          for (const pc of pyInfo.perCell) {
+            const cid = `${id}#cell:${pc.openLine}`;
+            for (const d of pc.defs) if (!cellByDef.has(d)) cellByDef.set(d, cid);
+            cellRefs.push({ cid, refs: pc.refs });
+          }
+          notePyDefs.set(f.path, { noteId: id, cellByDef, cellRefs });
+        }
         if (ran && !this.plantNoReadouts) {
           const lines = text.split("\n");
           let producer = "";
-          for (const x of fences) {
+          for (const x of pyFences) {
             const after = lines.slice(x.closeLine + 1, x.closeLine + 4).join("\n");
             if (/<!--\s*nb-output\s/.test(after)) producer = `${id}#cell:${x.openLine}`;
           }
@@ -483,7 +511,6 @@ export class Craft {
           nodes.push({ id: rid, kind: "readout", path: f.path, line: -1, label: "readout", local: { x: 0, y: 0, z: 0 } });
           edges.push({ a: producer || id, b: rid, kind: "forward" });
         }
-        // One kernel per note, run in the note's order (trees and cells).
         steps.sort((a, b) => a.line - b.line);
         for (let i = 1; i < steps.length; i++) edges.push({ a: steps[i - 1].id, b: steps[i].id, kind: "order" });
       }
@@ -576,17 +603,24 @@ export class Craft {
       // means. Planted `plantNoNoteLinks`: no such edges, as before.
       let hard = 0;
       if (!this.plantNoNoteLinks) {
-        const notes = new Set(nodes.filter((n) => n.kind === "note").map((n) => n.path));
+        const notes = new Set(nodes.filter((n) => n.kind === "note" || n.kind === "ego").map((n) => n.path));
         const seen = new Set<string>();
+        const addHard = (from: string, to: string) => {
+          if (to === from || !notes.has(to)) return;
+          const key = from < to ? from + "|" + to : to + "|" + from;
+          if (seen.has(key)) return;
+          seen.add(key);
+          edges.push({ a: "craft:" + from, b: "craft:" + to, kind: "link" });
+          hard++;
+        };
         const resolved: Record<string, Record<string, number>> = (app.metadataCache as any).resolvedLinks || {};
         for (const from of notes) {
-          for (const to of Object.keys(resolved[from] || {})) {
-            if (to === from || !notes.has(to)) continue;
-            const key = from < to ? from + "|" + to : to + "|" + from;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            edges.push({ a: "craft:" + from, b: "craft:" + to, kind: "link" }); hard++;
-          }
+          for (const to of Object.keys(resolved[from] || {})) addHard(from, to);
+          // Also include live `[cell title](cell link)` markdown links before metadataCache flushes (`G-448`).
+          const live = this.host.liveText?.(from);
+          const fObj = app.vault.getAbstractFileByPath(from);
+          const txt = live ?? (fObj instanceof TFile ? await app.vault.cachedRead(fObj) : "");
+          for (const lk of parseInternalMdLinks(txt)) addHard(from, lk.path);
         }
       }
       this.stats.hard_links = hard;
@@ -595,6 +629,40 @@ export class Craft {
         const head = p.ref.split(".")[0].trim().toLowerCase();
         const to = names.get(head);
         if (to && to !== p.from) { edges.push({ a: p.from, b: to, kind: "ref" }); refs++; }
+      }
+      // Intra-note and cross-notebook Python `defs -> refs` dependency edges (`G-448`, `G-451`).
+      if (!(window as any).__domvecPlantNoCrossVarLinks) {
+        const globalDefCell = new Map<string, { path: string; cid: string }>();
+        for (const [p, info] of notePyDefs.entries()) {
+          for (const [v, cid] of info.cellByDef.entries()) {
+            if (!globalDefCell.has(v)) globalDefCell.set(v, { path: p, cid });
+          }
+        }
+        const edgeSeen = new Set<string>();
+        for (const [p, info] of notePyDefs.entries()) {
+          for (const cr of info.cellRefs) {
+            for (const rName of cr.refs) {
+              const localCid = info.cellByDef.get(rName);
+              const ext = !localCid ? globalDefCell.get(rName) : null;
+              const srcCid = localCid || ext?.cid || "";
+              if (srcCid && srcCid !== cr.cid) {
+                const ek = cr.cid + "<-" + srcCid;
+                if (!edgeSeen.has(ek)) {
+                  edgeSeen.add(ek);
+                  edges.push({ a: cr.cid, b: srcCid, kind: "ref" });
+                  refs++;
+                }
+                if (ext && ext.path !== p) {
+                  const nk = "craft:" + p + "<-craft:" + ext.path;
+                  if (!edgeSeen.has(nk)) {
+                    edgeSeen.add(nk);
+                    edges.push({ a: "craft:" + p, b: "craft:" + ext.path, kind: "link" });
+                  }
+                }
+              }
+            }
+          }
+        }
       }
       // The ego's own projection (item 76, binding): asked after the store has
       // the membership the post above sent it -- and the new graph published

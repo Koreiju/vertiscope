@@ -231,10 +231,15 @@ class Live:
 
     def ui(self) -> Dict:
         """The interface as a data structure, in screen pixels."""
-        got = self.evaluate(
-            "JSON.stringify(window.__domvec ? window.__domvec.ui() "
-            ": {error: 'harness not installed; reload the plugin'})")
-        return json.loads(got) if isinstance(got, str) else {"error": "no value"}
+        from .session_lock import call_with_lease
+
+        def _do():
+            got = self.evaluate(
+                "JSON.stringify(window.__domvec ? window.__domvec.ui() "
+                ": {error: 'harness not installed; reload the plugin'})")
+            return json.loads(got) if isinstance(got, str) else {"error": "no value"}
+
+        return call_with_lease("ui_state", _do, wait_s=60.0)
 
     def act(self, gesture: str, arg: object = None, full: bool = False) -> Dict:
         """Do a thing, and report the UI either side plus the backend work.
@@ -243,12 +248,17 @@ class Live:
         open a pane, navigate, scan, watch the trie fill -- used to be a
         dozen round trips and a guess about ordering.
         """
-        expr = (
-            "window.__domvec.act(%s, %s, {full: %s}).then(JSON.stringify)"
-            % (json.dumps(gesture), json.dumps(arg),
-               "true" if full else "false"))
-        got = self.evaluate(expr)
-        return json.loads(got) if isinstance(got, str) else {"error": "no value"}
+        from .session_lock import call_with_lease
+
+        def _do():
+            expr = (
+                "window.__domvec.act(%s, %s, {full: %s}).then(JSON.stringify)"
+                % (json.dumps(gesture), json.dumps(arg),
+                   "true" if full else "false"))
+            got = self.evaluate(expr)
+            return json.loads(got) if isinstance(got, str) else {"error": "no value"}
+
+        return call_with_lease("ui_act", _do, detail=str(gesture), wait_s=60.0)
 
 
     # -- probes ---------------------------------------------------------------
@@ -477,61 +487,79 @@ class Live:
         instrument that is LOADED; this is the one step that cannot assume
         the instrument is the current one.
         """
-        import time
-        # Reader-idle gate: a reload under the reader's hands tears their
-        # panes down mid-gesture. `force` is for a probe the reader asked for.
-        if not force:
-            idle = self.evaluate(
-                "(()=>{try{return window.__domvec.reader.idleMs();}catch(e){return null;}})()")
-            if isinstance(idle, (int, float)) and idle < 60000:
-                return {"reloaded": False, "refused": "reader active %.0f s ago" % (idle / 1000),
-                        "hint": "pass force to reload anyway"}
-        # The reload is not the reader: it rebuilds the views, which stamps
-        # the reader clock, and the next idle-gated probe then aborted on it
-        # (2026-10-17). The stamp is put back afterwards.
-        stamp = self.evaluate("window.__domvecReaderAt || 0")
-        before = self.evaluate(
-            "(()=>{const p=app.plugins.getPlugin('domvec-bridge');"
-            " return p && p.manifest ? p.manifest.version : null;})()")
-        self.evaluate(
-            "(async()=>{await app.plugins.disablePlugin('domvec-bridge'); return 1;})()")
-        # Enable is FIRED, not awaited: awaiting it over CDP hung for the
-        # whole socket timeout more than once and left a half-loaded
-        # instance behind (2026-10-12). Poll a flag it sets instead.
-        self.evaluate(
-            "(()=>{window.__dvReload='start'; app.plugins.enablePlugin('domvec-bridge')"
-            ".then(()=>{window.__dvReload='done'},(e)=>{window.__dvReload='err '+e}); return 1;})()")
-        enabled = "start"
-        deadline = time.time() + 120
-        while time.time() < deadline and enabled == "start":
-            time.sleep(1.0)
-            enabled = self.evaluate("String(window.__dvReload)")
-        # Rebuild each view IN THE LEAF IT HAS. Disabling detaches the old
-        # view, and a leaf left that way keeps running the OLD instance's
-        # code or sits empty; never blank it and open another, which left
-        # 13 empty leaves splitting the window (2026-10-12).
-        views = self.evaluate(
-            "(async()=>{const out={}; const race=(pr)=>Promise.race([pr,new Promise((r)=>setTimeout(r,15000))]);"
-            " for (const [t,k] of [['domvec-graph-view','graph'],['domvec-browser-view','browser']]) {"
-            "  const ls=app.workspace.getLeavesOfType(t);"
-            "  for (const l of ls) await race(l.setViewState({type:t, active:false}));"
-            "  if (!app.workspace.getLeavesOfType(t).length) await race(window.__domvec.act('open',k));"
-            "  out[k]=app.workspace.getLeavesOfType(t).length; }"
-            " return JSON.stringify(out);})()")
-        time.sleep(settle)
-        gestures = self.evaluate(
-            "(()=>{try{return !!(window.__domvec && window.__domvec.act);}"
-            "catch(e){return false;}})()")
-        # `wait=False` for a store that has nothing to draw yet: a fresh
-        # test workspace, before it is seeded, would sit out the whole timeout.
-        drew = self.wait_for_projector() if wait else None
-        try:
-            views = json.loads(views) if isinstance(views, str) else views
-        except ValueError:
-            pass
-        self.evaluate("(()=>{window.__domvecReaderAt = %s; return 1})()" % json.dumps(stamp))
-        return {"version_before": before, "enable": enabled, "views": views,
-                "harness_installed": bool(gestures), "settled_s": settle, "projector": drew}
+        from .session_lock import call_with_lease
+
+        def _do():
+            import time
+            # Never tear down an in-flight in-app `verify` started with `wait=False`
+            # or by a sibling runner; wait briefly for it to finish or report busy.
+            vwait_end = time.time() + 45.0
+            while time.time() < vwait_end:
+                vrun = self.evaluate(
+                    "(()=>{try{const s=window.__domvec&&window.__domvec.verify&&window.__domvec.verify.state();"
+                    "return !!(s&&s.running);}catch(e){return false;}})()")
+                if not vrun:
+                    break
+                time.sleep(1.0)
+            else:
+                return {"reloaded": False, "busy": True,
+                        "refused": "in-app verify is currently running; wait for verify_state().running == false"}
+            # Reader-idle gate: a reload under the reader's hands tears their
+            # panes down mid-gesture. `force` is for a probe the reader asked for.
+            if not force:
+                idle = self.evaluate(
+                    "(()=>{try{return window.__domvec.reader.idleMs();}catch(e){return null;}})()")
+                if isinstance(idle, (int, float)) and idle < 60000:
+                    return {"reloaded": False, "refused": "reader active %.0f s ago" % (idle / 1000),
+                            "hint": "pass force to reload anyway"}
+            # The reload is not the reader: it rebuilds the views, which stamps
+            # the reader clock, and the next idle-gated probe then aborted on it
+            # (2026-10-17). The stamp is put back afterwards.
+            stamp = self.evaluate("window.__domvecReaderAt || 0")
+            before = self.evaluate(
+                "(()=>{const p=app.plugins.getPlugin('domvec-bridge');"
+                " return p && p.manifest ? p.manifest.version : null;})()")
+            self.evaluate(
+                "(async()=>{await app.plugins.disablePlugin('domvec-bridge'); return 1;})()")
+            # Enable is FIRED, not awaited: awaiting it over CDP hung for the
+            # whole socket timeout more than once and left a half-loaded
+            # instance behind (2026-10-12). Poll a flag it sets instead.
+            self.evaluate(
+                "(()=>{window.__dvReload='start'; app.plugins.enablePlugin('domvec-bridge')"
+                ".then(()=>{window.__dvReload='done'},(e)=>{window.__dvReload='err '+e}); return 1;})()")
+            enabled = "start"
+            deadline = time.time() + 120
+            while time.time() < deadline and enabled == "start":
+                time.sleep(1.0)
+                enabled = self.evaluate("String(window.__dvReload)")
+            # Rebuild each view IN THE LEAF IT HAS. Disabling detaches the old
+            # view, and a leaf left that way keeps running the OLD instance's
+            # code or sits empty; never blank it and open another, which left
+            # 13 empty leaves splitting the window (2026-10-12).
+            views = self.evaluate(
+                "(async()=>{const out={}; const race=(pr)=>Promise.race([pr,new Promise((r)=>setTimeout(r,15000))]);"
+                " for (const [t,k] of [['domvec-graph-view','graph'],['domvec-browser-view','browser']]) {"
+                "  const ls=app.workspace.getLeavesOfType(t);"
+                "  for (const l of ls) await race(l.setViewState({type:t, active:false}));"
+                "  if (!app.workspace.getLeavesOfType(t).length) await race(window.__domvec.act('open',k));"
+                "  out[k]=app.workspace.getLeavesOfType(t).length; }"
+                " return JSON.stringify(out);})()")
+            time.sleep(settle)
+            gestures = self.evaluate(
+                "(()=>{try{return !!(window.__domvec && window.__domvec.act);}"
+                "catch(e){return false;}})()")
+            # `wait=False` for a store that has nothing to draw yet: a fresh
+            # test workspace, before it is seeded, would sit out the whole timeout.
+            drew = self.wait_for_projector() if wait else None
+            try:
+                views = json.loads(views) if isinstance(views, str) else views
+            except ValueError:
+                pass
+            self.evaluate("(()=>{window.__domvecReaderAt = %s; return 1})()" % json.dumps(stamp))
+            return {"version_before": before, "enable": enabled, "views": views,
+                    "harness_installed": bool(gestures), "settled_s": settle, "projector": drew}
+
+        return call_with_lease("plugin_reload", _do, wait_s=120.0)
 
     def wait_for_projector(self, timeout: float = 90.0) -> Dict:
         """Wait until the pane has actually DRAWN something.
@@ -576,74 +604,61 @@ class Live:
     def verify(self, only=None, *, wait: bool = True, timeout_s: float = 1200,
                reload: bool = True, store: str = "working",
                fresh: bool = False) -> Dict:
-        """Run the live checks INSIDE the plugin and read them back (`G-75`).
+        """Run the live checks INSIDE the plugin and read them back (`G-75`)."""
+        from .session_lock import call_with_lease
+        detail = ",".join(str(x) for x in list(only or [])[:6])
 
-        Hardware in the loop: the checks are `checks/live.mjs`, the same list
-        the terminal client runs, executed by the plugin in its own window
-        (`window.__domvec.verify`). This only reloads the plugin -- from
-        outside, so the run scores the code on disk -- starts the run, and
-        polls its state; progress and failures also show in the browser
-        cell's corner box while it runs. `wait=False` returns once started.
-
-        `fresh=True` asks the PLUGIN for a fresh-store run (`G-87`): the app
-        starts a sidecar on an empty store, fills it by browsing, runs the
-        checks and switches itself back -- all of it inside the app, shown
-        in the corner box. Nothing here orchestrates it; this starts it and
-        reads it.
-        """
-        import time as _time
-        if reload:
-            got = self.reload_plugin()
-            if got.get("refused"):
-                # Running anyway would score the build that was loaded
-                # before, which is the trap this reload exists to close.
-                return {"started": None, "refused": got["refused"]}
-            _time.sleep(3)
-        call = ("v.startFresh(%s)" % json.dumps(list(only or [])) if fresh
-                else "v.start(%s, %s)" % (json.dumps(list(only or [])), json.dumps(store)))
-        started = self.json_eval(
-            "JSON.stringify((() => { const v = window.__domvec && window.__domvec.verify;"
-            " if (!v) return {error: 'this plugin build has no in-app verifier'};"
-            " %s; const s = v.state();"
-            " return {run: s.run, total: s.total}; })())" % call)
-        if not started or started.get("error") or not wait:
-            return {"started": started}
-        deadline = _time.time() + timeout_s
-        state = {}
-        while _time.time() < deadline:
-            _time.sleep(3)
-            state = self.json_eval("JSON.stringify(window.__domvec.verify.state())") or {}
-            if not state.get("running"):
-                break
-        results = state.get("results") or []
-        # And what the APP shows for the run: the verdicts as the corner box
-        # draws them. A run the box does not show, or shows differently, is
-        # a finding about the box.
-        try:
-            observed = self.observe_checks()
-            # Read, then put the corner box back as the reader had it: the run
-            # opened it to press its button, and left open it covers the page.
+        def _do():
+            import time as _time
+            if reload:
+                got = self.reload_plugin()
+                if got.get("busy"):
+                    return got
+                if got.get("refused"):
+                    # Running anyway would score the build that was loaded
+                    # before, which is the trap this reload exists to close.
+                    return {"started": None, "refused": got["refused"]}
+                _time.sleep(3)
+            call = ("v.startFresh(%s)" % json.dumps(list(only or [])) if fresh
+                    else "v.start(%s, %s)" % (json.dumps(list(only or [])), json.dumps(store)))
+            started = self.json_eval(
+                "JSON.stringify((() => { const v = window.__domvec && window.__domvec.verify;"
+                " if (!v) return {error: 'this plugin build has no in-app verifier'};"
+                " %s; const s = v.state();"
+                " return {run: s.run, total: s.total}; })())" % call)
+            if not started or started.get("error") or not wait:
+                return {"started": started}
+            deadline = _time.time() + timeout_s
+            state = {}
+            while _time.time() < deadline:
+                _time.sleep(3)
+                state = self.json_eval("JSON.stringify(window.__domvec.verify.state())") or {}
+                if not state.get("running"):
+                    break
+            results = state.get("results") or []
             try:
-                self.act("pipebox", "restore")
-            except Exception:                           # noqa: BLE001
-                pass
-        except Exception as err:                    # noqa: BLE001
-            observed = {"error": str(err)[:200]}
-        # Every finished run reaches the record of what has been SEEN working,
-        # with the store it read (`confirmations`); a run still going does not.
-        if results and not state.get("running"):
-            from .confirmations import record
-            record(results, store=state.get("label") or store,
-                   runner="in-app verify")
-        return {
-            "run": state.get("run"), "running": bool(state.get("running")),
-            "passed": sum(1 for r in results if r.get("pass")),
-            "total": state.get("total"), "stopped_because": state.get("stoppedBecause"),
-            "observed_in_app": observed,
-            "label": state.get("label"), "seed": state.get("seed"),
-            "teardown": state.get("teardown"),
-            "results": results,
-        }
+                observed = self.observe_checks()
+                try:
+                    self.act("pipebox", "restore")
+                except Exception:                       # noqa: BLE001
+                    pass
+            except Exception as err:                    # noqa: BLE001
+                observed = {"error": str(err)[:200]}
+            if results and not state.get("running"):
+                from .confirmations import record
+                record(results, store=state.get("label") or store,
+                       runner="in-app verify")
+            return {
+                "run": state.get("run"), "running": bool(state.get("running")),
+                "passed": sum(1 for r in results if r.get("pass")),
+                "total": state.get("total"), "stopped_because": state.get("stoppedBecause"),
+                "observed_in_app": observed,
+                "label": state.get("label"), "seed": state.get("seed"),
+                "teardown": state.get("teardown"),
+                "results": results,
+            }
+
+        return call_with_lease("confirm", _do, detail=detail, wait_s=240.0)
 
     def observe_checks(self) -> Dict:
         """The run as the APP SHOWS it: the corner box's check list, read off
@@ -828,7 +843,8 @@ class Live:
 
     def health(self) -> Dict:
         """Both halves, in one answer, because either can be the problem."""
-        out: Dict[str, object] = {}
+        from .session_lock import lock_status
+        out: Dict[str, object] = {"session_lock": lock_status()}
         try:
             out["sidecar"] = self.get("/health")
         except Exception as exc:                    # noqa: BLE001
@@ -838,7 +854,10 @@ class Live:
             out["app"] = {"error": "renderer not answering", **alive}
             return out
         try:
-            ui = self.ui()
+            raw_ui = self.evaluate(
+                "JSON.stringify(window.__domvec ? window.__domvec.ui() "
+                ": {error: 'harness not installed; reload the plugin'})")
+            ui = json.loads(raw_ui) if isinstance(raw_ui, str) else {"error": "no value"}
             out["app"] = {
                 "harness": "error" not in ui,
                 # Before the layout is ready every pane reads "not open",

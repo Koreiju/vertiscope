@@ -459,13 +459,13 @@ TOOLS: List[Dict] = [
     {
         "name": "obsidian_launch",
         "title": "Launch Obsidian with CDP",
-        "description": "Launch Obsidian with remote debugging enabled (--remote-debugging-port) and unthrottling flags, pointing to the vault.",
+        "description": "Launch Obsidian with remote debugging enabled (--remote-debugging-port) and unthrottling flags, pointing to the vault. Reuses a healthy running CDP Obsidian by default (`close_existing=false`) so concurrent MCP agents share one instance.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "vault": {"type": "string", "description": "Path to vault directory"},
                 "cdp_port": {"type": "integer", "default": 9222},
-                "close_existing": {"type": "boolean", "default": True},
+                "close_existing": {"type": "boolean", "default": False},
             },
         },
     },
@@ -583,7 +583,7 @@ class DomvecMCP:
             "obsidian_launch": lambda a: __import__("domvec.obsidian.controls", fromlist=["launch_obsidian"]).launch_obsidian(
                 vault_path=a.get("vault"),
                 cdp_port=int(a.get("cdp_port") or 9222),
-                close_existing=bool(a.get("close_existing", True)),
+                close_existing=bool(a.get("close_existing", False)),
             ),
             "readme_proof": lambda a: (lambda nu: (lambda rs: {"arms": rs, "report": str(nu.write_report(rs)),
                 "pass": rs[0]["ok"] and (len(rs) < 2 or (not rs[1]["ok"] and rs[1]["failed_at"] == "sidecar"))})(
@@ -849,7 +849,33 @@ class DomvecMCP:
     # restart -- the "probe scores the instrument that is LOADED" trap, on the
     # instrument itself. The server's own tool table (this file) still needs a
     # restart; everything it delegates to does not.
-    _FRESH = ("domvec.procs", "domvec.obsidian.controls", "domvec.obsidian.live")
+    _FRESH = ("domvec.procs", "domvec.obsidian.session_lock", "domvec.obsidian.controls", "domvec.obsidian.live")
+
+    # Read-only backend & health tools run lock-free so concurrent MCP agents
+    # can query the store and inspect `live_health.session_lock` at any time.
+    # All UI/CDP/lifecycle/mutating tools serialize through `session_lock` so
+    # one shared Obsidian + sidecar instance is never driven by two agents at
+    # once (`G-455`).
+    _LOCK_FREE_TOOLS = frozenset({
+        "search", "chunk", "affordances", "resolve_address", "pages",
+        "design_state", "live_health", "sidecar_status", "verify_state", "wake",
+    })
+    _TOOL_WAIT_S = {
+        "confirm": 240.0,
+        "pipeline_profile": 180.0,
+        "graph_motion": 180.0,
+        "plugin_reload": 120.0,
+        "readme_proof": 60.0,
+    }
+
+    def _needs_session_lease(self, name: str, arguments: Dict) -> bool:
+        if name in self._LOCK_FREE_TOOLS:
+            return False
+        if name == "browse":
+            return bool(arguments.get("down") or arguments.get("act"))
+        if name == "sidecar_start":
+            return bool(arguments.get("stop_existing"))
+        return True
 
     def _fresh(self) -> List[str]:
         import importlib
@@ -893,7 +919,12 @@ class DomvecMCP:
 
         try:
             if method == "initialize":
-                asked = (message.get("params") or {}).get("protocolVersion")
+                init_params = message.get("params") or {}
+                asked = init_params.get("protocolVersion")
+                cinfo = init_params.get("clientInfo") or {}
+                if isinstance(cinfo, dict) and cinfo.get("name"):
+                    from .session_lock import set_client_name
+                    set_client_name(str(cinfo.get("name")))
                 result = {
                     "protocolVersion": asked if asked in SUPPORTED else PROTOCOL,
                     "capabilities": {"tools": {"listChanged": False}},
@@ -906,7 +937,11 @@ class DomvecMCP:
                         "Read-only, with ONE exception: `browse` (G-205) "
                         "with `down` or `act` moves the reader's own browser "
                         "cell, as the reader chose (PLUGIN_GOAL 177 b). "
-                        "Elsewhere affordances are reported, never pressed.",
+                        "Elsewhere affordances are reported, never pressed. "
+                        "Shared single-instance concurrency (G-455): UI and "
+                        "mutating calls serialize automatically through an OS "
+                        "session lease, waiting when busy or returning "
+                        "`{busy: true, session_lock, retry_after_s}`.",
                 }
             elif method in ("notifications/initialized", "notifications/cancelled"):
                 return None
@@ -921,8 +956,28 @@ class DomvecMCP:
                 handler = self.handlers.get(name)
                 if handler is None:
                     return _error(mid, -32602, "no such tool: %s" % name)
+                call_args = dict(params.get("arguments") or {})
+                req_wait = call_args.pop("session_wait_s", None)
                 try:
-                    payload = handler(params.get("arguments") or {})
+                    if self._needs_session_lease(str(name), call_args):
+                        from .session_lock import call_with_lease
+                        wait_budget = (
+                            float(req_wait) if req_wait is not None
+                            else self._TOOL_WAIT_S.get(str(name), 90.0)
+                        )
+                        detail = ""
+                        if name == "confirm" and call_args.get("only"):
+                            detail = ",".join(str(x) for x in list(call_args["only"])[:6])
+                        elif name == "ui_act":
+                            detail = str(call_args.get("gesture") or "")
+                        payload = call_with_lease(
+                            str(name),
+                            lambda: handler(call_args),
+                            detail=detail,
+                            wait_s=wait_budget,
+                        )
+                    else:
+                        payload = handler(call_args)
                 except Exception as exc:
                     # A tool that fails is a RESULT with isError, not a
                     # protocol error: the model is meant to see the message

@@ -34,6 +34,8 @@ import { edgeResizable } from "./edgeresize";
 import { isSlate, COCKPIT_PATH } from "./cockpit";
 import { ChatUI, type Piece } from "./chatui";
 import { EgoCanvas } from "./egocanvas";
+import { classifyCellHeading, migrateDeprecatedSlateText, normVaultPath, parseInternalMdLinks, pruneMissingEgoCellLinks, removeEgoCellLink, titleOfNote, upsertEgoCellLink } from "./egolinks";
+import { extractNotePyDefsRefs } from "./fencecode";
 
 export interface PlaneHost {
   /** The plane over the 3D view, when a graph is open. */
@@ -58,8 +60,10 @@ export interface PlaneHost {
   headerClick?(path: string): void;
   /** PLUGIN_GOAL 150: the panel goes back INTO 3D -- closed, the camera flown to its craft node. */
   intoCraft?(path: string): boolean;
-  /** The chat cell's model, streamed (PLUGIN_GOAL 134). */
-  chatStream?(prompt: string, context: string[], onToken: (t: string) => void): Promise<string>;
+  /** The chat cell's model, streamed (PLUGIN_GOAL 134, 200 c). */
+  chatStream?(prompt: string, context: string[], onToken: (t: string) => void, meta?: any): Promise<string>;
+  /** Pinned web chunks associated with `path` or active browser (G-444). */
+  pins?(path: string): { cid: string; url: string; title?: string; markdown: string }[];
   /** Pull-apart: a pulled cell's card dropped at (x, y) goes back into the panel there. */
   pullInto?(from: string, x: number, y: number): Promise<boolean>;
   /** The soft-link field's query: the halo laid out for it (item 90). */
@@ -283,19 +287,63 @@ export class PlaneDesk {
     const folder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
     if (folder && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder).catch(() => undefined);
     const name = path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/, "");
-    const text = opts.text ?? (kind === "slate" ? SLATE_TEXT(name.replace(/\s+/g, "_")) : NOTEBOOK_TEXT(name));
+    const useLegacySlate = !!(window as any).__domvecPlantDeprecatedSlate || path.startsWith("domvec-checks/");
+    const text = opts.text ?? (kind === "slate"
+      ? (useLegacySlate ? SLATE_TEXT(name.replace(/\s+/g, "_")) : `# ${name}\n\n`)
+      : `# ${name}\n\n` + NOTEBOOK_TEXT(name));
     const f = await this.app.vault.create(path, text);
     this.stats.created++;
+    if (!path.startsWith("domvec-checks/")) void this.attachToEgo(f.path, text);
     // A new note's frontmatter is not cached yet: a terminal is known by its text.
     if (text === TERMINAL_TEXT) return this.open(f, { mount: (c) => this.terminalMount(c) });
     if (/^---\r?\ndomvec: chat\r?\n/.test(text)) return this.open(f, { mount: (c) => this.chatMount(c, f) });
     return this.open(f);
   }
 
+  /** Keep a panel's `.domvec-plane-head-node` pill synced with its main `# Heading` (`G-448`, PLUGIN_GOAL 201 a). */
+  syncHeadTitle(path: string, knownText?: string): string {
+    const p = this.panelOf(path);
+    if (!p || !p.head) return "";
+    const nodeEl = p.head.querySelector(".domvec-plane-head-node") as HTMLElement | null;
+    if (!nodeEl) return "";
+    const v = this.viewOf(path);
+    const live = knownText ?? (v?.editor ? v.editor.getValue() : undefined);
+    const nextTitle = titleOfNote(path, live);
+    if (nextTitle && nodeEl.textContent !== nextTitle) {
+      nodeEl.setText(nextTitle);
+    }
+    return nextTitle;
+  }
+
+  /** Migrate deprecated `slate_N \n \t value` notes in `domvec/graph/` to `# slate N` + fences (`G-448`). */
+  async migrateDeprecatedSlates(): Promise<string[]> {
+    if ((window as any).__domvecPlantDeprecatedSlate) return [];
+    const migrated: string[] = [];
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      if (!f.path.startsWith(PLANE_FOLDER + "/")) continue;
+      const raw = await this.app.vault.read(f);
+      const res = migrateDeprecatedSlateText(f.path, raw);
+      if (res.migrated) {
+        await this.app.vault.modify(f, res.text);
+        const v = this.viewOf(f.path);
+        if (v?.editor && v.editor.getValue() !== res.text) v.editor.setValue(res.text);
+        migrated.push(f.path);
+      }
+    }
+    return migrated;
+  }
+
   /** A note as a panel on the plane: the card it already has, or a new one. */
   async open(file: TFile, opts: { line?: number; leaf?: any; state?: any;
                                   at?: { x: number; y: number } | null;
                                   mount?: (card: HTMLElement) => Promise<(() => void) | void> } = {}): Promise<any> {
+    if (!file.path.startsWith("domvec-checks/") && !(window as any).__domvecPlantDeprecatedSlate) {
+      try {
+        const curRaw = await this.app.vault.cachedRead(file);
+        const mig = migrateDeprecatedSlateText(file.path, curRaw);
+        if (mig.migrated) await this.app.vault.modify(file, mig.text);
+      } catch { /* ignore */ }
+    }
     const plane = this.host.plane();
     if (this.plantOwnView || !plane) {
       // Off the plane: the note in a tab of its own (the planted arm, or no 3D view open).
@@ -319,12 +367,13 @@ export class PlaneDesk {
       card.style.right = "auto";
       card.style.left = `${12 + 28 * (n % 8)}px`;
       card.style.top = `${44 + 28 * (n % 8)}px`;
-      const slate = isSlate(this.app, file);
+      const slate = isSlate(this.app, file) && (file.path.startsWith("domvec-checks/") || !!(window as any).__domvecPlantDeprecatedSlate);
       let head: HTMLElement | null = null;
       if (!slate) {
         card.addClass("has-head");
         head = card.createDiv({ cls: "domvec-plane-head" });
-        head.createSpan({ cls: "domvec-plane-head-node", text: file.basename });
+        const initialText = await this.app.vault.cachedRead(file).catch(() => "");
+        head.createSpan({ cls: "domvec-plane-head-node", text: titleOfNote(file.path, initialText) });
         // The node's I/O toggle (item 79): its inputs and outputs linked to
         // the ego or to the web -- the note's own `maps` frontmatter.
         const chip = head.createSpan({ cls: "domvec-plane-maps" });
@@ -536,6 +585,7 @@ export class PlaneDesk {
     const f = this.app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return false;
     await this.app.vault.trash(f, false);           // the vault's .trash: recoverable
+    void this.detachFromEgo(path);
     // Its remembered place goes with it: a later note of the same name started
     // where a test had dragged this one, against the plane's corner (G-298).
     try { window.localStorage.removeItem("domvec-plane-card:" + path); } catch { /* a convenience */ }
@@ -651,6 +701,7 @@ export class PlaneDesk {
     // Folded back to the root: one line, something folded -- the panel is its node.
     if (!f.node && f.folds > 0 && f.lines <= 1) {
       p.card.addClass("is-collapsed"); p.foldedToNode = true; this.foldStats.to_node++;
+      if (this.isLoneCell(path) && !path.startsWith("domvec-checks/")) void this.attachToEgo(path);
       clampToPlane(p.card, plane);
       return;
     }
@@ -696,32 +747,137 @@ export class PlaneDesk {
     return out;
   }
   plantRefsNotLinks = false;
-  /** note path -> the open panels its `{name}` references resolve to (by
-   *  basename, spaces as underscores, case-folded). Re-read on edit. */
-  private refCache = new Map<string, { at: number; names: Set<string> }>();
+  /** Planted (G-446): new and collapsed lone cells are left unattached to `domvec/ego.md`. */
+  plantNoEgoAttach = false;
+  egoAttachStats = { attached: 0, detached: 0, pruned: 0, last: "" };
+
+  /** True when `path` has no compiled or ego link to `domvec/ego.md` or another open panel. */
+  isLoneCell(path: string): boolean {
+    if (!path || path === COCKPIT_PATH) return false;
+    if (this.refTargets(COCKPIT_PATH).has(path) || this.refTargets(path).has(COCKPIT_PATH)) return false;
+    for (const p of this.panels) {
+      if (p.path === path) continue;
+      if (this.refTargets(path).has(p.path) || this.refTargets(p.path).has(path)) return false;
+    }
+    return true;
+  }
+
+  /** Attach `path` under its typed markdown heading (`## <Type> cells`) in `domvec/ego.md` (`G-446`). */
+  async attachToEgo(path: string, knownText?: string): Promise<boolean> {
+    if (this.plantNoEgoAttach || !path || path === COCKPIT_PATH) return false;
+    const egoFile = this.app.vault.getAbstractFileByPath(COCKPIT_PATH);
+    const cellFile = this.app.vault.getAbstractFileByPath(path);
+    if (!(egoFile instanceof TFile) || !(cellFile instanceof TFile)) return false;
+    const cellText = knownText !== undefined ? knownText : await this.app.vault.cachedRead(cellFile);
+    const heading = classifyCellHeading(path, cellText);
+    const title = titleOfNote(path, cellText);
+    const cp: any = (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit;
+    const egoView = cp?.view?.();
+    let changed = false;
+    if (egoView?.editor && egoView.getMode?.() === "source") {
+      const cur = egoView.editor.getValue();
+      const next = upsertEgoCellLink(cur, path, title, heading);
+      if (next !== cur) {
+        egoView.editor.setValue(next);
+        changed = true;
+      }
+    } else {
+      await this.app.vault.process(egoFile, (cur) => {
+        const next = upsertEgoCellLink(cur, path, title, heading);
+        if (next !== cur) changed = true;
+        return next;
+      });
+    }
+    if (changed) {
+      this.refCache.delete(COCKPIT_PATH);
+      this.egoAttachStats.attached++;
+      this.egoAttachStats.last = `${path} (${heading})`;
+      this.drawLinks();
+    }
+    return changed;
+  }
+
+  /** Remove `path` from `domvec/ego.md` when trashed, pruning any emptied heading (`G-446`). */
+  async detachFromEgo(path: string): Promise<boolean> {
+    if (!path || path === COCKPIT_PATH) return false;
+    const egoFile = this.app.vault.getAbstractFileByPath(COCKPIT_PATH);
+    if (!(egoFile instanceof TFile)) return false;
+    const cp: any = (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit;
+    const egoView = cp?.view?.();
+    let changed = false;
+    if (egoView?.editor && egoView.getMode?.() === "source") {
+      const cur = egoView.editor.getValue();
+      const next = removeEgoCellLink(cur, path);
+      if (next !== cur) { egoView.editor.setValue(next); changed = true; }
+    } else {
+      await this.app.vault.process(egoFile, (cur) => {
+        const next = removeEgoCellLink(cur, path);
+        if (next !== cur) changed = true;
+        return next;
+      });
+    }
+    if (changed) {
+      this.refCache.delete(COCKPIT_PATH);
+      this.egoAttachStats.detached++;
+      this.drawLinks();
+    }
+    return changed;
+  }
+
+  /** Prune stale cell links in `domvec/ego.md` whose target note no longer exists. */
+  async pruneEgoLinks(): Promise<number> {
+    const egoFile = this.app.vault.getAbstractFileByPath(COCKPIT_PATH);
+    if (!(egoFile instanceof TFile)) return 0;
+    let removedCount = 0;
+    await this.app.vault.process(egoFile, (cur) => {
+      const { text, removed } = pruneMissingEgoCellLinks(cur, (p) => this.app.vault.getAbstractFileByPath(p) instanceof TFile);
+      removedCount = removed.length;
+      return text;
+    });
+    if (removedCount) {
+      this.refCache.delete(COCKPIT_PATH);
+      this.egoAttachStats.pruned += removedCount;
+    }
+    return removedCount;
+  }
+
+  /** note path -> the open panels its `{name}`, `Vault.read`, or `[title](path)` references resolve to. */
+  private refCache = new Map<string, { at: number; names: Set<string>; paths: Set<string> }>();
   refTargets(path: string): Set<string> {
     const f = this.app.vault.getAbstractFileByPath(path);
     if (!(f instanceof TFile)) return new Set();
-    // The NAMES a note's braces reference are cached per version of the note;
-    // they are resolved against the panels open NOW (a panel opened after the
-    // read was never linked -- seen 2026-11-22). Names may hold spaces (N.7):
-    // `{notebook 3}` is a reference as much as `{search.results}`.
     let hit = this.refCache.get(path);
     if (!hit || hit.at !== f.stat.mtime) {
       const names = new Set<string>();
-      hit = { at: f.stat.mtime, names };
+      const paths = new Set<string>();
+      hit = { at: f.stat.mtime, names, paths };
       this.refCache.set(path, hit);
-      void this.app.vault.cachedRead(f).then((t) => {
+      const parseText = (t: string) => {
         for (const m of t.matchAll(/\{([^{}\n]+)\}/g)) names.add(m[1].split(".")[0].split("#")[0].trim());
-        // A code cell reading another note is a compiled link (194; O-7):
-        // `x = Vault.read("folder/note.md")` names that note.
-        for (const m of t.matchAll(/Vault\.read\(\s*["']([^"'\n]+)["']/g)) names.add(m[1].replace(/^.*\//, "").replace(/\.md$/, "").trim());
-      });
+        for (const m of t.matchAll(/Vault\.read\(\s*["']([^"'\n]+)["']/g)) {
+          const raw = normVaultPath(m[1]);
+          paths.add(raw.endsWith(".md") ? raw : raw + ".md");
+          names.add(raw.replace(/^.*\//, "").replace(/\.md$/, "").trim());
+        }
+        if (!this.plantNoEgoAttach) {
+          for (const lk of parseInternalMdLinks(t)) paths.add(lk.path);
+        }
+      };
+      const cp: any = path === COCKPIT_PATH ? (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit : null;
+      const liveEd = path === COCKPIT_PATH ? cp?.view?.()?.editor : this.viewOf(path)?.editor;
+      if (liveEd) parseText(liveEd.getValue());
+      else void this.app.vault.cachedRead(f).then(parseText);
     }
     const key = (n: string) => n.toLowerCase().replace(/[\s_]+/g, "_");
-    const byName = new Map(this.panels.map((p) => [key(p.path.slice(p.path.lastIndexOf("/") + 1).replace(/\.md$/, "")), p.path]));
+    const cpCard: HTMLElement | null = (this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit?.card || null;
+    const allPaths = this.panels.map((p) => p.path).concat(cpCard?.isConnected ? [COCKPIT_PATH] : []);
+    const byName = new Map(allPaths.map((p) => [key(p.slice(p.lastIndexOf("/") + 1).replace(/\.md$/, "")), p]));
+    const byLowerPath = new Map(allPaths.map((p) => [normVaultPath(p).toLowerCase(), p]));
     const to = new Set<string>();
     for (const n of hit.names) { const q = byName.get(key(n)); if (q && q !== path) to.add(q); }
+    if (!this.plantNoEgoAttach) {
+      for (const p of hit.paths) { const q = byLowerPath.get(p.toLowerCase()); if (q && q !== path) to.add(q); }
+    }
     return to;
   }
   contain(path: string): string[] {
@@ -828,7 +984,8 @@ export class PlaneDesk {
     const ui = new ChatUI(this.app, file, {
       model: () => String(this.app.metadataCache.getFileCache(file)?.frontmatter?.model || PlaneDesk.CHAT_MODEL),
       context: () => this.chatContext(file.path),
-      stream: (p, ctx, on) => this.host.chatStream ? this.host.chatStream(p, ctx, on) : Promise.reject(new Error("no sidecar chat")),
+      pins: () => this.host.pins ? this.host.pins(file.path) : [],
+      stream: (p, ctx, on, meta) => this.host.chatStream ? this.host.chatStream(p, ctx, on, meta) : Promise.reject(new Error("no sidecar chat")),
       pullOut: (piece, at) => this.pullPiece(file.path, piece, at),
     }, card);
     this.chats.set(file.path, ui);
@@ -991,10 +1148,11 @@ export class PlaneDesk {
     const rf = this.app.vault.getAbstractFileByPath(rp) as TFile;
     const editor: any = (this.panelOf(rp)?.leaf?.view as any)?.editor;
     const t0 = performance.now(); let first = 0, n = 0;
+    const pins = this.host.pins ? this.host.pins(path) : [];
     const reply = await this.host.chatStream(prompt, ctx, (tok) => {
       n++; if (!first) first = performance.now() - t0;
       if (editor) { const end = editor.offsetToPos(editor.getValue().length); editor.replaceRange(tok, end); }
-    });
+    }, { session: path, pins });
     if (!editor) await this.app.vault.modify(rf, RESPONSE_HEAD + reply);
     this.chatStats.tokens += n; this.chatStats.last_ms = Math.round(performance.now() - t0); this.chatStats.first_token_ms = Math.round(first);
     await this.spawnCodeCells(rp, reply);
@@ -1239,16 +1397,49 @@ export class PlaneDesk {
     const svg = this.linkSvg;
     while (svg.firstChild) svg.firstChild.remove();
     const pairs: string[][] = [];
+    const cpCard: HTMLElement | null = !this.plantNoEgoAttach
+      ? ((this.app as any).plugins?.getPlugin?.("domvec-bridge")?.cockpit?.card || null)
+      : null;
+    const cardOf = (q: string): HTMLElement | null =>
+      q === COCKPIT_PATH ? (cpCard && cpCard.isConnected ? cpCard : null) : (this.panelOf(q)?.card || null);
     if (!this.plantNoPlaneLinks) {
-      const open = this.panels.filter((q) => !q.card.hasClass("is-collapsed") && q.card.isConnected);
+      const open: { path: string; card: HTMLElement }[] = this.panels
+        .filter((q) => !q.card.hasClass("is-collapsed") && q.card.isConnected)
+        .map((q) => ({ path: q.path, card: q.card }));
+      if (cpCard && cpCard.isConnected && !cpCard.hasClass("is-collapsed") && !open.some((x) => x.path === COCKPIT_PATH)) {
+        open.push({ path: COCKPIT_PATH, card: cpCard });
+      }
       for (let i = 0; i < open.length; i++) {
-        // Lines come from COMPILATION only (136, 142; spec §12d, G-404): a
-        // `{ref}` naming the other record. A plain wiki link is a plain link
-        // (T-4) and draws nothing. Planted `plantWikiLines`: wiki links too.
+        // Lines come from COMPILATION (`defs -> refs` across notebooks, `{ref}`s,
+        // `Vault.read`) and standard `[cell title](cell link)` markdown links (`G-446`, `G-448`, `G-451`).
         const rel = (q: string) => this.plantWikiLines ? this.linkedTo(q) : this.refTargets(q);
         const la = rel(open[i].path);
         for (let j = i + 1; j < open.length; j++) {
           if (la.has(open[j].path) || rel(open[j].path).has(open[i].path)) pairs.push([open[i].path, open[j].path]);
+        }
+      }
+      // Cross-notebook direct Python variable dependencies (`G-451`, PLUGIN_GOAL 201 d):
+      // if open panel A defines top-level variable `v` and open panel B reads `v`
+      // without defining it locally, draw a visible link between A and B.
+      if (!(window as any).__domvecPlantNoCrossVarLinks) {
+        const pyByPath = new Map<string, { defs: Set<string>; refs: Set<string> }>();
+        for (const item of open) {
+          if (item.path === COCKPIT_PATH) continue;
+          const vw = this.viewOf(item.path);
+          const txt = vw?.editor ? vw.editor.getValue() : "";
+          if (txt) pyByPath.set(item.path, extractNotePyDefsRefs(txt));
+        }
+        for (let i = 0; i < open.length; i++) {
+          const a = open[i].path, pa = pyByPath.get(a);
+          if (!pa) continue;
+          for (let j = i + 1; j < open.length; j++) {
+            const b = open[j].path, pb = pyByPath.get(b);
+            if (!pb) continue;
+            const ab = [...pa.defs].some((d) => pb.refs.has(d)) || [...pb.defs].some((d) => pa.refs.has(d));
+            if (ab && !pairs.some(([x, y]) => (x === a && y === b) || (x === b && y === a))) {
+              pairs.push([a, b]);
+            }
+          }
         }
       }
     }
@@ -1261,7 +1452,9 @@ export class PlaneDesk {
       return { x: cx + dx * k - pr.left + plane.scrollLeft, y: cy + dy * k - pr.top + plane.scrollTop };
     };
     for (const [a, b] of pairs) {
-      const ra = this.panelOf(a)!.card.getBoundingClientRect(), rb = this.panelOf(b)!.card.getBoundingClientRect();
+      const ca = cardOf(a), cb = cardOf(b);
+      if (!ca || !cb) continue;
+      const ra = ca.getBoundingClientRect(), rb = cb.getBoundingClientRect();
       const pa = exit(ra, rb.left + rb.width / 2, rb.top + rb.height / 2), pb = exit(rb, ra.left + ra.width / 2, ra.top + ra.height / 2);
       const l = document.createElementNS(NS, "line");
       l.setAttribute("x1", String(pa.x)); l.setAttribute("y1", String(pa.y));
@@ -1284,7 +1477,16 @@ export class PlaneDesk {
       p.foldedToNode = false; this.foldStats.from_node++;
     }
     p.card.toggleClass("is-collapsed", now);
-    if (now) this.stats.minimized++; else this.stats.restored++;
+    if (now) {
+      this.stats.minimized++;
+      // G-446 (PLUGIN_GOAL 200 b): a lone cell unlinked to the ego that is
+      // collapsed attaches under its typed markdown heading in `domvec/ego.md`.
+      if (this.isLoneCell(path) && !path.startsWith("domvec-checks/")) {
+        void this.attachToEgo(path);
+      }
+    } else {
+      this.stats.restored++;
+    }
     const plane = this.host.plane();
     if (plane) clampToPlane(p.card, plane);
     return now;

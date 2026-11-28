@@ -313,53 +313,114 @@ pre.domvec-has-run {
   position: relative;
 }
 
-button.domvec-run-fence {
-  font-size: var(--font-ui-smaller);
+button.domvec-run-fence,
+button.domvec-term-fence,
+button.domvec-open-fence,
+button.domvec-unnest-fence,
+button.domvec-pull-fence,
+button.domvec-complete-fence,
+button.domvec-play-fence {
+  font-size: 11px;
   font-family: var(--font-interface);
-  line-height: 1;
-  padding: 2px 7px;
+  line-height: 1.2;
+  height: auto;
+  padding: 2px 6px;
+  margin: 0;
   border-radius: var(--radius-s);
   border: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
   color: var(--text-muted);
+  box-shadow: none;
   cursor: pointer;
-  /* Not in the tab order. The button is an affordance ON a block, and a reader
-   * tabbing through a note of thirty cells would hit thirty of these before
-   * reaching the prose. Step 3 gives running a command, which is where a
-   * keyboard route belongs. */
+  white-space: nowrap;
   user-select: none;
 }
 
-pre.domvec-has-run > button.domvec-run-fence {
+pre.domvec-has-run > .domvec-reading-fence-bar {
   position: absolute;
   top: 4px;
-  right: 4px;
-  /* Above the code, below Obsidian's own copy button, which sits at the same
-   * corner and is added after ours. */
-  z-index: 1;
+  right: 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   opacity: 0;
   transition: opacity 90ms ease-in;
 }
 
-/* Revealed on hover or focus rather than always drawn: a note of many cells
- * otherwise carries a column of buttons competing with the code for attention.
- * Focus is included so the keyboard route still reaches it once step 3 exists. */
-pre.domvec-has-run:hover > button.domvec-run-fence,
-pre.domvec-has-run > button.domvec-run-fence:focus-visible {
+pre.domvec-has-run:hover > .domvec-reading-fence-bar,
+pre.domvec-has-run > .domvec-reading-fence-bar:focus-within {
   opacity: 1;
 }
 
-button.domvec-run-fence:hover {
+pre.domvec-has-run > .copy-code-button,
+.cm-line:has(.domvec-run-fence-wrap) .code-block-flair {
+  display: none !important;
+}
+
+button.domvec-run-fence:hover,
+button.domvec-term-fence:hover,
+button.domvec-open-fence:hover,
+button.domvec-unnest-fence:hover,
+button.domvec-pull-fence:hover,
+button.domvec-complete-fence:hover,
+button.domvec-play-fence:hover {
   color: var(--text-normal);
   background: var(--background-modifier-hover);
 }
 
-/* Live preview: the widget sits at the end of the opening fence line, so it is
- * inline and needs its own breathing room rather than absolute placement. */
+/* G-447: Live preview fence controls sit in one compact single-row strip on the
+ * opening fence line, separated cleanly from code lines and language flair. */
 .domvec-run-fence-wrap {
-  display: inline-block;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
   margin-left: 0.6em;
   vertical-align: middle;
+  max-width: calc(100% - 6em);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.domvec-run-fence-wrap::-webkit-scrollbar { display: none; }
+
+/* G-447: Fence-adaptive VS Code hover, signature help, and syntax diagnostics. */
+.domvec-sig-tooltip,
+.domvec-hover-tooltip {
+  position: fixed;
+  z-index: 1200;
+  max-width: min(520px, 85vw);
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  box-shadow: var(--shadow-s);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  pointer-events: none;
+}
+.domvec-sig-head,
+.domvec-hover-sig {
+  font-family: var(--font-monospace);
+  color: var(--text-accent);
+  margin-bottom: 2px;
+}
+.domvec-sig-active {
+  font-weight: 700;
+  text-decoration: underline;
+  color: var(--text-normal);
+}
+.domvec-sig-doc,
+.domvec-hover-doc {
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  max-height: 140px;
+  overflow: hidden;
+}
+.domvec-code-diag-err {
+  text-decoration: wavy underline var(--text-error);
+  text-underline-offset: 2px;
 }
 
 /* --- the command terminal, step 6 -------------------------------------------
@@ -1034,7 +1095,9 @@ button.domvec-run-fence:hover {
   font-family: Georgia, "Times New Roman", serif; color: #fff; caret-color: #fff; }
 .domvec-slate .cm-line { color: #fff; }
 .domvec-slate .inline-title, .domvec-slate .metadata-container, .domvec-slate .frontmatter-container,
-.domvec-slate .cm-line.HyperMD-frontmatter, .domvec-slate .domvec-cellbar { display: none; }
+.domvec-slate .cm-line.HyperMD-frontmatter { display: none; }
+.domvec-slate:not(.domvec-browser-panel-slate) .domvec-cellbar { display: none; }
+.domvec-browser-card .domvec-cellbar { display: flex; margin: 0.6em 0 0.4em; }
 .domvec-slate .cm-active, .domvec-slate .cm-activeLine { background: transparent; }
 /* The dialect's one slider: over a hovered number, gone when left (item 33). */
 .domvec-slate-slider { position: fixed; z-index: 1000; padding: 4px 8px; background: #000;
@@ -1311,8 +1374,23 @@ body.domvec-plant-slate-chips .domvec-slate-error { text-decoration: underline w
 .domvec-bb-body .view-header, .domvec-code-cell .view-header, .domvec-slate-cell .view-header, .domvec-chat-log .view-header { display: none; }
 .domvec-bb-body .inline-title, .domvec-slate-cell .inline-title, .domvec-chat-log .inline-title { display: none; }
 .domvec-browser-card { position: relative; }
-.domvec-browser-card-exit { position: absolute; top: 4px; right: 8px; z-index: 5; cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 4px; color: var(--text-muted); background: var(--background-secondary); }
-.domvec-browser-card-exit:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+/* G-443: browser card top-right controls grouped in one non-overlapping flex strip. */
+.domvec-browser-card-tools {
+  position: absolute; top: 6px; right: 10px; z-index: 6;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.domvec-browser-card > .workspace-leaf:not(.domvec-browser-panel-leaf) .cm-content > .cm-line:first-child {
+  padding-right: 68px;
+}
+.domvec-browser-card-split,
+.domvec-browser-card-exit {
+  position: static; cursor: pointer; font-size: 14px; line-height: 1;
+  padding: 3px 6px; border-radius: 4px; color: var(--text-muted);
+  background: var(--background-secondary); border: 1px solid var(--background-modifier-border);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.domvec-browser-card-split:hover,
+.domvec-browser-card-exit:hover { color: var(--text-normal); background: var(--background-modifier-hover); opacity: 1; }
 /* The billboard layer over every pane (PLUGIN_GOAL 137 (2)). */
 .domvec-bb-layer.is-overlay { position: fixed; inset: auto; overflow: visible; z-index: var(--layer-popover, 30); }
 /* PLUGIN_GOAL 137 (1): a panel's editor leaf has a box of its own -- it measured
@@ -1334,8 +1412,6 @@ body.domvec-plant-slate-chips .domvec-slate-error { text-decoration: underline w
 .domvec-var-action::before { content: "false"; font-size: var(--font-text-size, 16px); color: var(--text-muted); }
 .domvec-var-action:hover::before { content: "true"; color: var(--text-accent); }
 /* 135(b): a browser cell's pair pulled apart, joined by a solid link. */
-.domvec-browser-card-split { position: absolute; top: 4px; right: 28px; cursor: pointer; z-index: 5; opacity: .75; font-size: 14px; }
-.domvec-browser-card-split:hover { opacity: 1; }
 .domvec-browser-card.is-split { overflow: visible !important; height: auto !important; }
 .domvec-browser-card.is-split > .domvec-browser-panel-leaf.is-pulled { position: absolute !important; flex: none !important; border: 1px solid #556; border-radius: 6px; background: var(--background-primary); box-shadow: 0 4px 18px rgba(0,0,0,.35); display: flex; flex-direction: column; }
 .domvec-browser-card.is-split > .domvec-browser-panel-leaf.is-pulled > .workspace-leaf-content { flex: 1 1 auto; height: auto; }
@@ -1582,3 +1658,45 @@ body.domvec-field-holding, body.domvec-field-holding * { cursor: grabbing !impor
 
 /* G-412: the chat cell's stop, shown only while a reply streams. */
 .domvec-chat-stop { margin-top: 4px; font-size: var(--font-ui-smaller); }
+
+/* G-452: per-chat-cell system prompt bar, defaulting to domvec/ego.md. */
+.domvec-chat-sys { order: -1; border: 1px dashed var(--background-modifier-border); border-radius: var(--radius-s); padding: 4px 8px; background: color-mix(in srgb, var(--background-secondary) 70%, transparent); }
+.domvec-chat-sys-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--text-muted); }
+.domvec-chat-sys-toggle { cursor: pointer; user-select: none; }
+.domvec-chat-sys-toggle:hover { color: var(--text-normal); }
+.domvec-chat-sys-reset { font-size: 10px; padding: 1px 6px; height: 18px; }
+.domvec-chat-sys-body { margin-top: 6px; }
+.domvec-chat-sys-input { width: 100%; font-family: var(--font-monospace); font-size: 11px; resize: vertical; }
+
+/* G-453: interactive recursively-chunked ```tool cells + vanishing upward history. */
+.domvec-tool-cell { border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); padding: 8px 10px; background: var(--background-secondary); display: flex; flex-direction: column; gap: 6px; font-size: var(--font-ui-small); }
+.domvec-tool-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 6px; }
+.domvec-tool-title { font-family: var(--font-monospace); font-weight: 600; font-size: 12px; color: var(--text-accent); }
+.domvec-tool-stack { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+.domvec-tool-nav { font-size: 11px; padding: 1px 7px; height: 22px; }
+.domvec-tool-stack-pos { font-family: var(--font-monospace); font-size: 10px; color: var(--text-faint); }
+.domvec-tool-instructions { font-size: 11px; color: var(--text-muted); font-family: var(--font-monospace); white-space: pre-wrap; background: color-mix(in srgb, var(--background-primary) 65%, transparent); padding: 4px 6px; border-radius: var(--radius-s); }
+.domvec-tool-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.domvec-tool-search { flex: 1 1 160px; min-width: 120px; font-size: 12px; height: 24px; padding: 2px 6px; }
+.domvec-tool-act, .domvec-tool-child-btn { font-size: 11px; padding: 2px 8px; height: 24px; cursor: pointer; }
+.domvec-tool-body pre, .domvec-tool-root-list { margin: 0; font-size: 11px; max-height: 220px; overflow: auto; white-space: pre-wrap; }
+.domvec-tool-children { display: flex; flex-direction: column; gap: 4px; border-top: 1px dashed var(--background-modifier-border); padding-top: 6px; }
+.domvec-tool-child { display: flex; align-items: baseline; gap: 8px; font-size: 11px; }
+.domvec-tool-child-desc { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-line.domvec-tool-history-line { font-size: 11px; color: var(--text-muted); transition: max-height 0.16s ease, opacity 0.16s ease; }
+.cm-line.domvec-tool-history-line.is-vanished { max-height: 1.15em; overflow: hidden; opacity: 0.36; mask-image: linear-gradient(to bottom, transparent 0%, black 75%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 75%); }
+.cm-line.domvec-tool-history-line:hover, .cm-line.domvec-tool-history-line.is-vanished:hover, .cm-content:has(.domvec-tool-history-line:hover) .cm-line.domvec-tool-history-line.is-vanished { max-height: 8em; opacity: 0.95; mask-image: none; -webkit-mask-image: none; }
+
+/* G-454: unified vertical retrieval UI in []() matching 3D SearchField. */
+.domvec-linkgesture.domvec-search3d-vertical { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: color-mix(in srgb, var(--background-primary) 94%, transparent); max-width: 520px; }
+.domvec-search3d-vertical .domvec-search3d-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 11px; color: var(--text-muted); }
+.domvec-search3d-vertical .domvec-search3d-count { display: inline-flex !important; align-items: center; gap: 3px; }
+.domvec-search3d-vertical .domvec-lg-list { max-height: 240px; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 4px; white-space: normal; }
+.domvec-search3d-item.is-vertical { display: flex; align-items: flex-start; gap: 8px; width: 100%; max-width: 100%; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--background-modifier-border); cursor: pointer; box-sizing: border-box; }
+.domvec-search3d-item.is-vertical:hover { border-color: var(--interactive-accent); background: var(--background-modifier-hover); opacity: 1 !important; }
+.domvec-search3d-item.is-vertical .domvec-search3d-item-body { flex: 1; min-width: 0; }
+.domvec-search3d-item.is-vertical .domvec-search3d-item-similar { cursor: pointer; padding: 0 4px; color: var(--text-muted); font-weight: 600; }
+.domvec-search3d-item.is-vertical .domvec-search3d-item-similar:hover { color: var(--text-accent); }
+
+/* G-448: distinguish cross-notebook Python variable dependency edges on the 2D plane. */
+.domvec-plane-links line.is-var-dep { stroke: #7aa2f7; stroke-dasharray: 3 3; stroke-opacity: 0.85; }

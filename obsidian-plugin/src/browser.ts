@@ -848,6 +848,16 @@ export class BrowserView extends ItemView {
       cid: p.cid, matched: p.matched, url: p.url }));
   }
 
+  /** Pinned chunks with their full markdown, for quantized chat cell O(delta) context (G-444). */
+  pinnedChunks(): { cid: string; url: string; title: string; markdown: string }[] {
+    return [...this.pinned.values()].map((p) => ({
+      cid: p.cid,
+      url: p.url,
+      title: (p as any).head || p.url,
+      markdown: p.markdown || "",
+    }));
+  }
+
   /** Two right-clicks closer together than this pin; one alone opens the menu. */
   static DOUBLE_RIGHT_MS = 350;
   private lastRight = { at: 0, x: 0, y: 0 };

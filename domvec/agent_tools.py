@@ -13,7 +13,7 @@ nothing here writes it.
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from smolagents import Tool
 
@@ -69,9 +69,51 @@ class _Chunks(Tool):
         return self._ns["WebBrowser"].chunks(url)
 
 
-def tools(base: str) -> List[Tool]:
+class _ToolCell(Tool):
+    name = "tool_call"
+    description = (
+        "Execute a slim single-key interactive tool dict (`browser`, `search`, `cells`, `terminal`, or `panel`), "
+        "e.g. `{\"browser\": {\"search\": \"...\", \"next_chunk\": false, \"back\": false, \"forward\": false, \"chunks\": true}}`. "
+        "Set `chunks: true` to drill into linked child chunks and interactive controls; set `back`/`forward` to step the call stack."
+    )
+    inputs = {
+        "call": {
+            "type": "object",
+            "description": "Single-key dict naming the toolspace (`browser`, `search`, `cells`, `terminal`, `panel`) and its options.",
+        }
+    }
+    output_type = "object"
+
+    def __init__(self, base: str, asks: Optional[list] = None):
+        super().__init__()
+        self._base = base
+        self._asks = asks
+
+    def forward(self, call: dict) -> dict:
+        import json as _json
+        import urllib.request as _ur
+
+        req = _ur.Request(
+            self._base.rstrip("/") + "/tool_cell",
+            data=_json.dumps({"call": call, "session": "agent"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with _ur.urlopen(req, timeout=60) as r:
+            got = _json.loads(r.read().decode("utf-8"))
+        if self._asks is not None:
+            for a in got.get("asks") or []:
+                self._asks.append(a)
+        return {
+            "tool": got.get("tool"),
+            "markdown": got.get("markdown") or "",
+            "children": (got.get("children") or [])[:12],
+            "stack": got.get("stack"),
+        }
+
+
+def tools(base: str, asks: list = None) -> List[Tool]:
     ns = kernel(base)
-    return [_Search(ns), _Cypher(ns), _Chunks(ns)]
+    return [_Search(ns), _Cypher(ns), _Chunks(ns), _ToolCell(base, asks)]
 
 
 # The editor's five calls as tools (G-384: "the editor's five calls (spec

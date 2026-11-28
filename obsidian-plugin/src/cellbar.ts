@@ -27,6 +27,7 @@ export interface CellBarHost {
   openTerminal(): unknown;
   openBrowser(): void | Promise<void>;
   addBrowserCell(view: MarkdownView): Promise<void>;
+  addChatCell(view: MarkdownView): Promise<void>;
 }
 
 const CLS = "domvec-cellbar";
@@ -35,19 +36,22 @@ function build(doc: Document, view: MarkdownView, host: CellBarHost): HTMLElemen
   const bar = doc.createElement("div");
   bar.className = CLS;
   bar.setAttribute("contenteditable", "false");
-  const add = (label: string, title: string, act: () => unknown) => {
+  const add = (label: string, title: string, cls: string, act: () => unknown) => {
     const b = doc.createElement("button");
     b.type = "button";
-    b.className = "domvec-cellbar-add";
+    b.className = "domvec-cellbar-add " + cls;
     b.textContent = label;
     b.title = title;
     b.addEventListener("mousedown", (e) => e.preventDefault());
     b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); void act(); });
     bar.appendChild(b);
   };
-  add("+ code", "append a code cell to this note", () => host.addCodeCell(view));
-  add("+ terminal", "open a command terminal in its own pane", () => host.openTerminal());
-  add("+ browser cell", "append a browser cell to this note", () => host.addBrowserCell(view));
+  add("+ code", "append a code cell to this note", "is-code", () => host.addCodeCell(view));
+  add("+ terminal", "open a command terminal in its own pane", "is-terminal", () => host.openTerminal());
+  add("+ browser cell", "append a browser cell to this note", "is-browser", () => host.addBrowserCell(view));
+  if (!(window as any).__domvecPlantNoCellBarChat) {
+    add("+ chat", "append a chat cell to this note", "is-chat", () => host.addChatCell(view));
+  }
   return bar;
 }
 

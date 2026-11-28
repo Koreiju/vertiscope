@@ -108,8 +108,25 @@ def _handler(state: _State):
             route = self.path.split("?", 1)[0].rstrip("/")
             if route in ("", "/health") and self.command == "GET":
                 state.stats["health_served"] += 1
-                self._json(200, health_body(state))
+                from .session_lock import lock_status
+                self._json(200, dict(health_body(state), session_lock=lock_status()))
                 return
+            if route == "/session_lock":
+                from .session_lock import lock_status, run_contention_selftest
+                if self.command == "GET":
+                    self._json(200, {"ok": True, "session_lock": lock_status()})
+                    return
+                if self.command == "POST":
+                    n_b = int(self.headers.get("Content-Length") or 0)
+                    body = json.loads(self.rfile.read(n_b) or b"{}") if n_b > 0 else {}
+                    if body.get("action") == "selftest":
+                        self._json(200, {
+                            "live_lock": lock_status(),
+                            "selftest": run_contention_selftest(plant_no_lock=bool(body.get("plant_no_lock"))),
+                        })
+                        return
+                    self._json(200, {"ok": True, "session_lock": lock_status()})
+                    return
             if route == "/shutdown" and self.command == "POST" and ("stop=1" in self.path or "stop=true" in self.path):
                 state.stop_requested = True
             n = int(self.headers.get("Content-Length") or 0)

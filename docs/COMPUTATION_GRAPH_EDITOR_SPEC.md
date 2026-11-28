@@ -91,8 +91,13 @@ where it was read into a design.
 | **2026-11-24, 193** | "you're totally overdoing the work required for the markdown panels": plain Obsidian notes; the purple nodes removed; a `#` query as the retrieval gesture; code blocks as cells; one interface for every canvas type, two query embeddings | the head note; F-118 |
 | **2026-11-24, 194** | the suggestions override the custom syntax in markdown panels; it moves to code cells that run and compile on the reservoir; measurements coupled at the code's interface; every output shown for i/o and vectorization, re-indexed by diffs; the terminal a standard interface type; groups of artifacts compose; live objects alongside the graphical code interfaces | the head note; F-129 |
 | 2026-11-24, 195 | retrieval with the ego: results stay in their own canvases, drawn outside the ego's; each rendered canvas and its agent-facing tool interface in one editor, as a callable object whose base form is the string an agent sees; where a graph begins and a canvas ends, why and when | §13m (canvas / graph); F-138 |
+| 2026-11-27, 200 | `panels: fly-to` on hovered 3D chunk nodes and browser panels; deeper cell-graph connectivity & collapsed lone cells under typed headings in `ego.md` via `[title](link)`; persistent multi-turn quantized chat context with `O(delta)` pinned chunks; centralized `+ chat` in `cellbar.ts`; fence-adaptive VS Code editor tools | G-443..G-447 |
+| **2026-11-27, 201** | deprecate purple `slate_N` variable notes in favor of `# Title` + ` ``` ` cells; pull-apart & unified panel/graph dialect with `[cell title](cell link)` and recursive containment compilation (clicking node compiles panel; right-clicking header folds); cursor-exit fence evaluation & inline tracebacks; low-latency full VS Code helpers; direct cross-notebook variable DAG compilation (resolves O-5); `ego.md` as default system prompt + chat cell system prompt & `Chat.send` streaming; interactive recursively chunked ` ```tool ` cells with slim dict schemas (`search`/`back`/`forward`/`chunks: bool`), `back`/`forward` stack, and vanishing upward history above the cell; unified vertical `[]()` retrieval matching 3D `SearchField` | G-448..G-454 |
+| 2026-11-28, 202 | Root `AGENT_HANDOFF.md` synchronizing `G-443`–`G-454` with Claude's `afc636d` (`G-433`–`G-442`), parallel lock-free task split, and procedural MCP verification checkpoints | `AGENT_HANDOFF.md` |
+| 2026-11-28, 203 | Single-instance Obsidian & sidecar concurrency lease inside the MCP harness (`.domvec/mcp_session.lock`, wait-or-deliberate-busy return, `close_existing=False` reuse, zero coupling to freehand markdown artifacts) | G-455 |
+| **2026-11-28, 204** | Re-center `AGENT_HANDOFF.md` and merge rules squarely on the Nov 27–28 pivot (`Items 200`–`203`); localize active code scope & module splits onto pulled-apart cell-graph + `[title](link)` containment, VS Code fenced Graph-RAG coding harness, cross-notebook Python DAG, and recursive ` ```tool ` + quantized chat loops while freezing superseded pre-pivot surfaces | `AGENT_HANDOFF.md` |
 
-Where the verbatim record ends: 2026-11-24, item 195 (it was 166 when this table was first written). Anything below that
+Where the verbatim record ends: 2026-11-28, item 204 (it was 166 when this table was first written). Anything below that
 line in any design is interpretation.
 
 ## 2. The designs already written, and what 166 does to each
@@ -1785,7 +1790,16 @@ with the app, **U** an unclear term or step.
   (from 137.4, "chunk groups"); the governing browser class and
   G-301 step chunk -> page -> live. The ruling is the later word: the class
   gains a `group` rung.
-- O-5. **For the reader.** A LIVE value passed between nodes of two
+- O-5. **Closed 2026-11-27 (`201 d`, `G-451` Confirm).** The reader ruled:
+  *"variables in one notebook could be referenced directly in others without
+  special links or anything. Then, we truly take the computation graph approach
+  to code chunk sequencing in a standard program compilation where variables
+  that depend on variables from other notebooks are computed before their own."*
+  Built in `domvec/dataflow.py` (`workspace_graph`, `compile_plan`),
+  `domvec/obsidian/sidecar.py` (`_post_kernel` `pickle`/`base64` live value
+  export/import across per-note kernels), and `obsidian-plugin/src/dataflowrun.ts`
+  (`upstreamFor`, cross-note `after`), with `.is-var-dep` edges drawn on the 2D
+  plane and in `Craft`. (Was: **For the reader.** A LIVE value passed between nodes of two
   different notes. Today each note has its own kernel. Across notes the
   record gives a fence-line `{ref}` (a record, G-279, T-4, T-6) and
   magnetism's order (a readout, T-11), never an object living in another

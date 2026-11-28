@@ -27,6 +27,31 @@ export class Sidecar {
     return (got && Array.isArray(got.nodes)) ? got.nodes : [];
   }
 
+  /** G-447 / G-450: Python code intelligence (completions, signatures, hover, goto, diagnostics). */
+  async codeIntel(body: {
+    op: "complete" | "signature" | "hover" | "goto" | "diagnostics";
+    cells?: string[];
+    code?: string;
+    cell_index?: number;
+    line?: number;
+    col?: number;
+    note?: string;
+    external_defs?: { name: string; note: string }[];
+  }): Promise<any> {
+    const base = this.base().trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const r = await fetch(base + "/code_intel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
+        body: JSON.stringify(body),
+      });
+      return r.ok ? await r.json() : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** G-413: the search field's view, recorded for `Search.last()`. */
   async searchView(query: string, hits: { cid: string; url: string }[]): Promise<void> {
     const base = this.base().trim().replace(/\/+$/, "");
@@ -34,12 +59,22 @@ export class Sidecar {
     try { await fetch(base + "/search_view", { method: "POST", headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" }, body: JSON.stringify({ query, hits }) }); } catch { /* sidecar down */ }
   }
 
-  async chatStream(prompt: string, context: string[], onToken: (t: string) => void, signal?: AbortSignal): Promise<string> {
+  async chatStream(prompt: string, context: string[], onToken: (t: string) => void, signal?: AbortSignal,
+                   opts?: { session?: string; pins?: { cid: string; url: string; title?: string; markdown: string }[];
+                            history?: { user: string; assistant: string }[]; system?: string; reset?: boolean }): Promise<string> {
     const base = this.base().trim().replace(/\/+$/, "");
     const r = await fetch(base + "/chat_stream", { method: "POST",
       headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
-      body: JSON.stringify({ prompt, context, ...((window as any).__domvecChatDryMs ? { dry_ms: (window as any).__domvecChatDryMs } : {}),
-        ...((window as any).__domvecChatDryText ? { dry_text: (window as any).__domvecChatDryText } : {}) }), signal });
+      body: JSON.stringify({
+        prompt, context,
+        ...(opts?.session ? { session: opts.session } : {}),
+        ...(opts?.pins?.length ? { pins: opts.pins } : {}),
+        ...(opts?.history !== undefined ? { history: opts.history } : {}),
+        ...(opts?.system ? { system: opts.system } : {}),
+        ...(opts?.reset ? { reset: true } : {}),
+        ...((window as any).__domvecChatDryMs ? { dry_ms: (window as any).__domvecChatDryMs } : {}),
+        ...((window as any).__domvecChatDryText ? { dry_text: (window as any).__domvecChatDryText } : {}),
+      }), signal });
     if (!r.ok || !r.body) throw new Error("chat_stream " + r.status);
     const rd = r.body.getReader(), dec = new TextDecoder();
     let all = "";
@@ -85,6 +120,11 @@ export class Sidecar {
 
   chunk(cid: string): Promise<ChunkPayload | null> {
     return this.get<ChunkPayload>(`/chunk/${encodeURIComponent(cid)}`);
+  }
+
+  /** Similar chunks keyed by a reference cid (`G-454`). */
+  similar(cid: string, k = 20): Promise<SearchResults | null> {
+    return this.get<SearchResults>(`/search?ref=${encodeURIComponent(cid)}&k=${k}`);
   }
 
   /** Streamed chunks placed through the fit before the store holds them (`/project`). */
@@ -870,7 +910,7 @@ export class Sidecar {
   vaultRoot = "";
 
   async runCell(note: string, code: string,
-                lang = "python", refs: string[] = [], line = -1, sample?: number, markdown = "", maps = ""): Promise<KernelReply | null> {
+                lang = "python", refs: string[] = [], line = -1, sample?: number, markdown = "", maps = "", upstream?: any[]): Promise<KernelReply | null> {
     const base = this.base().trim().replace(/\/+$/, "");
     if (!base) return null;
     try {
@@ -879,7 +919,8 @@ export class Sidecar {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note, code, lang, refs, line, ...(sample === undefined ? {} : { sample }),
                                ...(this.vaultRoot ? { vault_root: this.vaultRoot } : {}),
-                               ...(markdown ? { markdown } : {}), ...(maps ? { maps } : {}) }),
+                               ...(markdown ? { markdown } : {}), ...(maps ? { maps } : {}),
+                               ...(upstream && upstream.length ? { upstream } : {}) }),
       });
       return (await res.json()) as KernelReply;
     } catch {

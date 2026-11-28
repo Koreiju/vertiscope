@@ -955,6 +955,8 @@ _PLANT_NO_MD_HEAL = [os.environ.get("DOMVEC_PLANT_NO_MD_HEAL") == "1"]
 #: up with a 120 ms drain, so one-capture-per-drain had nothing to lose and
 #: the planted arm could not fail (run 36: serial p95 442 ms, merged 889).
 PLANT_CAPTURE_LOAD = [False]
+#: Source-hash memo for cross-notebook DAG upstream cell evaluation (`G-451`).
+_UPSTREAM_CELL_HASHES: Dict[Tuple[str, int], str] = {}
 
 _PLANTABLE = {
     "capture-load": ("domvec.obsidian.sidecar", "PLANT_CAPTURE_LOAD"),      # D-42 load
@@ -986,6 +988,11 @@ _PLANTABLE = {
     "no-asks": ("domvec.obsidian.sidecar", "PLANT_NO_ASKS"),                   # G-288
     "project-whole-page": ("domvec.obsidian.sidecar", "PLANT_PROJECT_WHOLE_PAGE"),  # G-13
     "chat-resend": ("domvec.chat", "PLANT_RESEND"),                               # G-43
+    "chat-oneshot": ("domvec.chat", "PLANT_CHAT_ONESHOT"),                        # G-444
+    "no-code-intel": ("domvec.code_intel", "PLANT_NO_CODE_INTEL"),                # G-447
+    "no-cross-vars": ("domvec.dataflow", "PLANT_NO_CROSS_NOTE_VARS"),             # G-451
+    "no-tool-cell": ("domvec.tool_cells", "PLANT_NO_TOOL_CELL"),                  # G-453
+    "no-chat-system": ("domvec.chat", "PLANT_NO_CHAT_SYSTEM"),                    # G-452
     "prototype-no-code": ("domvec.obsidian.sidecar", "PLANT_PROTOTYPE_NO_CODE"),  # G-105
     "reembed-all": ("domvec.vectors", "PLANT_REEMBED_ALL"),                    # P-N6
     "no-seed": ("domvec.workspace", "PLANT_NO_SEED"),                          # P-N6
@@ -2749,6 +2756,19 @@ class _Handler(BaseHTTPRequestHandler):
         _LAST_REQUEST[0] = time.time()
         parts = urlsplit(self.path)
         route = parts.path.strip("/")
+        if route == "session_lock":
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}") if length > 0 else {}
+            from .session_lock import lock_status, run_contention_selftest
+            if body.get("action") == "selftest":
+                planted = bool(body.get("plant_no_lock"))
+                self._send(200, {
+                    "live_lock": lock_status(),
+                    "selftest": run_contention_selftest(plant_no_lock=planted),
+                })
+                return
+            self._send(200, {"session_lock": lock_status()})
+            return
         if route == "shutdown":
             if self.client_address[0] not in ("127.0.0.1", "::1"):
                 self._send(403, {"error": "loopback only"})
@@ -3191,11 +3211,12 @@ class _Handler(BaseHTTPRequestHandler):
             mod, attr = _PLANTABLE[name]
             module = __import__(mod, fromlist=[attr])
             cur = getattr(module, attr)
+            raw_on = body.get("on") if "on" in body else body.get("value")
             if isinstance(cur, list):           # a one-element flag list
-                cur[0] = bool(body.get("on"))
+                cur[0] = bool(raw_on)
                 now = cur[0]
             else:
-                setattr(module, attr, bool(body.get("on")))
+                setattr(module, attr, bool(raw_on))
                 now = getattr(module, attr)
             self._send(200, {"name": name, "on": now})
             return
@@ -3778,18 +3799,70 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, out)
             return
 
+        if route == "code_intel":
+            # G-447 (PLUGIN_GOAL 200 e, 133): VS Code-grade completions, call
+            # signatures, hover docstrings, go-to-definition, and syntax
+            # diagnostics across a markdown note's fenced Python cells.
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}") or {}
+                from .. import code_intel as _ci
+                t0 = time.time()
+                out = _ci.handle(body, workspace=self.workspace, kernel_pool=self.kernel_pool)
+                out["ms"] = round((time.time() - t0) * 1000, 2)
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "%s: %s" % (type(exc).__name__, exc)})
+                return
+            self._send(200, out)
+            return
+
         if route == "dataflow":
-            # G-380 (PLUGIN_GOAL 167 f, marimo style): the cells a run makes
-            # stale, from the note's own text -- names defined and read, read
-            # statically (`dataflow.rerun_plan`). Pure analysis: it reads no
-            # store and runs nothing; the plugin re-runs what it names.
+            # G-380 / G-451: single-note `rerun_plan`, or cross-notebook `compile_plan`
+            # / `workspace_graph` when `notes` (`{path: markdown}`) is supplied.
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(length) or b"{}")
                 from .. import dataflow as _df
                 t0 = time.time()
-                out = _df.rerun_plan(str(body.get("markdown") or ""), int(body.get("line", -1)))
+                notes_map = body.get("notes")
+                if isinstance(notes_map, dict):
+                    clean_notes = {str(k): str(v or "") for k, v in notes_map.items()}
+                    target_note = str(body.get("note") or "")
+                    if target_note:
+                        out = _df.compile_plan(clean_notes, target_note, int(body.get("line", -1)))
+                    else:
+                        wg = _df.workspace_graph(clean_notes)
+                        out = {
+                            "note_edges": wg["note_edges"],
+                            "cell_edges": wg["cell_edges"],
+                            "external_defs": wg["external_defs"],
+                            "problems": wg["problems"],
+                            "nodes": wg["nodes"],
+                        }
+                else:
+                    out = _df.rerun_plan(str(body.get("markdown") or ""), int(body.get("line", -1)))
                 out["ms"] = round((time.time() - t0) * 1000, 2)
+            except Exception as exc:                # noqa: BLE001
+                self._send(400, {"error": "%s: %s" % (type(exc).__name__, exc)})
+                return
+            self._send(200, out)
+            return
+
+        if route == "tool_cell":
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                from .. import tool_cells as _tc
+                b_state = dict(BROWSER_STATE) if isinstance(globals().get("BROWSER_STATE"), dict) else {}
+                s_last = dict(SHELL_LAST.get(next(iter(SHELL_LAST), ""), {})) if isinstance(globals().get("SHELL_LAST"), dict) and SHELL_LAST else {}
+                v_root = str(VAULT_ROOT[0] if isinstance(globals().get("VAULT_ROOT"), list) and VAULT_ROOT else "")
+                out = _tc.execute(
+                    body,
+                    workspace=self.workspace,
+                    browser_state=b_state,
+                    shell_last=s_last,
+                    vault_root=v_root,
+                )
             except Exception as exc:                # noqa: BLE001
                 self._send(400, {"error": "%s: %s" % (type(exc).__name__, exc)})
                 return
@@ -3967,12 +4040,10 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if route == "chat_stream":
-            # The plane's CHAT CELL (PLUGIN_GOAL 134): one prompt, its context
-            # the cells magnetized around it (sent by the plugin, already
-            # truncated), the reply written token by token as the model makes
-            # it -- plain text, flushed per token, the connection closed at
-            # the end. Its own model session: the browser cell's is closed
-            # first and reopens on its next turn. Loopback only.
+            # The plane's CHAT CELL (PLUGIN_GOAL 134, 200 c; G-444): multi-turn
+            # session keyed by `session` (the host note's path), adapting in
+            # O(delta) to newly pinned chunks (`pins`) and changed cell blocks
+            # (`context`), streamed token by token on CUDA. Loopback only.
             if self.client_address[0] not in ("127.0.0.1", "::1"):
                 self._send(403, {"error": "loopback only"})
                 return
@@ -3982,19 +4053,32 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as exc:                # noqa: BLE001
                 self._send(400, {"error": "bad body: %s" % exc})
                 return
+            from .. import chat as _chat
+            session_id = str(body.get("session") or "default").strip() or "default"
+            sess = _chat.stream_session(session_id)
+            if body.get("reset"):
+                sess.reset()
+                if not str(body.get("prompt") or "").strip():
+                    self._send(200, sess.to_json())
+                    return
+            if body.get("inspect"):
+                self._send(200, sess.to_json())
+                return
             prompt = str(body.get("prompt") or "").strip()
             if not prompt:
                 self._send(400, {"error": "no prompt"})
                 return
             context = [str(c) for c in (body.get("context") or []) if str(c).strip()]
-            from .. import chat as _chat
+            pins = body.get("pins") if isinstance(body.get("pins"), list) else []
+            history = body.get("history") if isinstance(body.get("history"), list) else None
+            sys_prompt = str(body.get("system") or "").strip() or None
             # `dry_ms`: the turn without the model -- a token a tick for that
             # long -- so the live check can put two turns in flight with the
             # lock planted away and not take the worker down with them.
             dry_ms = float(body.get("dry_ms") or 0)
             unlocked = bool(body.get("plant_unlocked")) and dry_ms > 0
-            NL = chr(10)
-            text = ("Context, the cells beside this one:" + NL + NL + (NL + NL + "---" + NL + NL).join(context) + NL + NL if context else "") + prompt
+            msgs, sess_meta = sess.prepare(prompt, context=context, pins=pins, history=history, system_prompt=sys_prompt)
+            text = msgs[-1]["content"]
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
@@ -4007,6 +4091,7 @@ class _Handler(BaseHTTPRequestHandler):
             # (or planted `PLANT_CHAT_GPT4ALL`) is the old path, kept as the arm.
             engine = str(body.get("engine") or ("gpt4all" if PLANT_CHAT_GPT4ALL[0] else "cuda"))
             lock = nullcontext() if unlocked else _chat.GEN_LOCK
+            reply_parts: list[str] = []
             with lock:
                 waited_ms = round((time.time() - t_ask) * 1000)
                 be = None
@@ -4033,27 +4118,37 @@ class _Handler(BaseHTTPRequestHandler):
                         for k in range(0, len(dt), 6):
                             if not n:
                                 t_first = time.time()
-                            self.wfile.write(dt[k:k + 6].encode("utf-8")); self.wfile.flush(); n += 1
+                            piece = dt[k:k + 6]
+                            reply_parts.append(piece)
+                            self.wfile.write(piece.encode("utf-8")); self.wfile.flush(); n += 1
                             time.sleep(0.02)
                     elif dry_ms:
                         while (time.time() - t0) * 1000 < dry_ms:
                             if not n:
                                 t_first = time.time()
+                            reply_parts.append(".")
                             self.wfile.write(b"."); self.wfile.flush(); n += 1
                             time.sleep(0.05)
                     elif engine == "cuda":
                         from .. import chat_cuda as _cc
-                        for tok in _cc.stream(text, max_tokens=int(body.get("max_tokens") or 400)):
+                        for tok in _cc.stream(msgs, max_tokens=int(body.get("max_tokens") or 400)):
                             if not n:
                                 t_first = time.time()
+                            reply_parts.append(tok)
                             self.wfile.write(tok.encode("utf-8")); self.wfile.flush(); n += 1
                     else:
                         m = be._load()
-                        with m.chat_session(_chat.SYSTEM, _chat.TEMPLATE):
+                        sys_wrapped = "<|im_start|>system\n" + msgs[0]["content"] + "<|im_end|>\n"
+                        with m.chat_session(sys_wrapped, _chat.TEMPLATE):
+                            if len(msgs) > 2 and hasattr(m, "current_chat_session"):
+                                for item in msgs[1:-1]:
+                                    m.current_chat_session.append({"role": item["role"], "content": item["content"]})
                             for tok in m.generate(text, max_tokens=int(body.get("max_tokens") or 400), temp=0.3, streaming=True):
                                 if not n:
                                     t_first = time.time()
-                                self.wfile.write(str(tok).encode("utf-8")); self.wfile.flush(); n += 1
+                                s_tok = str(tok)
+                                reply_parts.append(s_tok)
+                                self.wfile.write(s_tok.encode("utf-8")); self.wfile.flush(); n += 1
                 except Exception as exc:                # noqa: BLE001
                     try:
                         self.wfile.write((chr(10) + "[error: %s]" % exc).encode("utf-8"))
@@ -4061,6 +4156,7 @@ class _Handler(BaseHTTPRequestHandler):
                         pass
                 finally:
                     _chat.IN_FLIGHT["now"] -= 1
+                    sess.commit(sess_meta, "".join(reply_parts))
             # Where the model ran, the time to its first token, and how long
             # this turn queued behind another (PLUGIN_GOAL 159, "several minutes").
             from .. import gpu_gate as _gate                # G-385: did GPU work yield to this turn
@@ -4069,6 +4165,12 @@ class _Handler(BaseHTTPRequestHandler):
                                      "first_ms": round((t_first - t0) * 1000) if t_first else None,
                                      "waited_ms": waited_ms, "in_flight": in_flight, "dry": bool(dry_ms), "unlocked": unlocked, "gate": _gate_now,
                                      "engine": engine,
+                                     "session": session_id,
+                                     "history_turns": sess_meta.get("history_turns", 0),
+                                     "fresh_pins": sess_meta.get("fresh_pins", []),
+                                     "dropped_pins": sess_meta.get("dropped_pins", []),
+                                     "fresh_blocks": sess_meta.get("fresh_blocks", 0),
+                                     "dropped_blocks": sess_meta.get("dropped_blocks", 0),
                                      "loaded_on": (getattr(be, "loaded_on", "") if be is not None else "") if engine != "cuda" else __import__("domvec.chat_cuda", fromlist=["x"]).loaded_on(),
                                      "prompt_chars": len(text),
                                      "tok_s": round(n / max(1e-3, time.time() - t_first), 2) if t_first and n > 1 else None,
@@ -4332,6 +4434,8 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if body.get("op") == "restart":
+            for k in [k for k in list(_UPSTREAM_CELL_HASHES.keys()) if k[0] == note]:
+                _UPSTREAM_CELL_HASHES.pop(k, None)
             self._send(200, {"restarted": self.kernel_pool.restart(note),
                              "note": note})
             return
@@ -4434,7 +4538,80 @@ class _Handler(BaseHTTPRequestHandler):
                     tr = self.kernel_pool.run(note, _sm.compile_module(trees))
                     if isinstance(tr, dict) and tr.get("error"):
                         trees_reply = dict(tr, error="in the note's markdown trees:\n" + str(tr["error"]))
+            # G-451 (PLUGIN_GOAL 201 d): Cross-notebook DAG upstream compilation &
+            # direct variable binding before running `code` in `note`.
+            imported_vars: list = []
+            upstream_list = body.get("upstream")
+            from .. import dataflow as _df_up
+            if isinstance(upstream_list, list) and upstream_list and not _df_up.PLANT_NO_CROSS_NOTE_VARS[0]:
+                import hashlib as _hl
+                port = self.server.server_address[1]
+                for u_item in upstream_list:
+                    if not isinstance(u_item, dict):
+                        continue
+                    u_note = str(u_item.get("note") or "").strip()
+                    u_src = str(u_item.get("source") or "")
+                    u_line = int(u_item.get("open_line", -1))
+                    u_exports = [str(x) for x in (u_item.get("exports") or []) if str(x).isidentifier()]
+                    if not u_note or not u_src.strip():
+                        continue
+                    u_hash = _hl.sha256(u_src.encode("utf-8")).hexdigest()
+                    if u_note == note:
+                        if _UPSTREAM_CELL_HASHES.get((u_note, u_line)) != u_hash:
+                            ur = self.kernel_pool.run(note, u_src)
+                            if isinstance(ur, dict) and ur.get("ok"):
+                                _UPSTREAM_CELL_HASHES[(u_note, u_line)] = u_hash
+                        continue
+                    # External notebook: ensure its kernel is booted and its cell evaluated.
+                    if not PLANT_NO_BASE_OBJECTS[0]:
+                        from . import kernel_objects as _ko
+                        self.kernel_pool.run(u_note, _ko.boot("http://127.0.0.1:%d" % port))
+                        self.kernel_pool.run(u_note, "_domvec_note = %r" % u_note)
+                    if in_vault:
+                        from . import kernel_objects as _ko
+                        self.kernel_pool.run(u_note, _ko.vault_boot(root, u_note))
+                    check_expr = " and ".join(f"({v!r} in globals())" for v in u_exports) if u_exports else "True"
+                    have_rep = self.kernel_pool.run(u_note, f"print('__DV_HAVE__' + str(bool({check_expr})))")
+                    already_live = "__DV_HAVE__True" in str((have_rep or {}).get("stdout") or "")
+                    if _UPSTREAM_CELL_HASHES.get((u_note, u_line)) != u_hash or not already_live:
+                        ur = self.kernel_pool.run(u_note, u_src)
+                        if in_vault:
+                            self.kernel_pool.run(u_note, _ko.VAULT_DONE)
+                        if isinstance(ur, dict) and ur.get("ok"):
+                            _UPSTREAM_CELL_HASHES[(u_note, u_line)] = u_hash
+                    elif in_vault:
+                        self.kernel_pool.run(u_note, _ko.VAULT_DONE)
+                    if u_exports:
+                        exp_code = (
+                            "import pickle as _dpk, base64 as _db64, json as _djs\n"
+                            "_dout = {}\n"
+                            f"for _dk in {u_exports!r}:\n"
+                            "    if _dk in globals():\n"
+                            "        try:\n"
+                            "            _dout[_dk] = _db64.b64encode(_dpk.dumps(globals()[_dk])).decode('ascii')\n"
+                            "        except Exception:\n"
+                            "            pass\n"
+                            "print('__DV_EXPORT__' + _djs.dumps(_dout))"
+                        )
+                        erep = self.kernel_pool.run(u_note, exp_code)
+                        for eln in str((erep or {}).get("stdout") or "").splitlines():
+                            if eln.startswith("__DV_EXPORT__"):
+                                payload_map = json.loads(eln[len("__DV_EXPORT__"):])
+                                if payload_map:
+                                    imp_code = (
+                                        "import pickle as _dpk, base64 as _db64\n"
+                                        f"for _dk, _dv in {payload_map!r}.items():\n"
+                                        "    globals()[_dk] = _dpk.loads(_db64.b64decode(_dv.encode('ascii')))\n"
+                                    )
+                                    self.kernel_pool.run(note, imp_code)
+                                    imported_vars.extend(sorted(payload_map.keys()))
+
             reply = trees_reply if trees_reply is not None else self.kernel_pool.run(note, code)
+            if isinstance(reply, dict) and reply.get("ok"):
+                import hashlib as _hl
+                _UPSTREAM_CELL_HASHES[(note, int(body.get("line", -1)))] = _hl.sha256(code.encode("utf-8")).hexdigest()
+            if imported_vars and isinstance(reply, dict):
+                reply = dict(reply, imported_vars=sorted(set(imported_vars)))
             if in_vault:
                 # The note's folder only for the cell: a process's working
                 # directory cannot be removed on Windows, so a kernel parked
@@ -5084,6 +5261,11 @@ class _Handler(BaseHTTPRequestHandler):
         _LAST_REQUEST[0] = time.time()
         parts = urlsplit(self.path)
         segments = [unquote(s) for s in parts.path.strip("/").split("/") if s]
+
+        if segments and segments[0] == "session_lock":
+            from .session_lock import lock_status
+            self._send(200, {"ok": True, "session_lock": lock_status()})
+            return
 
         if not segments or segments[0] == "health":
             # **Liveness must not wait on the store** (2026-10-07). These are

@@ -292,6 +292,8 @@ def graph(text: str, known: Iterable[str] = ()) -> Graph:
 
 #: Planted (G-380): the plan names no readers, so a run leaves them stale.
 PLANT_NO_READERS = [False]
+#: Planted (G-451): cross-notebook direct variable references are ignored.
+PLANT_NO_CROSS_NOTE_VARS = [False]
 
 
 def rerun_plan(text: str, open_line: int, known: Iterable[str] = ()) -> dict:
@@ -318,3 +320,287 @@ def rerun_plan(text: str, open_line: int, known: Iterable[str] = ()) -> dict:
               "reads": sorted(by[i].refs & cell.defs)}
              for i in after if by[i].kind == "python" and not any(i in p.cells for p in g.problems)]
     return {"cell": cell.index, "defs": sorted(cell.defs), "rerun": rerun, "problems": []}
+
+
+_MD_LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)\s]+)\)")
+
+
+def _linked_notes_of(text: str) -> Set[str]:
+    from urllib.parse import unquote
+    out: Set[str] = set()
+    for _, raw in _MD_LINK_RE.findall(text or ""):
+        if re.match(r"^(https?:|mailto:|code:|data:)", raw, re.I):
+            continue
+        clean = unquote(re.sub(r"^vault://[^/]+/", "", raw)).split("#")[0].lstrip("/").replace("\\", "/")
+        if clean.endswith(".md"):
+            out.add(clean)
+    return out
+
+
+def workspace_graph(notes: Dict[str, str], known: Iterable[str] = ()) -> dict:
+    """Global computation graph across multiple markdown notebooks (`G-451`, PLUGIN_GOAL 201).
+
+    Variables defined at top level in one notebook's python cells can be referenced
+    directly in another notebook without `Vault.read` or special links:
+    - Intra-note definitions take precedence inside their own note (so independent
+      scratch notes defining `x` never collide with each other).
+    - Any unresolved reference `v` (`v in cell.refs` and not defined in the same
+      note or `known`) resolves to the external notebook cell defining `v` (using
+      explicit `[title](path.md)` links in the reader note to disambiguate if
+      multiple external notebooks define `v`).
+    """
+    known_set = set(known)
+    per_note: Dict[str, Graph] = {}
+    links_by_note: Dict[str, Set[str]] = {}
+    # var_name -> list of (note_path, cell_index, open_line)
+    ext_definers: Dict[str, List[Tuple[str, int, int]]] = {}
+
+    for path in sorted(notes.keys()):
+        txt = str(notes[path] or "")
+        g = graph(txt, known_set)
+        per_note[path] = g
+        links_by_note[path] = _linked_notes_of(txt)
+        for c in g.cells:
+            if c.kind != "python" or c.error:
+                continue
+            for d in sorted(c.defs):
+                ext_definers.setdefault(d, []).append((path, c.index, c.line - 1))
+
+    # Node key: `(note_path, cell_index)`
+    NodeKey = Tuple[str, int]
+    all_nodes: List[NodeKey] = []
+    cell_meta: Dict[NodeKey, dict] = {}
+    edges: Dict[NodeKey, Set[NodeKey]] = {}
+    edge_vars: Dict[Tuple[NodeKey, NodeKey], Set[str]] = {}
+    note_edges: Dict[Tuple[str, str], Set[str]] = {}
+    problems: List[dict] = []
+
+    for path, g in per_note.items():
+        for c in g.cells:
+            if c.kind != "python":
+                continue
+            nk = (path, c.index)
+            all_nodes.append(nk)
+            edges[nk] = set()
+            cell_meta[nk] = {
+                "note": path,
+                "index": c.index,
+                "open_line": c.line - 1,
+                "source": c.source,
+                "defs": sorted(c.defs),
+                "refs": sorted(c.refs),
+                "error": c.error,
+            }
+        # Intra-note edges
+        for src_i, dsts in g.edges.items():
+            if (path, src_i) not in edges:
+                continue
+            src_defs = per_note[path].cells[src_i].defs
+            for dst_i in dsts:
+                if (path, dst_i) not in edges:
+                    continue
+                edges[(path, src_i)].add((path, dst_i))
+                shared = src_defs & per_note[path].cells[dst_i].refs
+                edge_vars.setdefault(((path, src_i), (path, dst_i)), set()).update(shared)
+
+    if not PLANT_NO_CROSS_NOTE_VARS[0]:
+        for path, g in per_note.items():
+            local_defs = {d for c in g.cells for d in c.defs}
+            linked = links_by_note.get(path) or set()
+            for c in g.cells:
+                if c.kind != "python":
+                    continue
+                dst_nk = (path, c.index)
+                for ref_name in sorted(c.refs):
+                    if ref_name in local_defs or ref_name in known_set:
+                        continue
+                    cands = [x for x in (ext_definers.get(ref_name) or []) if x[0] != path]
+                    if not cands:
+                        continue
+                    if len(cands) > 1:
+                        linked_cands = [x for x in cands if x[0] in linked]
+                        if len(linked_cands) == 1:
+                            cands = linked_cands
+                        else:
+                            problems.append({
+                                "kind": "AmbiguousExternalError",
+                                "note": path,
+                                "open_line": c.line - 1,
+                                "name": ref_name,
+                                "definers": [x[0] for x in cands],
+                                "message": f"'{ref_name}' is defined in multiple notebooks ({', '.join(x[0] for x in cands)})",
+                            })
+                            continue
+                    src_path, src_idx, _ = cands[0]
+                    src_nk = (src_path, src_idx)
+                    if src_nk in edges:
+                        edges[src_nk].add(dst_nk)
+                        edge_vars.setdefault((src_nk, dst_nk), set()).add(ref_name)
+                        note_edges.setdefault((src_path, path), set()).add(ref_name)
+
+    # Topological sort over `all_nodes` (Kahn's algorithm; cycle participants reported).
+    indeg: Dict[NodeKey, int] = {nk: 0 for nk in all_nodes}
+    rev_edges: Dict[NodeKey, Set[NodeKey]] = {nk: set() for nk in all_nodes}
+    for u, vs in edges.items():
+        for v in vs:
+            indeg[v] += 1
+            rev_edges[v].add(u)
+
+    ready = sorted([nk for nk, d in indeg.items() if d == 0])
+    topo: List[NodeKey] = []
+    while ready:
+        u = ready.pop(0)
+        topo.append(u)
+        for v in sorted(edges.get(u, ())):
+            indeg[v] -= 1
+            if indeg[v] == 0:
+                ready.append(v)
+        ready.sort()
+
+    cycle_nodes = [nk for nk in all_nodes if nk not in topo]
+    if cycle_nodes:
+        problems.append({
+            "kind": "CrossCycleError",
+            "nodes": [{"note": n[0], "index": n[1], "open_line": cell_meta[n]["open_line"]} for n in cycle_nodes],
+            "message": "cross-notebook cycle among " + ", ".join(f"{n[0]}#{n[1] + 1}" for n in cycle_nodes),
+        })
+        topo.extend(cycle_nodes)
+
+    return {
+        "nodes": [cell_meta[nk] for nk in topo],
+        "topo": topo,
+        "edges": edges,
+        "rev_edges": rev_edges,
+        "edge_vars": edge_vars,
+        "cell_meta": cell_meta,
+        "note_edges": [
+            {"from": a, "to": b, "vars": sorted(vs)}
+            for (a, b), vs in sorted(note_edges.items())
+        ],
+        "cell_edges": [
+            {
+                "from_note": u[0],
+                "from_line": cell_meta[u]["open_line"],
+                "to_note": v[0],
+                "to_line": cell_meta[v]["open_line"],
+                "vars": sorted(vs),
+            }
+            for (u, v), vs in sorted(edge_vars.items())
+        ],
+        "external_defs": [
+            {
+                "name": var,
+                "note": locs[0][0],
+                "cell_index": locs[0][1],
+                "open_line": locs[0][2],
+            }
+            for var, locs in sorted(ext_definers.items())
+            if len(locs) == 1
+        ],
+        "problems": problems,
+    }
+
+
+def compile_plan(
+    notes: Dict[str, str],
+    target_note: str,
+    open_line: int = -1,
+    known: Iterable[str] = (),
+) -> dict:
+    """Return upstream cells (across other notebooks + earlier cells) that must be
+    evaluated BEFORE `(target_note, open_line)`, and downstream cells across all
+    notebooks that become stale AFTER `(target_note, open_line)` runs (`G-451`)."""
+    wg = workspace_graph(notes, known)
+    topo: List[Tuple[str, int]] = wg["topo"]
+    edges = wg["edges"]
+    rev_edges = wg["rev_edges"]
+    edge_vars = wg["edge_vars"]
+    cell_meta = wg["cell_meta"]
+
+    # Locate target cell(s) in `target_note`.
+    targets = [
+        nk for nk in topo
+        if nk[0] == target_note and (open_line < 0 or cell_meta[nk]["open_line"] == open_line)
+    ]
+    if not targets:
+        return {
+            "note": target_note,
+            "open_line": open_line,
+            "upstream": [],
+            "downstream": [],
+            "note_edges": wg["note_edges"],
+            "cell_edges": wg["cell_edges"],
+            "external_defs": wg["external_defs"],
+            "problems": wg["problems"],
+        }
+
+    # Upstream closure (ancestors in `rev_edges`, excluding `targets` themselves).
+    anc: Set[Tuple[str, int]] = set()
+    stack = list(targets)
+    while stack:
+        cur = stack.pop()
+        for p in rev_edges.get(cur, ()):
+            if p not in anc and p not in targets:
+                anc.add(p)
+                stack.append(p)
+
+    upstream = []
+    for nk in topo:
+        if nk not in anc:
+            continue
+        meta = cell_meta[nk]
+        if meta.get("error"):
+            continue
+        # Which vars defined by `nk` are read by downstream nodes in `anc | set(targets)`?
+        needed: Set[str] = set()
+        for dst in edges.get(nk, ()):
+            if dst in anc or dst in targets:
+                needed.update(edge_vars.get((nk, dst), set()))
+        upstream.append({
+            "note": nk[0],
+            "index": nk[1],
+            "open_line": meta["open_line"],
+            "source": meta["source"],
+            "exports": sorted(needed or set(meta["defs"])),
+        })
+
+    # Downstream closure (descendants in `edges`, excluding `targets`).
+    desc: Set[Tuple[str, int]] = set()
+    if not PLANT_NO_READERS[0]:
+        stack = list(targets)
+        while stack:
+            cur = stack.pop()
+            for ch in edges.get(cur, ()):
+                if ch not in desc and ch not in targets:
+                    desc.add(ch)
+                    stack.append(ch)
+
+    downstream = []
+    for nk in topo:
+        if nk not in desc:
+            continue
+        meta = cell_meta[nk]
+        if meta.get("error"):
+            continue
+        reads_vars: Set[str] = set()
+        for p in rev_edges.get(nk, ()):
+            if p in targets or p in desc:
+                reads_vars.update(edge_vars.get((p, nk), set()))
+        downstream.append({
+            "note": nk[0],
+            "index": nk[1],
+            "open_line": meta["open_line"],
+            "source": meta["source"],
+            "reads": sorted(reads_vars),
+        })
+
+    return {
+        "note": target_note,
+        "open_line": open_line,
+        "upstream": upstream,
+        "downstream": downstream,
+        "note_edges": wg["note_edges"],
+        "cell_edges": wg["cell_edges"],
+        "external_defs": wg["external_defs"],
+        "problems": wg["problems"],
+    }

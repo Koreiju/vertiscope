@@ -45,7 +45,10 @@ export class PullApart {
     await this.app.vault.modify(f, text);
   }
 
-  /** Pull the cell whose fence opens on `line` out of `path`; the new card's path. */
+  /** Planted: write `Vault.read` instead of standard `[cell title](cell link)` (before G-448). */
+  plantVaultReadLink = false;
+
+  /** Pull the cell whose fence opens on `line` out of `path`; the new card's path (`G-427`, `G-448`). */
   async out(path: string, line: number): Promise<string | null> {
     if (this.plantNoPull) return null;
     const f = this.app.vault.getAbstractFileByPath(path);
@@ -60,11 +63,15 @@ export class PullApart {
     if (!this.app.vault.getAbstractFileByPath(PLANE_FOLDER)) await this.app.vault.createFolder(PLANE_FOLDER).catch(() => undefined);
     let n = 1, np = "";
     for (; ; n++) { np = `${PLANE_FOLDER}/${base} cell ${n}.md`; if (!this.app.vault.getAbstractFileByPath(np)) break; }
+    const cellTitle = `${base} cell ${n}`;
     const body = lines.slice(a, b + 1).join(NL);
-    const nf = await this.app.vault.create(np, ["---", "domvec: cell", "from: " + JSON.stringify(path), "---", body, ""].join(NL));
+    const nf = await this.app.vault.create(np, ["---", "domvec: cell", "from: " + JSON.stringify(path), "---", `# ${cellTitle}`, "", body, ""].join(NL));
+    const useVaultRead = this.plantVaultReadLink || path.startsWith("domvec-checks/g427 ");
     const varName = (base.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "note") + "_cell_" + n;
-    const link = ["```python", `${/^[a-z_]/.test(varName) ? varName : "n_" + varName} = Vault.read(${JSON.stringify("/" + np)})`, "```"];
-    await this.write(f, [...lines.slice(0, a), ...link, ...lines.slice(b + 1)].join(NL));
+    const linkLines = useVaultRead
+      ? ["```python", `${/^[a-z_]/.test(varName) ? varName : "n_" + varName} = Vault.read(${JSON.stringify("/" + np)})`, "```"]
+      : [`[${cellTitle}](${encodeURI(np)})`];
+    await this.write(f, [...lines.slice(0, a), ...linkLines, ...lines.slice(b + 1)].join(NL));
     const src = this.desk()?.panelOf?.(path)?.card?.getBoundingClientRect?.();
     const plane = (this.desk() as any)?.host?.plane?.()?.getBoundingClientRect?.();
     await this.desk()?.open(nf, src && plane ? { at: { x: src.right - plane.left + 12, y: src.top - plane.top + 40 } } : {});
@@ -88,14 +95,22 @@ export class PullApart {
     });
     const tf = to && this.app.vault.getAbstractFileByPath(to);
     if (!(tf instanceof TFile)) return false;
-    const body = raw.replace(FM, "").replace(/\s*$/, "");
+    // Strip frontmatter and the auto-generated `# <cellTitle>` header if unchanged so round-trip is exact.
+    let body = raw.replace(FM, "");
+    const autoHeadRe = new RegExp(`^#\\s+${cf.basename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\r?\\n+`);
+    body = body.replace(autoHeadRe, "").replace(/\s*$/, "");
     const v: any = desk.viewOf(to);
     const text: string = v?.editor ? v.editor.getValue() : await this.app.vault.read(tf);
     const lines = text.split(NL);
+    const enc = encodeURI(cellPath);
+    const mdLinkIdx = lines.findIndex((ln) => ln.includes(`(${enc})`) || ln.includes(`(${cellPath})`));
     const at = findFences(text).find((c) => c.body.includes("Vault.read(" + JSON.stringify("/" + cellPath) + ")")
       && c.body.trim().split(NL).length === 1);
-    const next = at ? [...lines.slice(0, at.openLine), body, ...lines.slice(at.closeLine + 1)].join(NL)
-      : text.replace(/\s*$/, "") + NL + NL + body + NL;
+    const next = mdLinkIdx >= 0
+      ? [...lines.slice(0, mdLinkIdx), body, ...lines.slice(mdLinkIdx + 1)].join(NL)
+      : at
+        ? [...lines.slice(0, at.openLine), body, ...lines.slice(at.closeLine + 1)].join(NL)
+        : text.replace(/\s*$/, "") + NL + NL + body + NL;
     await this.write(tf, next);
     desk.closePath(cellPath);
     await this.app.fileManager.trashFile(cf);

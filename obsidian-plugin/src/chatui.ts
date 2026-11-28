@@ -37,7 +37,11 @@ export interface ChatHost {
   model(): string;
   /** This host's context for a prompt: magnetized panels, pins, rewound cells. */
   context(prompt: string): Promise<string[]>;
-  stream(prompt: string, context: string[], onToken: (t: string) => void): Promise<string>;
+  stream(prompt: string, context: string[], onToken: (t: string) => void,
+         meta?: { session?: string; pins?: { cid: string; url: string; title?: string; markdown: string }[];
+                  history?: { user: string; assistant: string }[] }): Promise<string>;
+  /** Pinned web chunks associated with this chat note (G-444). */
+  pins?(): { cid: string; url: string; title?: string; markdown: string }[];
   /** A piece dragged off the conversation, dropped at a screen point. */
   pullOut?(piece: Piece, at: { x: number; y: number }): Promise<string | void>;
 }
@@ -223,13 +227,22 @@ export class ChatUI {
     this.input.value = ""; this.grow();
     let reply = "", timer = 0;
     try {
+      const parsed = parseConversation(await this.text());
+      const history: { user: string; assistant: string }[] = [];
+      for (let i = 0; i + 1 < parsed.turns.length; i++) {
+        if (parsed.turns[i].who === "you" && parsed.turns[i + 1].who === "model") {
+          history.push({ user: parsed.turns[i].body.trim(), assistant: parsed.turns[i + 1].body.trim() });
+          i++;
+        }
+      }
       const ctx = await this.host.context(p);
+      const pins = this.host.pins ? this.host.pins() : [];
       const paint = () => { timer = 0; void this.render({ prompt: p, reply }); };
       void this.render({ prompt: p, reply: "" });
       reply = await this.host.stream(p, ctx, (tok) => {
         reply += tok; this.stats.tokens++;
         if (!timer) timer = window.setTimeout(paint, 120);
-      });
+      }, { session: this.file.path, pins, history });
       if (timer) window.clearTimeout(timer);
       await this.append(p, reply);
       this.stats.sends++;

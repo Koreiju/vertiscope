@@ -81,7 +81,9 @@ import { PlaneHalo } from "./planehalo";
 import { slateFolds } from "./slatefold";
 import { NotebookChats } from "./notebookchat";
 import { NoteMarks } from "./marks";
-import { chatCell, plusChat } from "./chatcell";
+import { ChatCellHost, chatCell, ensureChatFence, extractReplyToolBodies, plusChat, streamPromptIntoNote } from "./chatcell";
+import { executeToolFenceOnExit, toolBlockProcessor, toolHistoryExtension, writeToolStepToNote } from "./toolcell";
+import { fenceCodeExtensions } from "./codecell";
 import { slateLint, slateLintStats } from "./slatelint";
 import { EditorView as CmView } from "@codemirror/view";
 
@@ -213,9 +215,22 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     }
     this.sidecar = new Sidecar(() => this.settings.sidecar);
     this.autoRun = new AutoRun(this.app, (req) => this.onRunFence(req), (p) => p === "domvec/ego.md" || p.startsWith("domvec-checks/g418"));
-    // Edges between notes: a change to a note re-runs the cells that read it (G-426).
+    this.autoRun.onToolFenceExit = (file, fence) =>
+      executeToolFenceOnExit(
+        this.app,
+        {
+          sidecarBase: () => this.settings.sidecar,
+          carryAsk: (a) => this.carryAnyAsk(a, file.path),
+        },
+        file,
+        fence,
+      );
+    // Edges between notes: a change to a note re-runs the cells that read it (G-426, G-451).
     this.crossRun = new CrossRun(this.app, (req) => this.onRunFence(req));
-    this.app.workspace.onLayoutReady(() => void this.crossRun.build());
+    this.app.workspace.onLayoutReady(() => {
+      void this.crossRun.build();
+      void this.desk.migrateDeprecatedSlates();
+    });
     // G-413: a base tool's view change re-runs the cells that read it.
     this.toolRun = new ToolRun(this.app, (req) => this.onRunFence(req),
       (p) => !!this.desk.panelOf(p) || this.markdownLeaves().some((l) => (l.view as any)?.file?.path === p));
@@ -283,10 +298,25 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
                       callback: () => { void this.indexReservoir(); } });
     this.gesture = {
       sidecar: this.sidecar,
-      stats: { opened: 0, pages: 0, infilled: 0, last: null },
+      stats: { opened: 0, pages: 0, infilled: 0, hovers: 0, similars: 0, last: null },
       plantOverlay: false,
       onOpen: () => { void links.refresh(); },
       onInfill: () => { const f = this.app.workspace.getActiveFile(); if (f) this.indexNoteSoon(f, "infill"); },
+      onHoverHit: (hit) => {
+        const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;
+        if (!g) return;
+        if (!hit) { g.focusOn?.(null); g.hoverPanel?.(null); return; }
+        g.highlightChunk?.(hit.cid, hit.url, hit.cid);
+      },
+      onRightHit: (hit) => {
+        const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view;
+        const n = g?.graph?.graphData?.().nodes?.find((x: any) => String(x.id) === hit.cid);
+        if (n && typeof g.openBillboard === "function") void g.openBillboard(n, false, true);
+      },
+      onWebSearch: (q) => {
+        const browser = this.activeBrowser() as BrowserView | undefined;
+        if (browser && typeof browser.searchWeb === "function") void browser.searchWeb(q);
+      },
       destination: (hit) => {
         // A vault note links by its path in the vault; a page with an
         // exported note links to that note (a markdown panel link, as the
@@ -323,17 +353,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.slots.add({ id: "agent", slot: "codeblock:agent", register: () => this.registerMarkdownCodeBlockProcessor("agent",
       agentBlock(this.app, () => this.settings.sidecar, (f) => this.desk.open(f), (ask) => this.editor.carry(ask))) });
     this.slots.add({ id: "chat", slot: "codeblock:chat", register: () => this.registerMarkdownCodeBlockProcessor("chat",
-      chatCell(this.app, (p, c, on, sig) => this.sidecar.chatStream(p, c, on, sig))) });
-    this.slots.add({ id: "tool", slot: "codeblock:tool", register: () => this.registerMarkdownCodeBlockProcessor("tool", async (src, el) => {
-      const name = src.trim().split(/\s+/)[0] || "";
-      if ((window as any).__domvecPlantNoToolPanel) { el.createEl("pre", { text: src }); return; }
-      const base = this.settings.sidecar.trim().replace(/[/]+$/, "");
-      let text = "";
-      try { const j = await (await fetch(base + "/tool_panel")).json(); text = (j.panels || {})[name] || ""; } catch { /* sidecar down */ }
-      const box = el.createDiv({ cls: "domvec-tool-panel" });
-      box.createDiv({ cls: "domvec-tool-panel-head", text: "\u{1F512} " + name + " -- app tool, read-only" });
-      box.createEl("pre", { text: text || "no app tool named " + name });
-    }) });
+      chatCell(this.app, (p, c, on, sig, meta) => this.sidecar.chatStream(p, c, on, sig, meta), this.chatHostCtx())) });
+    this.slots.add({ id: "tool", slot: "codeblock:tool", register: () => this.registerMarkdownCodeBlockProcessor("tool",
+      toolBlockProcessor(this.app, {
+        sidecarBase: () => this.settings.sidecar,
+        carryAsk: (a) => this.carryAnyAsk(a),
+      })) });
     // The +chat cell is a decoration in a `card:` slot (G-240's second kind).
     this.slots.add({ id: "plus-chat", slot: "card:plus-chat", register: () => registerDecorator("plus-chat", (card, path) => plusChat(this.app, card, path)) });
     // The cell controls that are not the core's are a third kind, `cell:` (G-240).
@@ -368,7 +393,21 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // The `[]()` gesture (`R-1`..`R-4`): results in a block under the line,
     // a click infills the link between the parentheses.
     this.registerEditorExtension(linkGesture(this.gesture));
+    this.registerEditorExtension(toolHistoryExtension());
     this.registerEditorExtension(chunkGutter()); this.registerEditorExtension(problemExtension);
+    // G-447 / G-450 (PLUGIN_GOAL 200 e, 201 c): VS Code-grade completions, signature help,
+    // hover docs, go-to-definition, comment toggle, indent, and diagnostics,
+    // adaptive strictly to runnable fenced code cells in markdown notes.
+    this.registerEditorExtension(fenceCodeExtensions({
+      codeNodes: (q) => this.sidecar.codeNodes(q),
+      codeIntel: (b) => this.sidecar.codeIntel(b),
+      openCode: (u) => { void this.openCode(u); },
+      noteOfView: (cm) => {
+        const mv = this.markdownLeaves().map((l) => l.view as any).find((v) => v?.editor?.cm === cm);
+        return mv?.file?.path || "";
+      },
+      externalDefs: (n) => this.crossRun.externalDefsFor(n),
+    }));
     // A note's trees checked as the Python module they are (PLUGIN_GOAL 62).
     this.registerEditorExtension(slateLint(() => this.sidecar));
     (window as any).__domvecSlateLint = slateLintStats;
@@ -514,6 +553,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     this.registerEvent(this.app.vault.on("modify", (f) => { if (f instanceof TFile) void remark(f, true); }));
     let nbTimer = 0;
     this.registerEditorExtension(CmView.updateListener.of((u) => {
+      if (u.selectionSet || u.focusChanged) {
+        const mv = this.markdownLeaves().map((l) => l.view as any).find((v) => v?.editor?.cm === u.view);
+        if (mv?.editor && mv?.file) {
+          this.autoRun.flushOutside(mv.editor, mv.file, u.focusChanged && !u.view.hasFocus);
+        }
+      }
       if (!u.selectionSet && !u.docChanged) return;
       window.clearTimeout(nbTimer);
       nbTimer = window.setTimeout(() => this.nbChats?.onCursor(), 120);
@@ -541,7 +586,12 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // The cockpit (G-280): the `ego` slate's fields bound both ways to the
     // user agent and the search -- the text read on every edit, the agent's
     // own changes written back a few times a second.
-    this.registerEvent(this.app.workspace.on("editor-change", (_e: any, info: any) => { this.cockpit.onEdit(info?.file || null); this.autoRun.onEdit(_e, info?.file || null); for (const b of this.browserPanels) b.onEdit(info?.file || null); }));
+    this.registerEvent(this.app.workspace.on("editor-change", (_e: any, info: any) => {
+      this.cockpit.onEdit(info?.file || null);
+      this.autoRun.onEdit(_e, info?.file || null);
+      if (info?.file?.path) void this.desk.syncHeadTitle(info.file.path);
+      for (const b of this.browserPanels) b.onEdit(info?.file || null);
+    }));
     this.registerInterval(window.setInterval(() => { this.cockpit.sync(); for (const b of this.browserPanels) b.sync(); }, 250));
     (window as any).__domvecBrowserPanel = this.browserPanel;
     this.browserPanels = [this.browserPanel];
@@ -1035,7 +1085,9 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     openBrowser: () => { void this.openBrowserInstance(); },
     headerClick: (path) => { void this.halo.toggle(path); },
     intoCraft: (path) => { const g: any = this.app.workspace.getLeavesOfType(GRAPH_VIEW)[0]?.view; return !!g?.flyToCraft?.(path); },
-    chatStream: (prompt: string, ctx: string[], onTok: (t: string) => void) => this.sidecar.chatStream(prompt, ctx, onTok),
+    chatStream: (prompt: string, ctx: string[], onTok: (t: string) => void, meta?: any) =>
+      this.sidecar.chatStream(prompt, ctx, onTok, undefined, meta),
+    pins: (path: string) => this.pinsForNote(path),
     pullInto: (from: string, x: number, y: number) => this.pull.into(from, x, y),
     codeNodes: (q: string) => this.sidecar.codeNodes(q),
     typeNodes: (q: string) => this.minedTypes(q),
@@ -1265,9 +1317,122 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
 
   /** The editor's own calls from a cell -- create, link, invoke, commit, review (G-386). */
   editor: EditorCalls = new EditorCalls(this as any);
-  /** Marimo-style re-runs: a cell's readers run after it (G-380). */
-  dataflow: DataflowRun = new DataflowRun(this as any, (p: string) => noteTextOf(this.app, p, () => this.markdownLeaves().map((l) => l.view)),
-    (p, marks) => { markProblems(this.markdownLeaves().map((l) => l.view), p, marks); });
+  /** Marimo-style & cross-notebook DAG re-runs: a cell's readers run after it (`G-380`, `G-451`). */
+  dataflow: DataflowRun = new DataflowRun(
+    this as any,
+    (p: string) => noteTextOf(this.app, p, () => this.markdownLeaves().map((l) => l.view)),
+    (p, marks) => { markProblems(this.markdownLeaves().map((l) => l.view), p, marks); },
+    async (focusPath: string) => this.collectWorkspaceNotes(focusPath),
+  );
+
+  /** Gather computation-graph markdown notes for cross-notebook DAG compilation (`G-451`). */
+  async collectWorkspaceNotes(focusPath = ""): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    const views = this.markdownLeaves().map((l) => l.view as MarkdownView);
+    const checkPrefix = focusPath.startsWith("domvec-checks/") ? focusPath.split("/").slice(0, 2).join("/").replace(/\.md$/i, "").split(" ").slice(0, 2).join(" ") : "";
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      const p = f.path;
+      if (p === COCKPIT_PATH || p === "domvec/clipboard.md") continue;
+      const inScope = p === focusPath
+        || p.startsWith(PLANE_FOLDER + "/")
+        || !!this.desk.panelOf(p)
+        || views.some((v) => v?.file?.path === p)
+        || (checkPrefix && p.startsWith(checkPrefix));
+      if (!inScope) continue;
+      const openV = views.find((v) => v?.file?.path === p);
+      out[p] = openV?.editor ? openV.editor.getValue() : await this.app.vault.cachedRead(f);
+    }
+    return out;
+  }
+
+  chatHostCtx(): ChatCellHost {
+    return {
+      pins: (path) => this.pinsForNote(path),
+      extra: (path) => this.desk.chatContext(path),
+      systemPrompt: () => this.cockpit.egoSystemPrompt(),
+      markdownViews: () => this.markdownLeaves().map((l) => l.view),
+      onToolReply: (path, reply) => this.execReplyTools(path, reply),
+    };
+  }
+
+  /** Execute ```tool blocks emitted in a chat reply in-place (`G-453`). */
+  async execReplyTools(path: string, reply: string): Promise<void> {
+    const bodies = extractReplyToolBodies(reply);
+    if (!bodies.length) return;
+    const base = String(this.settings.sidecar || "").trim().replace(/\/+$/, "");
+    if (!base) return;
+    const f = this.app.vault.getAbstractFileByPath(path);
+    for (const src of bodies) {
+      try {
+        const res = await fetch(`${base}/tool_cell`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session: `${path}#tool`, source: src }),
+        });
+        const state = await res.json();
+        for (const a of state?.asks || []) await this.carryAnyAsk(a, path);
+        if (f instanceof TFile && state?.history_line) {
+          await writeToolStepToNote(this.app, f, -1, null, state.history_line);
+        }
+      } catch { /* sidecar unreachable */ }
+    }
+  }
+
+  /** Unified ask dispatcher across editor calls, browser, chat, terminal, and toolspaces (`G-452`, `G-453`). */
+  async carryAnyAsk(a: any, fromNote = ""): Promise<string> {
+    if (!a || typeof a !== "object") return "";
+    const said = await this.editor.carry(a);
+    if (said) return said;
+    if (typeof a.web === "string" && a.web.trim()) {
+      this.askStats.web++;
+      this.askStats.last = a.web;
+      const browser = this.activeBrowser() as BrowserView | undefined;
+      if (browser && typeof browser.searchWeb === "function") {
+        void browser.searchWeb(a.web);
+        return `web: "${a.web}" asked of the browser cell`;
+      }
+      return `web: no browser cell open for "${a.web}"`;
+    }
+    if (typeof a.go === "string" && a.go.trim()) {
+      this.askStats.go = (this.askStats.go || 0) + 1;
+      this.askStats.last = a.go;
+      const browser = this.activeBrowser() as BrowserView | undefined;
+      if (browser && typeof (browser as any).go === "function" && !this.plantNoBrowserAsk) {
+        (browser as any).go(a.go);
+        return `go: the browser sent to ${a.go}`;
+      }
+      return `go: no browser cell open for ${a.go}`;
+    }
+    if (typeof a.open_note === "string" && a.open_note.trim()) {
+      const nf = this.app.vault.getAbstractFileByPath(a.open_note) || this.app.metadataCache.getFirstLinkpathDest(a.open_note, fromNote);
+      if (nf instanceof TFile) {
+        await this.desk.open(nf);
+        return `opened ${nf.path}`;
+      }
+      return `no note ${a.open_note}`;
+    }
+    if (typeof a.terminal_run === "string" && a.terminal_run.trim()) {
+      await this.sidecar.runCommand(fromNote || "tool-cell", a.terminal_run);
+      return `terminal: ${a.terminal_run.slice(0, 48)}`;
+    }
+    if (a.chat_send && typeof a.chat_send === "object") {
+      const targetNote = String(a.chat_send.note || fromNote || "").trim();
+      const prompt = String(a.chat_send.prompt || "").trim();
+      const sys = typeof a.chat_send.system === "string" ? a.chat_send.system : undefined;
+      if (targetNote && prompt) {
+        await streamPromptIntoNote(
+          this.app,
+          targetNote,
+          prompt,
+          (p, c, on, sig, meta) => this.sidecar.chatStream(p, c, on, sig, meta),
+          this.chatHostCtx(),
+          sys,
+        );
+        return `chat: streamed to ${targetNote}`;
+      }
+    }
+    return this.carryToolAsk(a);
+  }
   /** A code card's typed rows as fields on its plane card (G-378). */
   codeRows: CodeRows = new CodeRows(this as any);
   /** A cell's asks of the app, carried out (G-288). */
@@ -1289,7 +1454,8 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       return;
     }
 
-    const running = new Notice(`domvec: running ${req.lang}…`, 0);
+    const isQuiet = !!(req as any).quiet;
+    const running = isQuiet ? null : new Notice(`domvec: running ${req.lang}…`, 0);
     let reply;
     // The computation, LIT while it runs (PLUGIN_GOAL 99): the panel's header
     // node on the plane, the craft's node in 3D -- the same moment.
@@ -1309,9 +1475,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
         : nf instanceof TFile ? await this.app.vault.cachedRead(nf) : "";
       // The note's I/O toggle (item 79): its inputs from the ego or the web.
       const maps = nf instanceof TFile ? String(this.app.metadataCache.getFileCache(nf)?.frontmatter?.maps || "") : "";
-      reply = await this.sidecar.runCell(note, req.code, req.lang, refs, req.line, req.sample, markdown, maps);
+      // Cross-notebook upstream cells in topological order (`G-451`).
+      const upstream = /^py/i.test(req.lang || "python") ? await this.dataflow.upstreamFor(note, req.line) : [];
+      reply = await this.sidecar.runCell(note, req.code, req.lang, refs, req.line, req.sample, markdown, maps, upstream);
     } finally {
-      running.hide();
+      running?.hide();
       this.light(note, false);
     }
 
@@ -1358,34 +1526,11 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     // asks the BROWSER CELL's web search, the same path as the 3D search
     // button's -- the kernel never fetches the web itself.
     for (const a of (reply.asks || []) as any[]) {
-      // The editor's own calls (G-386): carried out on the plane by the
-      // gestures' own methods, in the order the cell made them.
-      const said = await this.editor.carry(a);
-      if (said) { notes.push(said); continue; }
-      if (a && typeof a.web === "string" && a.web.trim()) {
-        this.askStats.web++;
-        this.askStats.last = a.web;
-        const l = { view: this.activeBrowser() } as any;
-        const browser = l?.view as BrowserView | undefined;
-        if (browser && typeof browser.searchWeb === "function") { void browser.searchWeb(a.web); notes.push(`web: "${a.web}" asked of the browser cell`); }
-        else notes.push(`web: no browser cell open for "${a.web}"`);
-      }
-      // `WebBrowser.go(url)` (G-279): the browser in use sent to the address.
-      if (a && typeof a.go === "string" && a.go.trim()) {
-        this.askStats.go = (this.askStats.go || 0) + 1;
-        this.askStats.last = a.go;
-        const browser = this.activeBrowser() as BrowserView | undefined;
-        if (browser && typeof (browser as any).go === "function" && !this.plantNoBrowserAsk) { (browser as any).go(a.go); notes.push(`go: the browser sent to ${a.go}`); }
-        else notes.push(`go: no browser cell open for ${a.go}`);
-      }
-      // The toolspaces' asks (G-377): each carried out by the method the
-      // reader's own gesture uses.
-      const said2 = await this.carryToolAsk(a);
-      if (said2) notes.push(said2);
+      const said = await this.carryAnyAsk(a, note);
+      if (said) notes.push(said);
     }
 
-    // Its readers, re-run (G-380): the cells that read the names this one
-    // defines, in run order, each by this same path.
+    // Its readers, re-run (G-380, G-451): the cells (same note + downstream notebooks) that read the names this one defines.
     const reran = await this.dataflow.after({ ...req, path: note }, reply);
     if (reran) notes.push(reran);
 
@@ -1394,8 +1539,10 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
       ? ([reply.stdout, reply.stderr, reply.value ?? ""]
           .filter((s) => s && s.trim()).join("\n").trim() || "ok, no output")
       : (last || "failed");
-    new Notice(`domvec [${reply.count ?? "?"}] ${shown}` +
-               (notes.length ? `\n(${notes.join("; ")})` : ""), 8000);
+    if (!isQuiet) {
+      new Notice(`domvec [${reply.count ?? "?"}] ${shown}` +
+                 (notes.length ? `\n(${notes.join("; ")})` : ""), 8000);
+    }
     return reply;
   }
 
@@ -1757,7 +1904,28 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
   // ---- structural cells at the bottom of the note (P-M4) ------------------
   //
   // Planted `__domvecPlantNoCellBar`: no strip anywhere.
-  cellBarStats = { placed: 0, code_cells: 0 };
+  cellBarStats = { placed: 0, code_cells: 0, chat_cells: 0 };
+
+  /** Pinned web chunks for a note's chat session: any notebook browser cell in
+   *  `path`, a matching plane BrowserPanel, and the active browser (`G-444`). */
+  pinsForNote(path: string): { cid: string; url: string; title?: string; markdown: string }[] {
+    const seen = new Set<string>();
+    const out: { cid: string; url: string; title?: string; markdown: string }[] = [];
+    const pushFrom = (bv: any) => {
+      if (!bv || typeof bv.pinnedChunks !== "function") return;
+      for (const p of bv.pinnedChunks()) {
+        if (p && p.cid && !seen.has(p.cid)) { seen.add(p.cid); out.push(p); }
+      }
+    };
+    for (const nb of notebookBrowsers) {
+      if (nb.sourcePath === path) pushFrom(nb.view);
+    }
+    for (const bp of this.browserPanels || []) {
+      if (bp.path === path) pushFrom(bp.view());
+    }
+    pushFrom(this.activeBrowser());
+    return out;
+  }
 
   applyCellBars(): void {
     const on = !(window as any).__domvecPlantNoCellBar;
@@ -1831,6 +1999,18 @@ export default class DomvecPlugin extends Plugin implements SurfaceHost, RunHost
     ed.setCursor(ed.offsetToPos(at));
     ed.focus();
     this.cellBarStats.code_cells++;
+  }
+
+  /** `+ chat` (`G-443`): standardized chat cell button in `cellbar.ts` across all cells. */
+  async addChatCell(view: MarkdownView): Promise<void> {
+    const file = view.file;
+    if (!file) return;
+    if (view.getMode() !== "source") {
+      await ensureChatFence(this.app, null, file.path);
+      await view.leaf.setViewState({ type: "markdown", state: { file: file.path, mode: "source", source: false } });
+    }
+    await ensureChatFence(this.app, view.containerEl, file.path);
+    this.cellBarStats.chat_cells++;
   }
 
   // ---- workspaces, per vault (PLUGIN_GOAL 144) ----------------------------

@@ -46,6 +46,12 @@ export const problemExtension: Extension = [problemField];
 /** Mark (or, with [], clear) the problems in every open editor of `path`. */
 export function markProblems(views: any[], path: string, marks: ProblemMark[]): number {
   if ((window as any).__domvecPlantNoProblemMarks) marks = [];
+  // G-449: do not slap SyntaxError banners onto fence opening lines (where they
+  // collide with fence toolbar buttons while typing); keep header problem marks
+  // strictly for structural dataflow errors (MultipleDefinitionError, CycleError).
+  if (!(window as any).__domvecPlantHeaderSyntaxMsg) {
+    marks = marks.filter((m) => !/invalid syntax|SyntaxError/i.test(String(m.message || "")));
+  }
   let n = 0;
   for (const v of views) {
     if (v?.file?.path !== path) continue;

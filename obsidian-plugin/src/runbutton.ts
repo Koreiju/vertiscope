@@ -167,7 +167,7 @@ export function readingViewRunButtons(host: RunHost) {
   return (el: HTMLElement, ctx: MarkdownPostProcessorContext): void => {
     el.querySelectorAll("pre > code").forEach((code) => {
       const pre = code.parentElement;
-      if (!pre || pre.querySelector(":scope > .domvec-run-fence")) return;
+      if (!pre || pre.querySelector(".domvec-run-fence")) return;
 
       // Obsidian marks the language as `language-python` on the <code>. Reading
       // the class is the only route here: the post-processor is handed rendered
@@ -188,25 +188,21 @@ export function readingViewRunButtons(host: RunHost) {
         refs,
         lang,
         code: cellSource(code.textContent || ""),
-        // Reading view knows the section, not the line. `getSectionInfo` gives
-        // the real line when it can; -1 says "unknown" rather than guessing 0,
-        // which would make every unknown cell collide on the first one.
-        // A block drawn by the chat interface (G-394) is rendered detached,
-        // so Obsidian knows no section; the interface wrote the fence's line
-        // in the conversation note on the block -- the same cell identity a
-        // note gives, so the same tools act on the same cell (182).
         line: ctx.getSectionInfo(pre)?.lineStart
           ?? (Number((pre.closest(".domvec-chatui-block") as HTMLElement | null)?.dataset.line ?? NaN) >= 0
               ? Number((pre.closest(".domvec-chatui-block") as HTMLElement).dataset.line) : -1),
         path: ctx.sourcePath || "",
       });
-      pre.appendChild(runButton(el.ownerDocument, () => host.onRunFence(req())));
+      const bar = el.ownerDocument.createElement("div");
+      bar.className = "domvec-reading-fence-bar";
+      bar.appendChild(runButton(el.ownerDocument, () => host.onRunFence(req())));
       const term = host.onTerminalFence ? termButton(el.ownerDocument, () => host.onTerminalFence!(req())) : null;
-      if (term) pre.appendChild(term);
-      if (host.onOpenFence) pre.appendChild(openButton(el.ownerDocument, () => host.onOpenFence!(req())));
-      if (host.onUnnestFence) pre.appendChild(unnestButton(el.ownerDocument, () => host.onUnnestFence!(req())));
+      if (term) bar.appendChild(term);
+      if (host.onOpenFence) bar.appendChild(openButton(el.ownerDocument, () => host.onOpenFence!(req())));
+      if (host.onUnnestFence) bar.appendChild(unnestButton(el.ownerDocument, () => host.onUnnestFence!(req())));
       // The `cell:` slot's extensions (G-240): pull out, complete, any other.
-      for (const b of cellControls(req, el.ownerDocument)) pre.appendChild(b);
+      for (const b of cellControls(req, el.ownerDocument)) bar.appendChild(b);
+      pre.appendChild(bar);
       if (host.onRowsFence && /^py(thon3?)?$/.test(lang)) {
         const r = req();
         // After the block is in the document: a chat block is rendered first, attached after.

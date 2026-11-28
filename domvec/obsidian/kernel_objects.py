@@ -472,6 +472,17 @@ if "Chat" not in globals():
             if cur: out.append(cur)
             for m in out: m["content"] = m["content"].strip()
             return out
+        def send(self, prompt, note=None, system=None):
+            """Stream `prompt` through the target markdown notebook's ` ```chat ` cell in-context (`G-452`)."""
+            target = str(note or globals().get("_domvec_note") or "").strip()
+            _domvec_asks.append({
+                "chat_send": {
+                    "prompt": str(prompt),
+                    "note": target,
+                    "system": None if system is None else str(system),
+                }
+            })
+            return {"asked": "chat_send", "note": target, "prompt": str(prompt)[:120], "pending": True}
         def __repr__(self):
             return "Chat(turns of the note)"
     Chat = _Chat()

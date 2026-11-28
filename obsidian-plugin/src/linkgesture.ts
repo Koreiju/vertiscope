@@ -1,33 +1,11 @@
 /**
- * The `[]()` gesture (`R-1`..`R-4`), in the reader's words: *"when the sequence
- * of four `[]()` symbols are typed, the entry in the square brackets acts as a
- * semantic retrieval feature, and the results are shown in some new
- * filled/scrollable whitespace immediately below the line such that the
- * remainder of the markdown panel editable lines are uninterrupted in
- * rendering as a cohesive unit. Once a scrolled result is clicked, the link is
- * infilled between the empty parentheses."*
+ * Unified vertical `[]()` retrieval UI (`R-1`..`R-5`, `G-454`; PLUGIN_GOAL 201 g).
  *
- * The design note (PLUGIN_GOAL, "trigger yes, layout no") settled the shape
- * before this was built: `EditorSuggest` has the right trigger but renders a
- * floating container that COVERS the lines below; a CodeMirror 6 **block
- * widget** is inserted into the document's flow, so the editor reflows around
- * it and every line below moves down by its height. Block decorations must
- * come from a state field (CM6 refuses them from a view plugin), so:
- *
- *   - `field` holds where the gesture is -- the line it sits under and the
- *     empty `()` to infill -- mapped through every edit;
- *   - a view plugin watches the cursor and opens or closes the gesture;
- *   - the widget's DOM is owned by a `Results` controller that survives
- *     re-decoration (its `eq` is identity), so results that arrive or are
- *     scrolled in are appended in place and the reader's scroll is kept.
- *
- * Retrieval is the workspace's one ranked list (`/search`, `G-69`'s offset
- * paging as the list nears its bottom): web pages, vault notes and source
- * files alike (`R-5`) -- this gesture adds no second index.
- *
- * Planted `plantOverlay`: the results are drawn as a floating overlay, the
- * `EditorSuggest` shape the design note rejected -- the live check must see
- * the line below NOT move and the results cover it.
+ * Matches the 3D `SearchField` (`searchfield.ts`) in representation and
+ * controls -- `showing [k] / [n] results · X retrieved of Y matching`, web
+ * `search` trigger, rank badges, `≈` similar-to-result pivot, soft scroll
+ * brightness (`stripLight`), and live 3D graph hover fly-to / billboard preview
+ * -- laid out as a vertically scrolled block widget inside the markdown editor.
  */
 import { Extension, StateEffect, StateField, EditorState } from "@codemirror/state";
 import {
@@ -35,16 +13,15 @@ import {
 } from "@codemirror/view";
 
 import { gestureIn } from "./gesture";
+import { fieldBounds, softIndex, stripLight, visibleCount } from "./searchfield";
 import { Sidecar } from "./sidecar";
 import { SearchHit } from "./types";
 
 export interface Gesture {
-  /** Where `()`'s inside is: the link goes here. */
   at: number;
   query: string;
 }
 
-/** Where the cursor makes a gesture, if it does. */
 export function gestureAt(state: EditorState): Gesture | null {
   const sel = state.selection.main;
   if (!sel.empty) return null;
@@ -65,97 +42,210 @@ export interface GestureStats {
   opened: number;
   pages: number;
   infilled: number;
+  hovers: number;
+  similars: number;
   last: any;
 }
 
 export interface GestureHost {
   sidecar: Sidecar;
-  /** Where a hit's link points: its note in the vault when the page has one. */
   destination(hit: SearchHit): string;
   stats: GestureStats;
   plantOverlay: boolean;
-  /** A gesture opened: a moment to learn which pages have notes. */
   onOpen?: () => void;
-  /** A result was infilled: the note now holds a retrieval link (G-7). */
   onInfill?: () => void;
+  onHoverHit?: (hit: SearchHit | null) => void;
+  onRightHit?: (hit: SearchHit) => void;
+  onWebSearch?: (query: string) => void;
 }
 
-/** The results under one gesture: the DOM, the pages fetched so far, more on scroll. */
 class Results {
   readonly dom: HTMLElement;
   private list: HTMLElement;
   private head: HTMLElement;
+  private kInput: HTMLInputElement;
+  private nInput: HTMLInputElement;
+  private matchEl: HTMLElement;
   private hits: SearchHit[] = [];
   private loading = false;
   private done = false;
   private token = 0;
-  /** Where the server's ranked list resumes (its own count, not ours). */
   private offset = 0;
   private wanted = false;
-  private static PAGE = 10;
+  private k = 20;
+  private total = 50;
+  private matching = 0;
+  private refCid = "";
+  private activeQuery: string;
+  private static PAGE = 12;
 
-  constructor(private host: GestureHost, private view: EditorView, readonly query: string,
-              private infill: (hit: SearchHit) => void, overlay: boolean) {
+  constructor(
+    private host: GestureHost,
+    private view: EditorView,
+    readonly query: string,
+    private infill: (hit: SearchHit) => void,
+    overlay: boolean,
+  ) {
+    this.activeQuery = query;
     this.dom = document.createElement("div");
-    this.dom.className = "domvec-linkgesture" + (overlay ? " domvec-linkgesture-overlay" : "");
+    const legacy = !!(window as any).__domvecPlantUnunifiedRetrieval;
+    this.dom.className = "domvec-linkgesture"
+      + (overlay ? " domvec-linkgesture-overlay" : "")
+      + (legacy ? "" : " domvec-search3d-vertical");
     this.dom.setAttribute("contenteditable", "false");
-    this.head = this.dom.createDiv({ cls: "domvec-lg-head", text: `retrieving “${query}”…` });
-    this.list = this.dom.createDiv({ cls: "domvec-lg-list" });
-    // The editor must not take a click in here for a cursor move.
-    this.dom.addEventListener("mousedown", (e) => e.preventDefault());
-    this.list.addEventListener("scroll", () => {
-      if (this.list.scrollTop + this.list.clientHeight > this.list.scrollHeight - 40) void this.more();
+
+    this.head = this.dom.createDiv({ cls: "domvec-lg-head domvec-search3d-vbar" });
+    const queryBadge = this.head.createSpan({ cls: "domvec-search3d-vquery", text: `“${query}”` });
+    const webBtn = this.head.createEl("button", { cls: "domvec-search3d-go is-inline", text: "search" });
+    webBtn.title = "search the web too";
+    webBtn.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      this.host.onWebSearch?.(this.activeQuery);
     });
+    const countWrap = this.head.createSpan({ cls: "domvec-search3d-count" });
+    const mkNum = (v: number, cls: string) => {
+      const inp = countWrap.createEl("input", { cls: "domvec-search3d-k " + cls });
+      inp.type = "number"; inp.min = "1"; inp.step = "1"; inp.value = String(v);
+      inp.addEventListener("mousedown", (e) => e.stopPropagation());
+      return inp;
+    };
+    countWrap.createSpan({ text: "showing " });
+    this.kInput = mkNum(this.k, "is-k");
+    countWrap.createSpan({ text: "/" });
+    this.nInput = mkNum(this.total, "is-n");
+    countWrap.createSpan({ text: " results" });
+    this.matchEl = countWrap.createSpan({ cls: "domvec-search3d-match", text: "" });
+
+    if (legacy) {
+      countWrap.style.display = "none";
+      webBtn.style.display = "none";
+    }
+
+    this.kInput.addEventListener("change", () => {
+      const v = Math.max(1, Math.floor(Number(this.kInput.value) || this.k));
+      this.k = v;
+      if (this.k > this.total) this.total = this.k;
+      this.updateLights();
+    });
+    this.nInput.addEventListener("change", () => {
+      const v = Math.max(1, Math.floor(Number(this.nInput.value) || this.total));
+      this.total = v;
+      if (this.hits.length < this.total && !this.done) void this.more();
+      this.updateLights();
+    });
+
+    this.list = this.dom.createDiv({ cls: "domvec-lg-list domvec-search3d-vstrip" });
+    this.dom.addEventListener("mousedown", (e) => {
+      if ((e.target as HTMLElement)?.tagName !== "INPUT") e.preventDefault();
+    });
+    this.list.addEventListener("scroll", () => {
+      this.updateLights();
+      if (this.list.scrollTop + this.list.clientHeight > this.list.scrollHeight - 48) void this.more();
+    });
+    this.list.addEventListener("mouseleave", () => this.host.onHoverHit?.(null));
+
+    const pivotSimilar = (hit: SearchHit, title: string) => {
+      this.refCid = hit.cid;
+      this.activeQuery = `≈ ${title.slice(0, 48)}`;
+      queryBadge.setText(this.activeQuery);
+      this.hits = [];
+      this.offset = 0;
+      this.done = false;
+      this.list.empty();
+      this.host.stats.similars = (this.host.stats.similars || 0) + 1;
+      void this.more();
+    };
+    (this as any)._pivotSimilar = pivotSimilar;
+
     void this.more();
   }
 
   get count(): number { return this.hits.length; }
 
+  private updateLights(): void {
+    if ((window as any).__domvecPlantUnunifiedRetrieval) return;
+    const items = this.list.children;
+    const winLen = Math.min(items.length, this.k);
+    if (!winLen) return;
+    const span = Math.max(0, this.list.scrollHeight - this.list.clientHeight);
+    const frac = span > 0 ? this.list.scrollTop / span : 0;
+    const shown = visibleCount(frac, winLen);
+    const soft = softIndex(frac, winLen);
+    for (let i = 0; i < items.length; i++) {
+      const el = items[i] as HTMLElement;
+      const light = i < winLen ? stripLight(i, shown, soft) : 0.16;
+      el.style.opacity = String(Math.max(0.42, light));
+      el.toggleClass("is-front", i === Math.max(0, Math.round(soft) - 1));
+    }
+    const { k, n } = fieldBounds(this.k, this.total, this.matching || this.hits.length);
+    if (document.activeElement !== this.kInput) this.kInput.value = String(k);
+    if (document.activeElement !== this.nInput) this.nInput.value = String(n);
+    this.matchEl.setText(this.hits.length ? ` · ${this.hits.length} retrieved of ${Math.max(this.matching, this.hits.length)} matching` : "");
+  }
+
   async more(): Promise<void> {
     if (this.done) return;
-    // A scroll while a page is on its way is a request, not noise: it is
-    // answered when that page lands. Dropped, the list sat at its first page
-    // whenever the sidecar was slow (20 s+ after a plugin reload, live).
     if (this.loading) { this.wanted = true; return; }
     this.wanted = false;
     this.loading = true;
     const mine = ++this.token;
-    // Plain triple retrieval (PLUGIN_GOAL 135(a): "I don't think we should
-    // need heuristics on which level the retrieval acts on ... a regular
-    // triple-retrieval mechanism with a properly engineered pagerank"): no
-    // coarse lead-only filter -- every chunk, group member or lead, ranked by
-    // the one score (lexical + semantic + PageRank + content). Planted
-    // `__domvecPlantGestureCoarse`: leads only, as before.
     const coarse = !!(globalThis as any).__domvecPlantGestureCoarse;
-    const got = await this.host.sidecar.search(this.query, { k: Results.PAGE, offset: this.offset, coarse });
+    const got: any = this.refCid
+      ? await this.host.sidecar.similar(this.refCid, this.total)
+      : await this.host.sidecar.search(this.query, { k: Results.PAGE, offset: this.offset, coarse });
     this.loading = false;
     if (mine !== this.token) return;
-    // The end of the list is the SERVER's word (`more`), never a page that did
-    // not arrive: a search that timed out read as "no more", and the list
-    // stopped at its first page (live, 2026-10-11).
-    if (!got) { this.head.setText(`the sidecar did not answer -- scroll to ask again`); return; }
+    if (!got || !Array.isArray(got.hits)) {
+      this.matchEl.setText(" · sidecar did not answer");
+      return;
+    }
+    if (this.refCid) this.done = true;
     this.offset += got.hits.length;
-    if (!got.hits.length || got.more === false) this.done = true;
-    const fresh = got.hits.filter((h) => !this.hits.some((x) => x.cid === h.cid));
+    if (typeof got.n === "number" && got.n > this.matching) this.matching = got.n;
+    if (!got.hits.length || got.more === false || this.hits.length >= this.total) this.done = true;
+    const fresh: SearchHit[] = got.hits.filter((h: SearchHit) => !this.hits.some((x) => x.cid === h.cid));
     this.host.stats.pages++;
-    for (const hit of fresh) this.row(hit);
-    this.hits.push(...fresh);
-    this.head.setText(this.hits.length
-      ? `${this.hits.length}${this.done ? "" : "+"} for “${this.query}” · click one to link it`
-      : `nothing for “${this.query}”`);
+    for (const hit of fresh) this.row(hit, this.hits.length + 1), this.hits.push(hit);
+    this.updateLights();
     this.view.requestMeasure();
-    // Scrolling is how the reader asks for more, so the list has to be able
-    // to scroll: fill it past its own height first.
-    if (!this.done && ((this.dom.isConnected && this.list.scrollHeight <= this.list.clientHeight) || this.wanted)) void this.more();
+    if (!this.done && this.hits.length < this.total && ((this.dom.isConnected && this.list.scrollHeight <= this.list.clientHeight) || this.wanted)) {
+      void this.more();
+    }
   }
 
-  private row(hit: SearchHit): void {
-    const el = this.list.createDiv({ cls: "domvec-lg-hit" });
+  private row(hit: SearchHit, rank1: number): void {
+    const legacy = !!(window as any).__domvecPlantUnunifiedRetrieval;
+    const el = this.list.createDiv({ cls: legacy ? "domvec-lg-hit" : "domvec-lg-hit domvec-search3d-item is-vertical" });
     el.dataset.cid = hit.cid;
-    const first = (hit.preview || "").split("\n").find((l) => l.trim()) || hit.url;
-    el.createDiv({ cls: "domvec-lg-title", text: first.slice(0, 120) });
-    el.createDiv({ cls: "domvec-lg-sub", text: `${where(hit.url)} · ${hit.score.toFixed(3)}` });
-    el.addEventListener("click", () => this.infill(hit));
+    const first = ((hit.preview || "").split("\n").find((l) => l.trim()) || hit.url).replace(/^#+\s*/, "").trim();
+    if (!legacy) {
+      el.createSpan({ cls: "domvec-search3d-item-rank", text: String(rank1) });
+    }
+    const body = el.createDiv({ cls: "domvec-search3d-item-body" });
+    body.createDiv({ cls: "domvec-lg-title domvec-search3d-item-label", text: first.slice(0, 120) });
+    const scoreNum = typeof hit.score === "number" ? hit.score : 0;
+    body.createDiv({ cls: "domvec-lg-sub", text: `${where(hit.url)} · ${scoreNum.toFixed(3)}` });
+    if (!legacy) {
+      const sim = el.createSpan({ cls: "domvec-search3d-item-similar", text: "≈" });
+      sim.title = "similar to this result";
+      sim.addEventListener("click", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        (this as any)._pivotSimilar(hit, first);
+      });
+    }
+    el.addEventListener("mouseenter", () => {
+      this.host.stats.hovers = (this.host.stats.hovers || 0) + 1;
+      this.host.onHoverHit?.(hit);
+    });
+    el.addEventListener("contextmenu", (e) => {
+      if (!this.host.onRightHit) return;
+      e.preventDefault(); e.stopPropagation();
+      this.host.onRightHit(hit);
+    });
+    el.addEventListener("click", () => {
+      this.host.onHoverHit?.(null);
+      this.infill(hit);
+    });
   }
 }
 
@@ -182,8 +272,6 @@ export function linkGesture(host: GestureHost): Extension {
     },
   });
 
-  // Computed from the STATE (a block may not come from a view plugin), with
-  // the document in hand to place the block at the end of the gesture's line.
   const blocks = EditorView.decorations.compute([field], (state): DecorationSet => {
     const open = state.field(field);
     if (!open) return Decoration.none;
@@ -195,7 +283,6 @@ export function linkGesture(host: GestureHost): Extension {
     return Decoration.set([Decoration.widget({ widget: new ResultsWidget(open.results), block: true, side: 1 }).range(line.to)]);
   });
 
-  /** Gestures the reader dismissed, by place and query, so Esc stays dismissed. */
   let dismissed = "";
 
   const watch = ViewPlugin.fromClass(class {
@@ -206,8 +293,6 @@ export function linkGesture(host: GestureHost): Extension {
 
     private check() {
       window.clearTimeout(this.timer);
-      // Typing settles before a query is asked: one search per pause, not
-      // one per keypress.
       this.timer = window.setTimeout(() => this.settle(), 250);
     }
 
@@ -219,15 +304,16 @@ export function linkGesture(host: GestureHost): Extension {
       if (now && key === dismissed) return;
       if (now && open && open.query === now.query && open.at === now.at) return;
       if (!now && !open) return;
-      if (!now) { view.dispatch({ effects: setGesture.of(null) }); return; }
+      if (!now) { host.onHoverHit?.(null); view.dispatch({ effects: setGesture.of(null) }); return; }
       const infill = (hit: SearchHit) => {
         const cur = view.state.field(field, false);
         if (!cur) return;
         const dest = host.destination(hit);
-        // Between the parentheses -- whatever the reader had typed there is
-        // empty by construction (the gesture needs `()`).
-        view.dispatch({ changes: { from: cur.at, to: cur.at, insert: dest }, effects: setGesture.of(null),
-                        selection: { anchor: cur.at + dest.length + 1 } });
+        view.dispatch({
+          changes: { from: cur.at, to: cur.at, insert: dest },
+          effects: setGesture.of(null),
+          selection: { anchor: cur.at + dest.length + 1 },
+        });
         host.stats.infilled++;
         host.stats.last = { query: cur.query, cid: hit.cid, dest };
         view.focus();
@@ -247,6 +333,7 @@ export function linkGesture(host: GestureHost): Extension {
       const open = view.state.field(field, false);
       if (!open) return false;
       dismissed = `${open.at}:${open.query}`;
+      host.onHoverHit?.(null);
       view.dispatch({ effects: setGesture.of(null) });
       return true;
     },

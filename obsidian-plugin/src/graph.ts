@@ -643,7 +643,11 @@ export class GraphView extends ItemView {
       window.setTimeout(() => {
         if (this.nodeClickAt >= at - 400) return;
         if (this.craft?.nodeAt(x, y)) return;
-        const n = this.nodeAtScreen(x, y);
+        const n = (this.hover3dNode && Math.hypot(x - this.hover3dX, y - this.hover3dY) <= 4)
+          ? this.hover3dNode
+          : this.nodeAtScreen(x, y);
+        this.hover3dX = -1e9;
+        this.hover3dY = -1e9;
         if (n) { this.clickFallbackStats.used++; this.clickNode!(n); } else this.clickFallbackStats.none++;
       }, 0);
     });
@@ -842,14 +846,12 @@ export class GraphView extends ItemView {
       if (!h) { this.focusOn(null); this.hoverPanel(null); this.unspread(); return; }
       this.searchStats.strip_hovers++;
       this.spreadUrl(h.url);
-      // The node the search lit for this hit -- its chunk when drawn, else
-      // its page (`resolveSearch`) -- flown to as the top result is; a chunk
-      // also opens its panel. `highlightChunk` flies only to a DRAWN chunk,
-      // and in url view a result's chunk is not drawn: no flight at all.
+      this.resolveSearch();
       const st = this.searchState;
       const i = st ? st.hits.findIndex((x) => x.cid === h.cid) : -1;
       const n = i >= 0 ? st!.targets[i] : null;
       if (this.plantStripNoFlight) return;
+      if (this.panelsOn === "flyto") this.ensureFlytoReady();
       if (!n) { this.highlightChunk(h.cid, h.url, h.cid); return; }
       this.focusOn(n);
       // The panels toggle governs the strip as it governs the browser hover
@@ -3334,7 +3336,10 @@ export class GraphView extends ItemView {
     const isChunk = !!target && target.level !== "page" && target.level !== "path";
     if (cid && url) { this.hoverAskAt = performance.now(); this.hoverAskUrl = url; }
     if (!cid || isChunk) {
-      this.focusOn(cid ? (focusTarget || target) : null);
+      if (!cid || this.panelsOn === "flyto" || (this as any).plantFlyInRightClick) {
+        if (cid && this.panelsOn === "flyto") this.ensureFlytoReady();
+        this.focusOn(cid ? (focusTarget || target) : null);
+      }
       this.hoverPanel(cid ? target : null);
     } else {
       // Off every drawn chunk (the page node is only the fallback): the
@@ -3438,8 +3443,26 @@ export class GraphView extends ItemView {
     this.panelModeStats.right_opened++;
     void this.openBillboard(target, false, true);
   }
+  /** Ensure `panels: fly-to` has active first-person ego flight ready (`G-445` post-search/map hardening). */
+  private ensureFlytoReady(): void {
+    if (this.panelsOn !== "flyto" || !this.agent || this.plantNo3DHoverFly || (this as any).plantKeepMapOnFlyto) return;
+    if (this.agent.mode === "map") {
+      this.agent.setMode("ego");
+      this.zoomState = { zoomedFor: "", zoomedAt: -1e9 };
+    }
+    if (this.agent.view === "third") this.agent.setView("first");
+    if (this.agent.paused) this.agent.paused = false;
+    if (!(this.agent.throttle > 0)) this.agent.setThrottle(0.25);
+  }
+
   setPanelsOn(mode: "flyto" | "rightclick"): void {
     this.panelsOn = mode;
+    // G-445 (PLUGIN_GOAL 200 a, 201 h): `panels: fly-to` ensures ego flight mode is
+    // active so hovered browser panels and 3D nodes actually fly into focus.
+    if (mode === "flyto") {
+      this.zoomState = { zoomedFor: "", zoomedAt: -1e9 };
+      this.ensureFlytoReady();
+    }
     try { window.localStorage.setItem("domvec.panelsOn", mode); } catch { /* a convenience only */ }
   }
 
@@ -3779,7 +3802,17 @@ export class GraphView extends ItemView {
 
   private flyTo(n: any, waited = 0): void {
     const g: any = this.graph;
-    if (!g) return;
+    if (!g || !n) return;
+    const drawn = g.graphData().nodes as any[];
+    if (n.virtual && n.base?.id) {
+      const liveBase = drawn.find((x) => String(x.id) === String(n.base.id));
+      if (liveBase && Number.isFinite(liveBase.x)) {
+        n.base = liveBase; n.x = liveBase.x; n.y = liveBase.y; n.z = liveBase.z ?? 0;
+      }
+    } else if (n.id !== undefined && !drawn.includes(n)) {
+      const live = drawn.find((x) => String(x.id) === String(n.id));
+      if (live) n = live;
+    }
     // A node just placed from the store has no position until the forces
     // tick it, and the hover that asked for it has already stopped asking:
     // returning here left the camera where it was, with the panel open
@@ -7243,6 +7276,13 @@ export class GraphView extends ItemView {
     const to = new Set<string>();
     for (const m of text.matchAll(/\{([^{}\n]+)\}/g)) { const p = byBase.get(m[1].split("#")[0].trim().toLowerCase()); if (p && p !== path) to.add(p); }
     for (const m of text.matchAll(/Vault[.]read\(\s*["']\/?([^"'\n]+)["']/g)) { const p = m[1].endsWith(".md") ? m[1] : m[1] + ".md"; if (egoPaths.includes(p) && p !== path) to.add(p); }
+    for (const m of text.matchAll(/(?<!!)\[[^\]]*\]\(([^)\s]+)\)/g)) {
+      if (/^(https?:|mailto:|code:)/i.test(m[1])) continue;
+      let dec = m[1];
+      try { dec = decodeURIComponent(m[1].replace(/^vault:\/\/[^/]+\//i, "")); } catch { /* keep */ }
+      const p = dec.split("#")[0].replace(/^\/+/, "");
+      if (egoPaths.includes(p) && p !== path) to.add(p);
+    }
     this.egoRefs.set(path, { at: f.stat.mtime, to: [...to] });
     return [...to];
   }
@@ -7514,32 +7554,119 @@ export class GraphView extends ItemView {
   // would move the node out from under the pointer. Reads the trie address of
   // the node drawn; writes nothing. Planted `plantNo3DHoverPanel`: no preview.
   plantNo3DHoverPanel = false;
-  hover3dStats = { asked: 0, chunk: 0, page: 0, none: 0, over_panel: 0, last: "" };
+  /** Planted (G-445): 3D hover opens billboard previews without camera flight. */
+  plantNo3DHoverFly = false;
+  hover3dStats: Record<string, any> = { asked: 0, chunk: 0, page: 0, none: 0, over_panel: 0, flown: 0, panel_fly: 0, last: "" };
   private hover3dAt = 0;
   private hover3dId = "";
+  private hover3dNode: any = null;
+  private hover3dPanelId = "";
+  private hover3dX = -1e9;
+  private hover3dY = -1e9;
   private hover3d(e: PointerEvent): void {
     if (this.plantNo3DHoverPanel || e.buttons) return;
-    // Over a card or a billboard, the pointer is not on the 3D view.
     const over = e.target as HTMLElement | null;
-    if (over?.closest?.(".domvec-plane-card, .domvec-bb, .domvec-graph-bar, .domvec-search3d")) { this.hover3dStats.over_panel++; return; }
+    if (over?.closest?.(".domvec-plane-card, .domvec-bb, .domvec-graph-bar, .domvec-search3d")) {
+      this.hover3dStats.over_panel++;
+      // Clear 3D node stationary guard when entering an overlay so returning to
+      // the same 3D node after crossing a billboard/search strip re-flies (`G-445`).
+      this.hover3dId = "";
+      this.hover3dX = -1e9;
+      this.hover3dY = -1e9;
+      if (this.panelsOn === "flyto" && !this.plantNo3DHoverFly && this.graph) {
+        const bbEl = over.closest(".domvec-bb") as HTMLElement | null;
+        const bCard = over.closest(".domvec-browser-card") as HTMLElement | null;
+        const pCard = !bCard ? (over.closest(".domvec-panel-card") as HTMLElement | null) : null;
+        const nodes = this.graph.graphData().nodes as any[];
+        let pNode: any = null;
+        if (bbEl) {
+          for (const [id, entry] of this.billboards.entries()) {
+            if ((entry as any)?.el === bbEl) {
+              const baseId = String(id).split("|")[0];
+              const bbUrl = String((entry as any)?.node?.url || "").split("#")[0];
+              pNode = nodes.find((nd) => String(nd.id) === baseId)
+                || (bbUrl && nodes.find((nd) => nd.level === "page" && String(nd.url).split("#")[0] === bbUrl))
+                || null;
+              break;
+            }
+          }
+        } else if ((bCard || pCard) && !over.closest("webview")) {
+          const bPath = (bCard || pCard)!.dataset.path || "";
+          const bps: any[] = ((window as any).__domvecBrowsers?.browserPanels) || [];
+          const bp = bps.find((x) => x && x.path === bPath);
+          const nbs: any[] = ((window as any).__domvecNotebookBrowsers) ? Array.from((window as any).__domvecNotebookBrowsers) : [];
+          const nb = !bp && bPath ? nbs.find((x) => x && x.sourcePath === bPath) : null;
+          const bView = bp?.view?.() || nb?.view;
+          const cid = bp?.chunkShown ? String(bp.chunkShown).split("|")[0] : "";
+          const url = String(bView?.shownUrl?.() || "").split("#")[0];
+          pNode = (cid && nodes.find((nd) => String(nd.id) === cid))
+            || (url && nodes.find((nd) => nd.level === "page" && String(nd.url).split("#")[0] === url))
+            || null;
+        }
+        if (pNode && Number.isFinite(pNode.x) && this.hover3dPanelId !== String(pNode.id)) {
+          this.hover3dPanelId = String(pNode.id);
+          this.hover3dStats.panel_fly = (this.hover3dStats.panel_fly || 0) + 1;
+          this.ensureFlytoReady();
+          this.focusOn(pNode);
+        }
+      }
+      return;
+    }
+    this.hover3dPanelId = "";
     const now = performance.now();
     if (now - this.hover3dAt < 60) return;
     this.hover3dAt = now;
+    // Stationary-pointer guard (G-445): while flying towards `hover3dId`, camera
+    // motion shifts the node on screen under an unmoving cursor. Only re-pick
+    // when the reader actually moves the pointer >= 3 px.
+    const movedPx = Math.hypot(e.clientX - this.hover3dX, e.clientY - this.hover3dY);
+    if (this.hover3dId && movedPx < 3) return;
+    this.hover3dX = e.clientX;
+    this.hover3dY = e.clientY;
     this.hover3dStats.asked++;
     const n = this.nodeAtScreen(e.clientX, e.clientY);
     const chunk = !!n && n.level !== "page" && n.level !== "path" && !!n.url;
     if (chunk) {
       this.hover3dStats.chunk++;
       this.hover3dStats.last = String(n.id);
+      const prevId = this.hover3dId;
       this.hover3dId = String(n.id);
+      this.hover3dNode = n;
+      if (this.panelsOn === "flyto" && !this.plantNo3DHoverFly && prevId !== this.hover3dId) {
+        this.hover3dStats.flown = (this.hover3dStats.flown || 0) + 1;
+        this.ensureFlytoReady();
+        this.focusOn(n);
+      }
       this.hoverPanel(n);
       return;
     }
+    if (n && n.level === "page" && Number.isFinite(n.x)) {
+      this.hover3dStats.page++;
+      const prevId = this.hover3dId;
+      this.hover3dNode = n;
+      if (this.panelsOn === "flyto" && !this.plantNo3DHoverFly) {
+        this.hover3dId = String(n.id);
+        if (prevId !== this.hover3dId) {
+          this.hover3dStats.flown = (this.hover3dStats.flown || 0) + 1;
+          this.ensureFlytoReady();
+          this.focusOn(n);
+        }
+      } else if (this.hover3dId) {
+        this.hover3dId = "";
+      }
+      if (this.hoverBb) this.hoverPanel(null);
+      return;
+    }
     if (n) this.hover3dStats.page++; else this.hover3dStats.none++;
-    if (this.hover3dId) { this.hover3dId = ""; this.hoverPanel(null); }
+    this.hover3dNode = null;
+    if (this.hover3dId) { this.hover3dId = ""; this.focusOn(null); this.hoverPanel(null); }
   }
   private hover3dLeave(): void {
-    if (this.hover3dId) { this.hover3dId = ""; this.hoverPanel(null); }
+    this.hover3dX = -1e9;
+    this.hover3dY = -1e9;
+    this.hover3dPanelId = "";
+    this.hover3dNode = null;
+    if (this.hover3dId) { this.hover3dId = ""; this.focusOn(null); this.hoverPanel(null); }
   }
   /**
    * The node a click at (x, y) means, as the HOVER shows it -- not as the

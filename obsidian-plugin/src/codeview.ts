@@ -110,9 +110,10 @@ export class CodeView extends ItemView {
           EditorView.lineWrapping,
           keymap.of([{ key: "Mod-s", preventDefault: true, run: () => { void this.save(); return true; } }]),
           EditorView.updateListener.of((u) => { if (u.docChanged) this.renderHead(); }),
-          // VS Code-grade (PLUGIN_GOAL 133): see codecell.ts.
+          // VS Code-grade (PLUGIN_GOAL 133, 200 e): see codecell.ts.
           ...codeCellExtensions({
             codeNodes: (q) => this.sidecar.codeNodes(q),
+            codeIntel: (b) => this.sidecar.codeIntel(b),
             openCode: (u) => { const P: any = (this.app as any).plugins.plugins["domvec-bridge"]; void P?.openCode?.(u); },
           }),
         ],

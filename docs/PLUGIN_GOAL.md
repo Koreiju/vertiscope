@@ -6890,6 +6890,317 @@ it is the item deferred on 2026-11-24 and stays open.* *Built the same day*
 *out into a card of its own, the source keeping a compiled link in its place; the card*
 *dropped on a panel goes back in.*
 
+### 200. (2026-11-27) Chunks-view hover fly-to; ego cell-graph connectivity & collapsed lone cells; persistent quantized chat context; unjumbled browser chrome; fence-adaptive VS Code tools; centralized `+chat`
+
+> Hovering on nodes in chunks view doesn't let me fly towards the nodes as
+> would be expected (please refresh yourself on the docs and the code).
+> Panels: fly-to should allow for the fly-to feature to work on hovered browser
+> panels and hovered nodes in the 3D graph.
+>
+> Also, we need deeper connectivity between our cell graph. Currently, there
+> are no links between the ego panel and the new cells that are created. If
+> lone cells that are unlinked to the ego are collapsed, they must be attached
+> to a regular markdown heading that lists the different types of cells open,
+> and then their [title names](with their links per our standard formulation.
+> please check the docs and specs on this one too).
+>
+> Also, we need to persist chat context for our quantized chat cell models.
+> That means each call and response are not one-shot, but also adapts to the
+> pinned chunks while tracking the chat context.
+>
+> Also, in the pasted image for an open browser cell, the buttons on the
+> markdown panel are way too jumbled together.
+>
+> in the second pasted image, I must make a clear separation between some
+> things in our code artifacts. we need to have features like auto-suggest etc
+> that would carry over from standard extensions and tool-based features that
+> would come from vscode. however, all vscode-based features must still be
+> adaptive to the
+>
+> ```code cell
+> the code in here
+> ```
+>
+> type of structure. Also, the chat cell feature is broken in the code cell
+> view (third image).
+>
+> Also, in the fourth pasted image, and in general, we should keep the "chat"
+> feature centralized to a "+chat" button at the same level as the other
+> buttons, not in two different places at once that are different from the
+> uniform "+cell" types, which must be standardized for all cells.
+
+*Read as (200), mine:*
+- *(a) `G-445`: `panels: fly-to` flies the camera towards hovered nodes in 3D
+  chunks view (`hover3d`, overriding 192's my-reading exclusion of flight) as
+  well as hovered browser panels (`BrowserView`, plane `BrowserPanel`, and
+  notebook ```browser cells).*
+- *(b) `G-446`: New cells connect to `domvec/ego.md` (with `cockpit.card`
+  participating in plane edge rendering), and collapsed lone cells attach under
+  standard ATX headings per cell type (`## Code cells`, `## Browser cells`,
+  `## Terminal cells`, `## Chat cells`, `## Markdown cells`) as standard
+  markdown links `- [title](encodeURI(relPath))` (`main.ts` `destination`,
+  `vault.py` `_LINK`).*
+- *(c) `G-444`: Quantized chat cell calls (`POST /chat_stream` on CUDA) keep
+  multi-turn session history keyed by note/session and inject newly pinned
+  chunks and changed cell context in O(delta), at most once per chunk.*
+- *(d) `G-443`: `+ chat` is centralized in the bottom `+ cell` bar
+  (`cellbar.ts`: `+ code`, `+ terminal`, `+ browser cell`, `+ chat`) across all
+  cells; the duplicate corner `.domvec-plus-chat` badge (superseding `G-424`'s
+  placement) and the broken floating `.domvec-nbchat` overlay (`L-2`) are
+  retired; 2D browser card split/exit controls sit cleanly spaced in one strip.*
+- *(e) `G-447`: Code fences keep a clean single-row header toolbar separated
+  from code lines and Obsidian's language flair, while VS Code editor features
+  (auto-suggest via Jedi + kernel + CPG, signature help, hover docs, F12 /
+  Mod-click go-to-definition, Mod-/ comment toggle, Tab indent, bracket
+  matching/closing, inline syntax diagnostics) activate adaptively inside
+  fenced code cells without hijacking markdown prose outside fences.*
+
+### 201. (2026-11-27) Cell-graph pull-apart & unified panel/graph dialect; deprecating purple `slate_N` variable notes; cursor-exit code & tool evaluation; full low-latency VS Code helpers; cross-notebook variable DAG compilation; ego default system prompt & chat tool calls; recursive interactive `tool` cells with back/forward & vanishing upward history; unified vertical retrieval UI
+
+> Thanks. Now, we need to deprecate this UI form. Instead, we need to adhere to
+> our new treatment of pulling apart individual cells in their interactive form.
+> There has been some good work done on context and we're ready to take it to
+> the next level. We want a graph view that pulls cells together and apart. We
+> show links between the cells, but the cells remain in their panel form and can
+> be changed accordinly, as regular, nothing special done except for showing
+> visible links. Then, we apply the standard linking between [cell title](cell
+> link) form in obsidian as docs. Also, we should standardize some things about
+> our graph view and panel view dialect. I think it's important to keep both,
+> and I see *some* leftover functionality. I think what would work best is the
+> selected node has its panel compiled and shown as its unified cell, then
+> right-clicking the panel node (the purple node thing in the very top, which is
+> supposed to update according to the title of the main header of the markdown
+> for consistency, otherwise removing it entirely and allowing for the graph
+> view to be a recursive compilation over things like markdown fields with links
+> to code artifacts and assuming headers contain their text chunks. We would
+> also be able to then show the code dependency graph and variable links between
+> cells as the same pure-graph form, so that we can also represent our code
+> artifacts as graph based with links between the nodes. So, clicking on the
+> node compiles the markdown in sequence over the node containment on the
+> specialized ``` syntax and rendered cells. Also, we should only run the code
+> once the cursor is out of the ``` windows when writing code, since repeatedly
+> evaluating broken and incomplete code makes the current runtime go apeshit
+> (see the numbers of syntax errors). Also, code suggestions are nowhere close
+> to latency nor the truly complete 'vscode helper' standard. We need to
+> maximize on vscode helpers for our code interface to properly realize a good
+> small language model coding harness that hacks the graph-rag that comes free
+> from standard vscode tools. of course, this is just the idea. We won't cover
+> agent code editor stuff just yet, but that will come in handy when toolspaces
+> on interactive panels are also able to be defined as their own cells and have
+> a much more dynamic and closer direct interface link with porting the helper
+> functions to the pure-markdown cell interface itself. To the human, the
+> specialized ``` would render the interactive interface. We'll also end up
+> exposing external toolspaces that are more closely aligned with this adaptive
+> graph/cell dialect interface, again, much more closely procedurally rendered
+> on the cell/graph as the user/tool is interacted with. I guess that would then
+> instantiate the "tool" cell, which effectively exposes all actions that can be
+> taken on a given cell's interactive components, which allows for the
+> smolagents tool interfaces to stay slim and also retrievable/linkable in main
+> cells that essentially do just render the full context to the agent in
+> markdown.
+>
+> For browsers, this would mean tools dedicated to inter-chunk navigation like
+> 'next chunk' and 'previous chunk' and 'search page', but also interactive
+> thinks like "click". We should also leave room for more between-cell
+> computation interactions too. So variables in one notebook could be referenced
+> directly in others without special links or anything. Then, we truly take the
+> computation graph approach to code chunk sequencing in a standard program
+> compilation where variables that depend on variables from other notebooks are
+> computed before their own. We should also expose tool call cells on chat model
+> cells too so that we can port prompts from programs to chat models and see
+> their outputs streamed to their markdown notebooks in-context. We would then
+> also show the system prompt of each chat model cell, defaulting to what the
+> ego will be changed to, which is essentially the default system prompt of
+> instructions on how to instantiate our base interactive cells. We will have to
+> work more on how tool cells work because the way the chat model outputs the
+> base ```browser or even ```chat or wants to search or can make use of the
+> interactive yet markdown-pure fields where the output of the model would then
+> render the query of the tool context graph of the full set of tool cells
+> available to call, which would essentially be the recursive chunk next step in
+> the tool call graph. So, we could make tool cells like interactive content
+> panel tree things that are also recursively chunked and linked as a graph that
+> allows for a kind of in-place contextual navigation, either from the model
+> outputs or a user's direct interactions (where exiting the ``` fields would
+> then produce the call, similar to how the streamed tokens from a chat model
+> could work). Since tool cells are also specialized like this, linked calls on
+> the tool-chain are rendered in-place from chat model outputs and user
+> interactions, and simple tool navigations are also available. Since we're
+> talking smolagents here, we need each tool to almost in itself be as simply
+> designed as possible, like ({"browser":{"search":str, "back":bool,
+> "forward":bool, "chunks":bool}}, etc) or however. The chunks:bool is meant to
+> indicate the navigation to linked tools as booleans. We could actually likely
+> plan to build all of this together. So, it's really more than just an idea
+> when I really think about it. Traceback for code outputs could also be
+> included as inline renders and outputs from agents. The stack of model outputs
+> and tool calls would be hidden and navigable in a back-forward set of buttons
+> in the set of tool call cells. We could also add to the ego system prompt of
+> fundamental primary-facing tool calls and markdown instructions inline the
+> same way. Tool cells navigationally speaking on the markdown interaction side
+> need to be designed carefully to balance out the width and depth of tools
+> both, meaning that primitive tool calls on tool navigation could be
+> generalized to include navigating on tool chunks as well with, essentially, a
+> "browser" analogue as "back", "forward", "search" that could allow for
+> long-context exploration on tool calls, almost making the two main examples
+> interchangeable over the parent field and keeping the other basic functions
+> the same. Tool cells, then, should also include their own markdown
+> instructions to enable for improved agent responses in continuous call
+> workflows when we assume that we re-render the output of the agent inplace for
+> sequences of tool calls. tool call histories could be shown compactly as well
+> for sequences on procedural/recursive chunk renderings in markdown as well
+> (just above the main tool cell rendering itself), where the history would
+> append directly to the markdown above the tool cell (i repeat), the prompt
+> would be carried over hidden to the markdown or perhaps with a vanishing
+> upward scroll on repeated tool call outputs that can expand when the gap is
+> hovered.
+>
+> Also, we need to fix up our "slate_6" cell notes that are pure-purple and I
+> think the deprecated form of representing variables in place of our ```-style
+> code rendering cells etc... First image. In the third image, we should unify
+> our retrieval UI format to the same as the main retrieval function in the
+> search bar, where our results are the exact same scrollable results and
+> representations with the same features in the 3D graph, just scrolled
+> vertically instead of horizontally.
+>
+> Please don't forget to follow standard contextual procedures as they were
+> revealed in the CLAUDE.md and docs. Meaning verbatim, requirements, other docs
+> as necessary, and then the code and docs updates.
+
+*(Sent with five screenshots: (1-2) purple `slate 1..7` circle/pill headers and
+`slate_6 \n \t value` purple variable text; (3) `# [Psychic]()` inline retrieval
+block vs the horizontal 3D `SearchField` strip; (4-5) `slate 5` running
+incomplete `np.` mid-typing with `SyntaxError` output + toast spam `[447]`,
+`[456]`, `[465]` and autocomplete showing `abc import` / `abc numpy` instead of
+`numpy` members.)*
+
+*Read as (201), mine:*
+- *(a) `G-448`: Retire the purple `slate_N \n \t value` variable-note form in
+  favor of plain `# Heading` + fenced ` ``` ` cells; keep panel header nodes
+  synced to the note's main `# Heading`, right-click folding between compiled
+  panel form and recursive cell-graph node form (headers containing text chunks,
+  fences, `[cell title](cell link)` links, and variable-dependency edges), and
+  click compiling node containment into its unified panel.*
+- *(b) `G-449`: Gate reactive code auto-run (`AutoRun`, amending `G-419`) on the
+  cursor exiting the ` ``` ` fence window, eliminating mid-typing `SyntaxError`
+  kernel runs and `Notice` toast spam, and rendering code/agent tracebacks
+  inline.*
+- *(c) `G-450`: Upgrade fenced code-cell helpers to low-latency VS Code parity:
+  warm Jedi + live kernel/cross-notebook symbol completion without buffer-word
+  pollution on attribute access (`np.` -> `array`, `zeros`, `linalg`, cached
+  locally for `< 5 ms` prefix filtering), auto-imports, Python snippets,
+  signatures, and hover docs/values.*
+- *(d) `G-451`: Direct cross-notebook variable references and global topological
+  DAG compilation (resolving `O-5`): variables defined in one notebook are
+  referenced directly in others without `Vault.read`, drawn as graph edges, and
+  upstream cells across notebooks execute in topological order and bind their
+  values before downstream dependents.*
+- *(e) `G-452`: `domvec/ego.md` holds the default system prompt instructing how
+  to instantiate base interactive cells and primary tool calls; each ` ```chat `
+  cell displays/edits its system prompt (defaulting to `ego.md`'s) and supports
+  programmatic prompt streaming (`Chat.send`) + tool-call cell emission in
+  context.*
+- *(f) `G-453`: Interactive, recursively chunked ` ```tool ` cells (extending
+  `G-421`) with slim uniform smolagents dict schemas (`{"browser": {"search":
+  str, "click": str, "next_chunk": bool, "prev_chunk": bool, "back": bool,
+  "forward": bool, "chunks": bool}}` and uniform `search`/`back`/`forward`/
+  `chunks` across toolspaces), inline markdown instructions, cursor-exit and
+  chat-output in-place execution, `back`/`forward` stack buttons, and compact
+  markdown history appended directly above the ` ```tool ` cell with a vanishing
+  upward scroll that expands on hover.*
+- *(g) `G-454`: Unify the inline `[]()` retrieval block (`linkgesture.ts`) with
+  the 3D `SearchField` format (`showing k / n results · retrieved of matching`,
+  rank badges, `≈` similar pivot, soft scroll brightness, 3D hover fly-to and
+  billboard preview), scrolled vertically.*
+- *(h) Addendum on `G-445` (same session, 2026-11-27):*
+  > Also, panels-fly-to is broken again after a search and some more interactions
+
+  *Read as (201 h): harden `panels: fly-to` (`G-445`) so hover flights on 3D
+  nodes, search strip results, and browser/billboard panels remain responsive
+  after searches, page unfolds, Craft/map transitions, and hover-billboard
+  crossings.*
+
+### 202. Synchronized Antigravity + Claude handoff and parallel buildout (2026-11-28)
+
+> thanks. now, please track all the recent changes and pivots and my own
+> verbatim with you from yesterday and today. we will create a handoff document
+> for our claude agent on the updates so that we can synchronize our progress.
+> we can keep the handoff local to the root on our project. i would like you to
+> then consult the chat transcript's most recent progress in
+> "C:\Users\isaac\.claude\projects\C--Users-isaac-Documents-domvec\a9b349a5-0dd5-48a8-b034-fa7ab3b206b4.jsonl".
+> we should synchronize our work between here and with claude to make the most
+> of a common and unified direction forward that you and claude can work on in
+> parallel with each other. you can propose the initial unified work tasks and
+> their splits between yourself and claude, and claude and you can
+> intermittently update the shared ideas and goals with each other as you
+> progress on your tasks and updates to new goals and how they affect our
+> buildout. this, of course, should be balanced with the actual work being
+> properly and procedurally accomplished and tested without deviating too much
+> into debate, since the aim is to share a common goal to work towards and
+> verify *properly* with each other's feedback in mind.
+
+*Read as (202), mine:*
+- *(a) Maintain a canonical root synchronization document (`AGENT_HANDOFF.md`)
+  tracking Items `200`–`202`, the `G-443`–`G-454` pivots, and Claude's work
+  through `afc636d` (`G-433`–`G-442` in `a9b349a5-...jsonl`).*
+- *(b) Split upcoming work into module-disjoint parallel tracks for Antigravity
+  and Claude with intermittent checkpoint updates in `AGENT_HANDOFF.md`, keeping
+  execution procedural and verified via non-vacuous MCP `confirm` checks rather
+  than prolonged debate.*
+
+### 203. Shared single-instance Obsidian & MCP harness concurrency lease (2026-11-28)
+
+> Thanks. Now, also consider the case when you both will need to share the same
+> obsidian session between your two MCP plugin harnesses. We will have to solve
+> the concurrent MCP and control issue intelligently and concisely so that if
+> one agent is running actions on the obsidian plugin, that the other agent can
+> wait and deliberately return when the sidecar is free, or something of the
+> sort, since we will need to have only one instance of the plugin running at
+> any given time since memory bottlenecks are an issue, and so sharing is
+> caring... likely could be both built into the MCP harness and also advised in
+> the agent handoff in a way that keeps the MCP harness features completely
+> independent of any freehand code artifacts like the handoff, so that
+> information must only ever be shared by the harness itself within the
+> concurrency setting.
+
+*Read as (203), mine:*
+- *`G-455`: Enforce single-instance Obsidian + sidecar sharing across concurrent
+  MCP harnesses (`domvec.obsidian.mcp`, `live.py`, `controls.py`,
+  `session_lock.py`) using an OS kernel file lease (`.domvec/mcp_session.lock` +
+  `.domvec/mcp_session.json`), completely independent of `AGENT_HANDOFF.md` or
+  any vault markdown artifact: mutating/UI calls wait automatically up to
+  `wait_s` and execute once the peer releases, or deliberately return a
+  structured `{busy: true, session_lock, retry_after_s}` payload when busy past
+  `wait_s`; `obsidian_launch` reuses a healthy running instance by default
+  (`close_existing=False`); read-only backend & `live_health` queries remain
+  lock-free and report live `session_lock` state.*
+
+### 204. Re-centering `AGENT_HANDOFF.md` & localized constraints on the recent Nov 27–28 pivot (2026-11-28)
+
+> Please then go and review our agent handoff and the merge between the two
+> current code directions such that we put more emphasis on the more recent
+> pivot in terms of our own work in the past couple of days. that might also
+> include localizing constraints on work directions and the code that we will be
+> focusing on and splitting up work for.
+
+*Read as (204), mine:*
+- *(a) Prioritize the Nov 27–28 pivot (`Items 200`–`203`, `G-443`–`G-455`) as
+  the governing direction wherever it diverges from pre-pivot Nov 24–25 threads
+  (`G-399..G-442` / `O-1..O-11`).*
+- *(b) Explicitly freeze superseded/off-pivot surfaces (`slate_N` variable
+  stubs, `ego canvas.md`, `{ref}`/`[[wiki]]` editors, `HasTraits` socket
+  widgets, corner `+chat`, mid-fence timer `AutoRun`, unrelated 3D layout
+  archaeology) and localize both Antigravity's and Claude's work tracks onto the
+  exact module set of the new cell-graph / fenced VS Code Graph-RAG / recursive
+  ` ```tool ` / quantized chat dialect.*
+
+### 205. Claude takes Track B of the parallel split (2026-11-28)
+
+> We're pivoting in our direction to parallel work with our Carbon model in
+> antigravity. See the handoff in "C:\Users\isaac\Documents\domvec\AGENT_HANDOFF.md"
+
+*Read as (205), mine: Claude works Track B of `AGENT_HANDOFF.md` §5.2 (pull-apart
+cell-graph dialect, panel toolspaces as ` ```tool ` cells, the chat <-> tool loop),
+first doing its Step 0 (commit the verified `G-443`–`G-455` baseline).*
+
 ### Recovered verbatim (2026-11-22 inventory)
 
 *Every prompt in this session's own transcript (2026-09-12 to 2026-11-23 UTC,

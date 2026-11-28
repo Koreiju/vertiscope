@@ -113,17 +113,30 @@ def model(path: Optional[str] = None):
         return _MODEL[0]
 
 
-def stream(text: str, max_tokens: int = 400) -> Iterator[str]:
-    """The reply to `text`, piece by piece as llama.cpp makes it."""
+def stream(text_or_messages, max_tokens: int = 400) -> Iterator[str]:
+    """The reply to `text_or_messages` (a single user string or a multi-turn
+    `[{"role": ..., "content": ...}]` list, G-444), piece by piece on CUDA."""
     import time
     from smolagents.models import ChatMessage, MessageRole
+    role_map = {
+        "system": MessageRole.SYSTEM,
+        "user": MessageRole.USER,
+        "assistant": MessageRole.ASSISTANT,
+    }
     with _LOCK:
         _IN_USE[0] += 1                      # held from before the load: the reaper waits
     try:
         m = model()
         m.max_tokens = int(max_tokens)
-        msgs = [ChatMessage(role=MessageRole.SYSTEM, content=_system()),
-                ChatMessage(role=MessageRole.USER, content=text)]
+        if isinstance(text_or_messages, list):
+            msgs = [
+                ChatMessage(role=role_map.get(str(item.get("role") or "user"), MessageRole.USER),
+                            content=str(item.get("content") or ""))
+                for item in text_or_messages
+            ]
+        else:
+            msgs = [ChatMessage(role=MessageRole.SYSTEM, content=_system()),
+                    ChatMessage(role=MessageRole.USER, content=str(text_or_messages))]
         for d in m.generate_stream(msgs):
             if d.content:
                 yield d.content

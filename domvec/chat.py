@@ -26,12 +26,17 @@ The model is L-1's: Nous Hermes 2 DPO (Mistral 7B, Q4_0), local, on CUDA.
 
 from __future__ import annotations
 
+import hashlib
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 PLANT_RESEND = [False]
+#: Planted (G-444): `/chat_stream` runs one-shot -- no prior turns kept, pins re-sent.
+PLANT_CHAT_ONESHOT = [False]
+#: Planted (G-452): `/chat_stream` ignores ego/cell system prompts and falls back to bare prompt.
+PLANT_NO_CHAT_SYSTEM = [False]
 
 #: L-1 (`docs/PLUGIN_PRD.md`): Nous Hermes 2 DPO 7B, quantized, local CUDA --
 #: read from the one model table (`models.ROLES["chat"]`).
@@ -204,15 +209,204 @@ def conversation(session: str, backend_factory: Callable[[], HermesBackend] = He
         if conv is None:
             conv = Conversation(session, be.generate, be.open)
             _CONVERSATIONS[session] = conv
-        if _ACTIVE[0] != session:
-            be.open()
-            if _ACTIVE[0]:
-                # The other cell's conversation lost its model session: its
-                # record is cleared too, so nothing it holds claims to be in
-                # a context window it is no longer in.
-                other = _CONVERSATIONS.get(_ACTIVE[0])
-                if other is not None:
-                    other.sent.clear()
-                    other.pinned_ever.clear()
-            _ACTIVE[0] = session
+            if _ACTIVE[0] != session:
+                be.open()
+                # Replay prior turns of `conv` into the reopened GPT4All session
+                # when switching back to an existing conversation (G-444).
+                if not PLANT_CHAT_ONESHOT[0] and conv.turns and hasattr(be._model, "current_chat_session"):
+                    for t in conv.turns[-16:]:
+                        u_msg = message(t.prompt, t.context)
+                        be._model.current_chat_session.append({"role": "user", "content": u_msg})
+                        be._model.current_chat_session.append({"role": "assistant", "content": t.reply})
+                _ACTIVE[0] = session
         return conv
+
+
+def default_stream_system() -> str:
+    """Default system prompt for notebook chat cells (`G-452`), carrying ego cell/tool instructions."""
+    if PLANT_NO_CHAT_SYSTEM[0]:
+        return "You are an assistant."
+    from . import tool_cells
+    return (
+        "You are a careful research and coding assistant inside an Obsidian computation-graph notebook. "
+        "Answer concisely in Markdown, grounded in the pinned web chunks and notebook cells provided.\n\n"
+        + tool_cells.DEFAULT_EGO_SYSTEM_PROMPT
+    )
+
+
+class StreamSession:
+    """Multi-turn streaming session for a quantized chat cell (`G-444`).
+
+    Keyed by the host note's `vault://` path (or explicit session key). Mirrors
+    the note's turns (`seed_history` when cold after a restart, spec F-82) and
+    tracks sent pinned-chunk digests (`sent_pins`) plus context-block digests
+    (`sent_blocks`) so each pinned web chunk or cell block enters the model's
+    context window in O(delta) -- at most once per digest unless edited.
+    """
+
+    def __init__(self, session: str) -> None:
+        self.session = session
+        self.turns: List[Dict[str, str]] = []
+        self.sent_pins: Dict[str, str] = {}
+        self.sent_blocks: Dict[str, str] = {}
+        self.last_meta: Dict = {}
+        self.lock = threading.Lock()
+
+    def reset(self) -> None:
+        with self.lock:
+            self.turns.clear()
+            self.sent_pins.clear()
+            self.sent_blocks.clear()
+            self.last_meta = {}
+
+    @staticmethod
+    def _digest(text: str) -> str:
+        return hashlib.sha1(text.encode("utf-8", errors="replace")).hexdigest()
+
+    def prepare(
+        self,
+        prompt: str,
+        context: Optional[List[str]] = None,
+        pins: Optional[List[Dict[str, str]]] = None,
+        history: Optional[List[Dict[str, str]]] = None,
+        system_prompt: Optional[str] = None,
+        max_ctx_chars: int = 20000,
+    ) -> Tuple[List[Dict[str, str]], Dict]:
+        """Build `[system, *prior_turns, user]` messages and delta metadata."""
+        sys_clean = "You are an assistant." if PLANT_NO_CHAT_SYSTEM[0] else (system_prompt or default_stream_system())
+        for tag in ("<|im_start|>system\n", "<|im_end|>\n", "<|im_end|>"):
+            sys_clean = sys_clean.replace(tag, "")
+        sys_clean = sys_clean.strip()
+
+        raw_blocks = [str(c).strip() for c in (context or []) if str(c).strip()]
+        raw_pins = [p for p in (pins or []) if isinstance(p, dict) and str(p.get("markdown") or "").strip()]
+        oneshot = bool(PLANT_CHAT_ONESHOT[0])
+        resend = bool(PLANT_RESEND[0]) or oneshot
+
+        with self.lock:
+            if not oneshot and isinstance(history, list):
+                valid_hist = [
+                    {"user": str(h.get("user") or "").strip(), "assistant": str(h.get("assistant") or "").strip()}
+                    for h in history
+                    if isinstance(h, dict) and str(h.get("user") or "").strip() and str(h.get("assistant") or "").strip()
+                ]
+                if not self.turns and valid_hist:
+                    self.turns = valid_hist[-24:]
+                elif len(valid_hist) == 0 and self.turns and history is not None:
+                    # Note history cleared by the reader: clear mirrored session.
+                    self.turns.clear()
+                    self.sent_pins.clear()
+                    self.sent_blocks.clear()
+
+            fresh_pins: List[Tuple[str, str, Dict[str, str]]] = []
+            dropped_pins: List[str] = []
+            seen_now = set()
+            for p in raw_pins:
+                md = str(p.get("markdown") or "")[:CHUNK_CAP]
+                cid = str(p.get("cid") or p.get("url") or self._digest(md)[:12])
+                dig = self._digest(md)
+                if not resend and (cid in seen_now or self.sent_pins.get(cid) == dig):
+                    dropped_pins.append(cid)
+                else:
+                    seen_now.add(cid)
+                    fresh_pins.append((cid, dig, p))
+
+            fresh_blocks: List[Tuple[str, str]] = []
+            dropped_blocks = 0
+            for b in raw_blocks:
+                clipped = b[:CHUNK_CAP]
+                bdig = self._digest(clipped)
+                if not resend and self.turns and bdig in self.sent_blocks:
+                    dropped_blocks += 1
+                else:
+                    fresh_blocks.append((bdig, clipped))
+
+            parts: List[str] = []
+            for _cid, _dig, p in fresh_pins:
+                label = p.get("title") or p.get("head") or p.get("url") or "pinned chunk"
+                url = p.get("url") or ""
+                head = f"{label} ({url})" if url and url != label else str(label)
+                parts.append(f"Pinned chunk from {head}:\n\n{str(p.get('markdown') or '')[:CHUNK_CAP]}")
+            if fresh_blocks:
+                parts.append("Context, the cells beside/above this one:\n\n" + "\n\n---\n\n".join(b for _, b in fresh_blocks))
+            if parts:
+                parts.append("---")
+            parts.append(prompt.strip())
+            user_text = "\n\n".join(parts)
+
+            prior: List[Dict[str, str]] = []
+            if not oneshot and self.turns:
+                budget = max(2000, max_ctx_chars - len(user_text) - len(sys_clean))
+                used = 0
+                kept: List[Dict[str, str]] = []
+                for t in reversed(self.turns):
+                    cost = len(t["user"]) + len(t["assistant"])
+                    if kept and used + cost > budget:
+                        break
+                    kept.append(t)
+                    used += cost
+                for t in reversed(kept):
+                    prior.append({"role": "user", "content": t["user"]})
+                    prior.append({"role": "assistant", "content": t["assistant"]})
+
+            msgs = [{"role": "system", "content": sys_clean}, *prior, {"role": "user", "content": user_text}]
+            meta = {
+                "session": self.session,
+                "oneshot": oneshot,
+                "history_turns": len(prior) // 2,
+                "stored_turns": len(self.turns),
+                "fresh_pins": [cid for cid, _, _ in fresh_pins],
+                "dropped_pins": dropped_pins,
+                "fresh_blocks": len(fresh_blocks),
+                "dropped_blocks": dropped_blocks,
+                "delta_chars": len(user_text),
+                "system_chars": len(sys_clean),
+                "system_head": sys_clean[:160],
+                "_commit_tokens": (user_text, [(cid, dig) for cid, dig, _ in fresh_pins], [bdig for bdig, _ in fresh_blocks]),
+            }
+            return msgs, meta
+
+    def commit(self, meta: Dict, reply: str) -> None:
+        clean_reply = (reply or "").strip()
+        if not clean_reply or bool(PLANT_CHAT_ONESHOT[0]):
+            with self.lock:
+                self.last_meta = {k: v for k, v in meta.items() if not k.startswith("_")}
+            return
+        user_text, pin_digs, block_digs = meta.get("_commit_tokens") or ("", [], [])
+        with self.lock:
+            for cid, dig in pin_digs:
+                self.sent_pins[cid] = dig
+            for bdig in block_digs:
+                self.sent_blocks[bdig] = bdig
+            if user_text:
+                self.turns.append({"user": user_text, "assistant": clean_reply})
+                del self.turns[:-40]
+            self.last_meta = {
+                **{k: v for k, v in meta.items() if not k.startswith("_")},
+                "stored_turns": len(self.turns),
+            }
+
+    def to_json(self) -> Dict:
+        with self.lock:
+            return {
+                "session": self.session,
+                "turns": len(self.turns),
+                "sent_pins": sorted(self.sent_pins.keys()),
+                "sent_blocks": len(self.sent_blocks),
+                "last": dict(self.last_meta),
+                "plant_oneshot": bool(PLANT_CHAT_ONESHOT[0]),
+                "plant_resend": bool(PLANT_RESEND[0]),
+            }
+
+
+_STREAM_SESSIONS: Dict[str, StreamSession] = {}
+
+
+def stream_session(session: str = "default") -> StreamSession:
+    key = (session or "default").strip() or "default"
+    with _GLOBAL:
+        s = _STREAM_SESSIONS.get(key)
+        if s is None:
+            s = StreamSession(key)
+            _STREAM_SESSIONS[key] = s
+        return s

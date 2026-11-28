@@ -352,8 +352,13 @@ export class NotebookChats {
     return chat;
   }
 
-  /** The cursor moved in some editor. */
-  onCursor(): void { this.forActive()?.land(); }
+  /** The cursor moved in some editor. Retired in UI by G-443 (centralized
+   *  `+ chat` in `cellbar.ts`); planted `__domvecPlantNbChatOverlay` restores
+   *  the floating overlay. */
+  onCursor(): void {
+    if (!(window as any).__domvecPlantNbChatOverlay && !this.byView.size) return;
+    this.forActive()?.land();
+  }
 
   forFile(file: TFile): NotebookChat | null {
     for (const [v, c] of this.byView) if (v.file === file) return c;

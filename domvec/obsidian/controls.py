@@ -114,6 +114,14 @@ def find_sidecars(port: int = 8788) -> List[Dict]:
 
 
 def stop_sidecar(port: Optional[int] = None, timeout_s: float = 5.0, force: bool = False) -> Dict:
+    """Stop any running sidecar and supervisor processes on the given port."""
+    from .session_lock import call_with_lease
+    if not force:
+        return call_with_lease("sidecar_stop", lambda: _stop_sidecar_inner(port, timeout_s, force), wait_s=90.0)
+    return _stop_sidecar_inner(port, timeout_s, force)
+
+
+def _stop_sidecar_inner(port: Optional[int] = None, timeout_s: float = 5.0, force: bool = False) -> Dict:
     """Stop any running sidecar and supervisor processes on the given port.
 
     Asks `/shutdown?stop=1` first so the worker finishes its work lock, saves
@@ -340,6 +348,7 @@ def sidecar_status(port: Optional[int] = None, url: str = "http://127.0.0.1:8788
     state = ("down" if not procs else
              "healthy" if "error" not in health_data else
              "busy" if "timed out" in health_data.get("error", "") else "unreachable")
+    from .session_lock import lock_status
     return {
         "running": len(procs) > 0,
         "state": state,
@@ -348,6 +357,7 @@ def sidecar_status(port: Optional[int] = None, url: str = "http://127.0.0.1:8788
         "health": health_data,
         "workspace": ws,
         "wal_mb": round(wal_bytes(ws) / 1e6, 2) if ws else None,
+        "session_lock": lock_status(),
         "screen": [{k: c.get(k) for k in ("root", "processes", "consoles", "visible_windows", "windows", "planted", "error")}
                    for c in screen],
         "url": "http://127.0.0.1:%d" % port,
@@ -473,8 +483,15 @@ def setup_vault(
     }
 
 
-def close_obsidian() -> Dict:
+def close_obsidian(*, force: bool = False) -> Dict:
     """Kill any running Obsidian processes cleanly and remove stale lockfiles."""
+    if not force:
+        from .session_lock import call_with_lease
+        return call_with_lease("obsidian_close", _close_obsidian_inner, wait_s=90.0)
+    return _close_obsidian_inner()
+
+
+def _close_obsidian_inner() -> Dict:
     import psutil
     killed = []
 
@@ -522,9 +539,16 @@ def launch_obsidian(
     vault_path: Optional[Union[str, Path]] = None,
     cdp_port: int = 9222,
     *,
-    close_existing: bool = True,
+    close_existing: bool = False,
+    force: bool = False,
 ) -> Dict:
-    """Launch Obsidian with remote debugging and background unthrottling."""
+    """Launch Obsidian with remote debugging and background unthrottling.
+
+    Reuses an already-running CDP-enabled Obsidian instance unless `force=True`,
+    so even legacy callers passing `close_existing=True` never kill a healthy
+    shared session (`G-455`); `close_existing` only restarts an Obsidian that
+    was launched *without* `--remote-debugging-port`.
+    """
     def cdp_up() -> bool:
         try:
             with urllib.request.urlopen("http://127.0.0.1:%d/json/version" % cdp_port, timeout=1.0) as res:
@@ -532,12 +556,15 @@ def launch_obsidian(
         except Exception:                           # noqa: BLE001
             return False
 
-    # A second Obsidian.exe hands its arguments to the running instance and
-    # exits, so without a close the flags never apply. Say which happened.
-    if not close_existing and cdp_up():
-        return {"ok": True, "already_running": True, "cdp_port": cdp_port, "cdp_alive": True}
-    if close_existing:
-        close_obsidian()
+    # If CDP is already answering on `cdp_port`, the unthrottling + debug flags
+    # are already active: share the single running instance (`G-455`).
+    if not force and cdp_up():
+        return {"ok": True, "already_running": True, "shared_instance": True,
+                "cdp_port": cdp_port, "cdp_alive": True}
+    if close_existing or force:
+        closed = close_obsidian()
+        if closed.get("busy"):
+            return closed
 
     if vault_path:
         setup_vault(vault_path, register_in_obsidian=True)

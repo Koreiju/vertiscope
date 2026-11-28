@@ -124,14 +124,9 @@ export class BrowserPanel {
     await desk.open(f as TFile, {
       mount: async (card: HTMLElement) => {
         card.addClass("domvec-browser-card");
-        // Its exit (2026-11-07: "no option to exit a 2D plane browser cell").
-        // Planted `plantNoExit`: none, as before.
-        if (!this.plantNoExit) {
-          const x = card.createSpan({ cls: "domvec-browser-card-exit", text: "×" });
-          x.setAttr("aria-label", "close this browser cell");
-          x.onpointerdown = (e: PointerEvent) => e.stopPropagation();
-          x.onclick = (e: MouseEvent) => { e.stopPropagation(); this.stats.exited++; const q = desk.panelOf(this.path); if (q) q.leaf.detach(); };
-        }
+        // Clean header tool strip (G-443, PLUGIN_GOAL 200 d): split and exit
+        // grouped in one flex container so buttons never overlap each other.
+        const tools = card.createDiv({ cls: "domvec-browser-card-tools" });
         const Leaf = (this.app.workspace as any).activeLeaf?.constructor ?? (this.app.workspace.getMostRecentLeaf() as any)?.constructor;
         const leaf = new Leaf(this.app);
         leaf.containerEl.addClass("domvec-browser-panel-leaf");
@@ -144,10 +139,18 @@ export class BrowserPanel {
         // (a reparented <webview> reloads its page) and is offset out of the
         // card; a solid undirected link joins the halves, right-click toggles
         // it translucent (135(d)), the split control again rejoins.
-        const sp = card.createSpan({ cls: "domvec-browser-card-split", text: "⇹" });
+        const sp = tools.createSpan({ cls: "domvec-browser-card-split", text: "⇹" });
         sp.setAttr("aria-label", "pull the browser apart from its markdown");
         sp.onpointerdown = (e: PointerEvent) => e.stopPropagation();
         sp.onclick = (e: MouseEvent) => { e.stopPropagation(); this.togglePair(); };
+        // Its exit (2026-11-07: "no option to exit a 2D plane browser cell").
+        // Planted `plantNoExit`: none, as before.
+        if (!this.plantNoExit) {
+          const x = tools.createSpan({ cls: "domvec-browser-card-exit", text: "×" });
+          x.setAttr("aria-label", "close this browser cell");
+          x.onpointerdown = (e: PointerEvent) => e.stopPropagation();
+          x.onclick = (e: MouseEvent) => { e.stopPropagation(); this.stats.exited++; const q = desk.panelOf(this.path); if (q) q.leaf.detach(); };
+        }
         const chunkEl = card.createDiv({ cls: "domvec-browser-chunk" });
         chunkEl.style.display = "none";
         this.chunkEl = chunkEl;
@@ -168,7 +171,10 @@ export class BrowserPanel {
         };
       },
     });
-    if (!existing) this.stats.opened++;
+    if (!existing) {
+      this.stats.opened++;
+      if (!this.path.startsWith("domvec-checks/")) void desk.attachToEgo(this.path);
+    }
     const sv = this.slateView();
     if (sv) this.hook(sv);
     // Asked to open, it opens: a slate left collapsed to its node (its fold

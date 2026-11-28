@@ -42,6 +42,42 @@ export const COCKPIT_PATH = "domvec/ego.md";
 const DOCKED_KEY = "domvec-cockpit-on-plane";
 const FOLD_KEY = "domvec.cockpit.results";
 
+/** Default ego system prompt (`G-452`): teaches chat models how to instantiate base cells and slim tool calls. */
+export const DEFAULT_EGO_SYSTEM_PROMPT = [
+  "You operate inside an Obsidian markdown computation-graph notebook.",
+  "Base interactive cells are pure fenced blocks:",
+  "- ```python : code cell sharing reactive top-level variables across linked notebooks.",
+  "- ```browser : embedded web browser cell (`url` on line 1).",
+  "- ```chat : multi-turn local chat cell grounded in pinned chunks and upstream cells.",
+  "- ```tool : slim interactive smolagents tool cell, e.g. `{\"browser\": {\"search\": \"...\", \"back\": false, \"forward\": false, \"chunks\": true}}`.",
+  "Prefer emitting a single ```tool or ```python block when acting on the workspace.",
+].join("\n");
+
+/** Extract `## System prompt` section from `domvec/ego.md`, falling back to `DEFAULT_EGO_SYSTEM_PROMPT` (`G-452`). */
+export function extractEgoSystemPrompt(text: string): string {
+  const m = /^##\s+System prompt\s*$([\s\S]*?)(?=^##\s+|\Z)/m.exec(text || "");
+  if (m) {
+    //Note: JS RegExp doesn't treat \Z as end-of-string; handle explicitly below.
+    const body = m[1].trim();
+    if (body) return body;
+  }
+  const lines = String(text || "").split(/\r?\n/);
+  const idx = lines.findIndex((l) => /^##\s+System prompt\s*$/i.test(l.trim()));
+  if (idx >= 0) {
+    const buf: string[] = [];
+    let inFence = false;
+    for (let i = idx + 1; i < lines.length; i++) {
+      const tr = lines[i].trim();
+      if (/^(`{3,}|~{3,})/.test(tr)) inFence = !inFence;
+      if (!inFence && /^##\s+/.test(tr)) break;
+      buf.push(lines[i]);
+    }
+    const found = buf.join("\n").trim();
+    if (found) return found;
+  }
+  return DEFAULT_EGO_SYSTEM_PROMPT;
+}
+
 const T = "\t";
 export const COCKPIT_TEXT = [
   "---", "domvec: slate", "---",
@@ -285,6 +321,23 @@ export class Cockpit {
     return f instanceof TFile ? f : null;
   }
 
+  private egoSysCache = DEFAULT_EGO_SYSTEM_PROMPT;
+
+  /** Current system prompt from `domvec/ego.md` (`G-452`). */
+  egoSystemPrompt(): string {
+    if ((window as any).__domvecPlantNoEgoSystemPrompt) return "";
+    const v = this.view();
+    if (v?.editor) {
+      this.egoSysCache = extractEgoSystemPrompt(v.editor.getValue());
+      return this.egoSysCache;
+    }
+    const f = this.file();
+    if (f) {
+      void this.app.vault.cachedRead(f).then((t) => { this.egoSysCache = extractEgoSystemPrompt(t); }).catch(() => undefined);
+    }
+    return this.egoSysCache || DEFAULT_EGO_SYSTEM_PROMPT;
+  }
+
   /** Open the cockpit, creating its note on first use, beside the graph. */
   async open(): Promise<MarkdownView | null> {
     let f = this.file();
@@ -293,11 +346,24 @@ export class Cockpit {
       f = await this.app.vault.create(COCKPIT_PATH, COCKPIT_TEXT);
     }
     // A cockpit written before a field existed gains it (the plan, G-283).
-    const text = await this.app.vault.read(f);
-    if (!/^\tplan\t/m.test(text)) {
-      await this.app.vault.modify(f, text.replace(/^(\tlast\t.*)$/m, "$1\n\tplan\t{search.results}\n\tplay\tfalse"));
+    let text = await this.app.vault.read(f);
+    if (!/^\tplan\t/m.test(text) && !isPlainCockpit(text)) {
+      text = text.replace(/^(\tlast\t.*)$/m, "$1\n\tplan\t{search.results}\n\tplay\tfalse");
+      await this.app.vault.modify(f, text);
     }
+    if (isPlainCockpit(text) && !/^##\s+System prompt\s*$/m.test(text) && !(window as any).__domvecPlantNoEgoSystemPrompt) {
+      const nl = "\n";
+      const sec = `## System prompt${nl}${nl}${DEFAULT_EGO_SYSTEM_PROMPT}${nl}`;
+      const h2 = text.search(/^##\s+/m);
+      const next = h2 >= 0
+        ? text.slice(0, h2).replace(/\s*$/, "") + nl + nl + sec + nl + text.slice(h2)
+        : text.replace(/\s*$/, "") + nl + nl + sec;
+      await this.app.vault.modify(f, next);
+      text = next;
+    }
+    this.egoSysCache = extractEgoSystemPrompt(text);
     void this.pruneUnfolded();
+    void this.desk?.()?.pruneEgoLinks?.();
     // On the 2D plane over the 3D view when a graph is open (items 50, 52-53).
     const onPlane = await this.dock();
     if (onPlane) { this.stats.opened++; return onPlane; }
@@ -602,6 +668,7 @@ export class Cockpit {
   plantKeepGoneRows = false;
   async noteGone(path: string): Promise<void> {
     if (!/\.md$/i.test(path) || path === COCKPIT_PATH || this.plantKeepGoneRows) return;
+    void this.desk?.()?.detachFromEgo?.(path);
     try { window.localStorage.removeItem(this.foldKey(path)); } catch { /* a convenience */ }
     if (!(await this.egoUnfolded(path)).length && !this.unfoldPending.has(this.noteKey(path))) return;
     this.unfoldPending.set(this.noteKey(path), []);
@@ -609,6 +676,11 @@ export class Cockpit {
   }
   async noteMoved(oldPath: string, newPath: string): Promise<void> {
     if (!/\.md$/i.test(oldPath) || oldPath === COCKPIT_PATH || this.plantKeepGoneRows) return;
+    const desk = this.desk?.();
+    if (desk) {
+      const removed = await desk.detachFromEgo?.(oldPath);
+      if (removed && !newPath.startsWith("domvec-checks/")) await desk.attachToEgo?.(newPath);
+    }
     const names = this.unfoldPending.get(this.noteKey(oldPath)) ?? await this.egoUnfolded(oldPath);
     try {
       const st = window.localStorage.getItem(this.foldKey(oldPath));
@@ -1054,10 +1126,21 @@ export class Cockpit {
   private cameraText = "";
   private playText = "";
   private ensureSearchFields(v: any): void {
-    const fs = parseSlate(v.editor.getValue());
+    const raw = v.editor.getValue();
+    const NL = String.fromCharCode(10);
+    // Plain cockpit (`G-418`): settings live in a Python cell (`name = literal`),
+    // never tab-indented slate rows (`\tn\t50` corrupted the Python syntax).
+    if (isPlainCockpit(raw)) {
+      if (/^\t(n|matching)\t/m.test(raw)) {
+        const cleaned = raw.split(NL).filter((l: string) => !/^\t(n|matching)\t/.test(l)).join(NL);
+        this.writing = true;
+        try { v.editor.setValue(cleaned); } finally { this.writing = false; }
+      }
+      return;
+    }
+    const fs = parseSlate(raw);
     const k = this.field(fs, "search", "k");
     if (!k) return;
-    const NL = String.fromCharCode(10);
     // Read by LINE at k's own depth (2026-11-08: the ego note held `n` and
     // `matching` twice, the copy nested under an empty `matching` -- the parse
     // read that empty field as a parent and the lookup missed them). Copies
@@ -1232,6 +1315,32 @@ export class Cockpit {
         const cur = v.editor.getCursor();
         const fl = parseSlate(v.editor.getValue()).find((f) => f.line === cur.line);
         if (fl && fl.key === "query") { e.preventDefault(); e.stopPropagation(); this.submit(); }
+      }
+    }, true);
+    el.addEventListener("click", (e: MouseEvent) => {
+      // G-446: clicking a `[title](domvec/...)` cell link inside the ego card
+      // unfolds/opens that cell on the 2D plane instead of navigating `ego.md`'s leaf.
+      const t = e.target as HTMLElement | null;
+      const a = t?.closest?.("a.internal-link, a.external-link, .cm-link, .cm-url, .cm-underline") as HTMLElement | null;
+      if (!a || !this.card?.contains(el)) return;
+      let href = a.getAttribute("data-href") || a.getAttribute("href") || "";
+      if (!href) {
+        const cm = v?.editor?.cm;
+        const pos = cm ? cm.posAtCoords({ x: e.clientX, y: e.clientY }) : null;
+        if (cm && pos != null) {
+          const ln = cm.state.doc.lineAt(pos).text;
+          const m = /\[([^\]]*)\]\(([^)\s]+)\)/.exec(ln);
+          if (m) href = m[2];
+        }
+      }
+      if (!href || /^(https?:|mailto:|code:)/i.test(href)) return;
+      let rel = href;
+      try { rel = decodeURIComponent(href.replace(/^vault:\/\/[^/]+\//i, "")).split("#")[0].replace(/^\/+/, ""); } catch { /* keep */ }
+      const targetFile = rel ? (this.app.vault.getAbstractFileByPath(rel) || this.app.metadataCache.getFirstLinkpathDest(rel, COCKPIT_PATH)) : null;
+      if (targetFile instanceof TFile && targetFile.path !== COCKPIT_PATH && this.desk?.()) {
+        e.preventDefault();
+        e.stopPropagation();
+        void this.desk().open(targetFile);
       }
     }, true);
     v.editor?.cm?.scrollDOM?.addEventListener("scroll", () => this.scrolled(), { passive: true });

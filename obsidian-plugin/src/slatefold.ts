@@ -494,6 +494,8 @@ export function foldDecorations(doc: Text, st: FoldState): DecorationSet {
   if (t < 0) return Decoration.none;
   // A plain note draws as Obsidian draws it: no slate layer (193-194).
   if (isPlainCockpit(doc.toString())) return Decoration.none;
+  const isExplicitSlate = /^---\r?\n[\s\S]*?^\s*domvec\s*:\s*slate\s*$/m.test(doc.toString());
+  if (!isExplicitSlate && !(window as any).__domvecPlantPurpleAllNotes) return Decoration.none;
   // RETIRED by PLUGIN_GOAL 183 ("in the 2D plane, we deal only with the
   // interface canvases themselves"; 182 "Both"): a stored `graph` flag draws
   // the panel. Planted `__domvecPlantGraphForm`: the graph form, as before.
