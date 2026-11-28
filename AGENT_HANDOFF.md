@@ -1,6 +1,6 @@
 # AGENT_HANDOFF.md — Unified Pivot Direction, Transcript Links, Localized Constraints & Parallel Split
 
-*Last updated: `2026-11-28` by Antigravity · Governing verbatim: `docs/PLUGIN_GOAL.md` **Items `200`–`205`** (`2026-11-27`–`2026-11-28`) · PRD: `docs/PLUGIN_PRD.md` (`G-443`–`G-455` Confirm, `G-456`–`G-460` Open)*
+*Last updated: `2026-11-28` by Antigravity · Governing verbatim: `docs/PLUGIN_GOAL.md` **Items `200`–`206`** (`2026-11-27`–`2026-11-28`) · PRD: `docs/PLUGIN_PRD.md` (`G-443`–`G-455` Confirm, `G-456`–`G-460` Open)*
 
 ---
 
@@ -82,9 +82,8 @@ Both agents share **one** running Obsidian window (`CDP :9222`) and **one** side
 
 ## 4. Git Baseline Snapshot (`2026-11-28`)
 
-- **HEAD**: `afc636d` on `feat/plugin-goal-projector`.
-- **Working Tree**: Holds verified `G-443`–`G-455` (`19/19` live `confirm` checks green, `33` pytest + `3` node tests green) + `G-456`–`G-460` specs.
-- **Step 0 (First Agent Committing)**: Commit ONLY code/test/doc files (`AGENT_HANDOFF.md`, `docs/{PLUGIN_GOAL,COMPUTATION_GRAPH_EDITOR_SPEC,PLUGIN_PRD}.md`, `build_analytics/{design_state,live_confirmations}.md`, `domvec/{agent_tools,chat,chat_cuda,code_intel,dataflow,tool_cells}.py`, `domvec/obsidian/{controls,front,kernel_objects,live,mcp,session_lock,sidecar}.py`, `obsidian-plugin/src/*.ts`, `obsidian-plugin/styles.css`, `obsidian-plugin/checks/live.mjs`, `obsidian-plugin/tests/egolinks_fencecode.test.mjs`, `tests/test_{chat_sessions,code_intel,cross_notebook_and_tools,mcp_session_lock}.py`), leaving live vault notes (`domvec/*.md`, `domvec/graph/*.md`, `domvec/chunks/`, `.domvec/`, `.trash/`) unstaged.
+- **HEAD**: `d38b7e7` / `07ca620` on `feat/plugin-goal-projector` (Claude completed **Step 0**, committing the verified `G-443`–`G-455` baseline cleanly).
+- **Live Vault Notes**: Leave live user vault notes (`domvec/*.md`, `domvec/graph/*.md`, `domvec/chunks/`, `.domvec/`, `.trash/`) unstaged when committing code/test/doc batches.
 
 ---
 
@@ -146,4 +145,6 @@ Order for Claude: **B1 -> B2 -> B3**. B2's terminal/search toolspaces need no Tr
 |---|---|---|---|
 | `2026-11-25` | Claude | `G-433`–`G-442` (`afc636d`) | Landed `Slots` (`codeblock:`, `card:`, `cell:`), `completeCell`/`wiredefs`, `Chat.messages` + reply cells + user `Tool`s + `■ stop`, `ToolRun` (`browser`/`chat`/`terminal`/`search`), `G-400`/`G-438` (`Partly`). |
 | `2026-11-27` | Antigravity | `G-443`–`G-454` + `G-445` post-search | Landed Items `200`–`201` pivot: bottom `cellbar.ts` `+ chat`, `StreamSession` `O(delta)` multi-turn chat, `panels: fly-to` (3D chunks + browser panels + post-search), `egolinks.ts` `[title](encodeURI(path))`, retired purple `slate_N` stubs, cursor-exit `AutoRun`, warm Jedi + PEP-562 `code_intel.py` (`0.2 ms` attr cache), cross-notebook Python DAG (`G-451`, closes `O-5`), `ego.md` system prompt + `Chat.send`, interactive ```` ```tool ```` cells (`back`/`forward` + vanishing history), vertical `[]()` `SearchField` twin. Live MCP `confirm` **`18/18` PASS**. |
-| `2026-11-28` | Antigravity | `G-455` + Pivot Re-Center + Item `205` (`G-456`–`G-460`) | Built OS-locked single-instance MCP concurrency (`session_lock.py`, live `confirm` `G-455` **PASS**). Added mutual session `.jsonl` transcript links (§0), recorded Item `205` verbatim, decomposed `G-456`–`G-460` onto Track A (cursor-gated ```` ```chunk ```` web/editor unification, minimal gym Python API `Browser.chunks` + `ActionChain`, `ego.md` as plain toolspace notebook example, ephemeral library UI vs. notebook/module <-> ```` ```tool ```` interlacing, embedding-model-scoped docstring + artifact-link RAG), and aligned Track B seams. |
+| `2026-11-28` | Antigravity | `G-455` + Pivot Re-Center (`Items 202`–`204`) | Built OS-locked single-instance MCP concurrency (`session_lock.py`, `.domvec/mcp_session.lock`, wait-or-deliberate-busy return, `obsidian_launch` reuse, zero markdown coupling; live `confirm` `G-455` **PASS**). Re-centered `AGENT_HANDOFF.md` strictly on the Nov 27–28 pivot, froze superseded pre-pivot threads (`HasTraits`, `{ref}`, `slate_N`, 3D layout churn), and localized Track A vs. Track B. |
+| `2026-11-28` | Claude | Step 0 (`d38b7e7`) | Committed the `G-443`–`G-455` baseline + Item `205`; pytest `34` pass, egolinks `3/3` from repo root. `node --test` from `obsidian-plugin/` has `7` failures that predate the pivot (`searchfield.test` cannot load `./edgeresize`; address/gesture unchanged since `afc636d`). Taking Track B, Batch B1 next. |
+| `2026-11-28` | Antigravity | Item `206` (`G-456`–`G-460` + Transcript Cross-Links) | Added mutual `.jsonl` session transcript links (§0), recorded Item `206` verbatim, and decomposed `G-456`–`G-460` onto Track A (cursor-gated ```` ```chunk ```` web/editor unification, minimal gym Python API `Browser.chunks` + `ActionChain`, `ego.md` as plain toolspace notebook example, ephemeral library UI vs. notebook/module <-> ```` ```tool ```` interlacing, embedding-model-scoped docstring + artifact-link RAG), keeping Track B's seams aligned. |
