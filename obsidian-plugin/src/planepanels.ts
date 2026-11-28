@@ -362,11 +362,15 @@ export class PlaneDesk {
       const card = plane.createDiv({ cls: "domvec-plane-card domvec-panel-card" });
       card.dataset.path = file.path;
       decorateCard(card, file.path);   // the card: slot (G-240): +chat and any other decoration
-      // A cascade, so a second panel is never under the first.
+      // The first FREE slot, so a new panel never covers another and the links
+      // between them stay visible (2026-11-28: a 28 px cascade hid a variable
+      // link under the card it joined). The old cascade only when the plane is
+      // full. Planted `__domvecPlantCascade`: the cascade always.
       const n = this.panels.length;
       card.style.right = "auto";
-      card.style.left = `${12 + 28 * (n % 8)}px`;
-      card.style.top = `${44 + 28 * (n % 8)}px`;
+      const spot = (window as any).__domvecPlantCascade ? null : this.freeSpot(plane, card);
+      card.style.left = `${spot ? spot.x : 12 + 28 * (n % 8)}px`;
+      card.style.top = `${spot ? spot.y : 44 + 28 * (n % 8)}px`;
       const slate = isSlate(this.app, file) && (file.path.startsWith("domvec-checks/") || !!(window as any).__domvecPlantDeprecatedSlate);
       let head: HTMLElement | null = null;
       if (!slate) {
@@ -1386,7 +1390,7 @@ export class PlaneDesk {
     const plane = this.host.plane();
     if (!plane) return;
     // The plane takes notes dragged from tabs or the file list (tabdrag.ts).
-    acceptTabDrops(this.app, plane, (f, at) => this.open(f, { at }));
+    acceptTabDrops(this.app, plane, (f, at) => this.open(f, { at }), () => (window as any).__domvecPlane === this);
     const NS = "http://www.w3.org/2000/svg";
     if (!this.linkSvg || !plane.contains(this.linkSvg)) {
       this.linkSvg?.remove();
@@ -1548,6 +1552,32 @@ export class PlaneDesk {
   }
 
   /** The view of a note on the plane, if one is open there. */
+  /** A slot on `plane` (plane coordinates) where a card of the usual size
+   *  overlaps no other card, scanning row by row; null when there is none. */
+  freeSpot(plane: HTMLElement, self: HTMLElement | null = null, w = 380, h = 240, gap = 16): { x: number; y: number } | null {
+    const pr = plane.getBoundingClientRect();
+    const boxes = Array.from(plane.querySelectorAll(":scope > .domvec-plane-card")).filter((c) => c !== self).map((c) => {
+      const r = (c as HTMLElement).getBoundingClientRect();
+      return { x: r.left - pr.left + plane.scrollLeft, y: r.top - pr.top + plane.scrollTop, w: r.width, h: r.height };
+    }).filter((b) => b.w > 0 && b.h > 0);
+    // Within the visible plane: a card is clamped into it (clampToPlane), so a
+    // slot below the fold would be pulled back up over another card.
+    const W = Math.max(plane.clientWidth, w + 24), H = Math.max(plane.clientHeight, h + 44);
+    // The first slot that touches nothing; when the plane is full, the slot
+    // that covers the least (never blindly the corner).
+    const cover = (x: number, y: number) => boxes.reduce((s, b) => s
+      + Math.max(0, Math.min(x + w + gap, b.x + b.w) - Math.max(x, b.x - gap)) * Math.max(0, Math.min(y + h + gap, b.y + b.h) - Math.max(y, b.y - gap)), 0);
+    let best: { x: number; y: number } | null = null, least = Infinity;
+    for (let y = 44; y + h <= H || y === 44; y += 32) {
+      for (let x = 12; x + w <= W || x === 12; x += 32) {
+        const c = cover(x, y);
+        if (c === 0) return { x, y };
+        if (c < least) { least = c; best = { x, y }; }
+      }
+    }
+    return best;
+  }
+
   viewOf(path: string): MarkdownView | null {
     const p = this.panelOf(path);
     return p && p.leaf.view instanceof MarkdownView ? p.leaf.view : null;
@@ -1688,6 +1718,10 @@ export class PlaneDesk {
   }
 
   unload(): void {
+    // The 250 ms link timer was never cleared: every reload left a dead desk
+    // redrawing links and re-installing ITS tab-drop handler over the live
+    // one (tab -> plane drops did nothing, 2026-11-28).
+    this.linksOff();
     if (this.memTimer) { window.clearInterval(this.memTimer); this.memTimer = 0; } this.memSvg?.remove(); this.memSvg = null;
     for (const u of this.flipUnhook) u(); this.flipUnhook = [];
     if (this.flipped) { window.clearInterval(this.flipped.timer); this.flipped.svg.remove(); this.flipped = null; }

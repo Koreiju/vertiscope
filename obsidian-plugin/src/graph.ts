@@ -15,6 +15,7 @@
  * and draws them.
  */
 
+import { extractNotePyDefsRefs } from "./fencecode";
 import { UserAgent } from "./useragent";
 import { Craft } from "./craft";
 import { setFolds as setFoldsEffect } from "./slatefold";
@@ -7265,13 +7266,19 @@ export class GraphView extends ItemView {
   private egoLinkGroup: any = null;
   private egoRefs = new Map<string, { at: number; to: string[] }>();
   /** Ego note path -> the ego note paths it links to (by its own text). */
+  plantNoEgoVarLinks = false;
+  egoVarLinks = 0;
   async egoLinksOf(path: string): Promise<string[]> {
     const f: any = this.app.vault.getAbstractFileByPath(path);
     if (!f || !f.stat || this.plantNoEgoLinks) return [];
-    const hit = this.egoRefs.get(path);
-    if (hit && hit.at === f.stat.mtime) return hit.to;
-    const text: string = await this.app.vault.cachedRead(f);
     const egoPaths = [...this.egoUrls].map((u) => GraphView.egoPath(u));
+    // A variable link is a function of the OTHER notes too (CLAUDE.md 5c): the
+    // cache key is the neighbourhood's mtimes, not this note's alone.
+    const mt = (p: string) => { const x: any = this.app.vault.getAbstractFileByPath(p); return x?.stat ? x.stat.mtime : 0; };
+    const stamp = egoPaths.reduce((a, p) => a + mt(p), 0) * 31 + f.stat.mtime;
+    const hit = this.egoRefs.get(path);
+    if (hit && hit.at === stamp) return hit.to;
+    const text: string = await this.app.vault.cachedRead(f);
     const byBase = new Map(egoPaths.map((p) => [p.split("/").pop()!.replace(/[.]md$/, "").toLowerCase(), p]));
     const to = new Set<string>();
     for (const m of text.matchAll(/\{([^{}\n]+)\}/g)) { const p = byBase.get(m[1].split("#")[0].trim().toLowerCase()); if (p && p !== path) to.add(p); }
@@ -7283,7 +7290,21 @@ export class GraphView extends ItemView {
       const p = dec.split("#")[0].replace(/^\/+/, "");
       if (egoPaths.includes(p) && p !== path) to.add(p);
     }
-    this.egoRefs.set(path, { at: f.stat.mtime, to: [...to] });
+    // Cross-notebook variables (G-451, PLUGIN_GOAL 201: "the code dependency
+    // graph and variable links between cells as the same pure-graph form"):
+    // a note that READS a top-level name another ego note DEFINES is linked to
+    // it, as on the 2D plane. Planted `plantNoEgoVarLinks`.
+    if (!this.plantNoEgoVarLinks) {
+      const mine = extractNotePyDefsRefs(text);
+      if (mine.refs.size) for (const q of egoPaths) {
+        if (q === path || to.has(q)) continue;
+        const g: any = this.app.vault.getAbstractFileByPath(q);
+        if (!g || !g.stat) continue;
+        const theirs = extractNotePyDefsRefs(await this.app.vault.cachedRead(g));
+        if ([...theirs.defs].some((d) => mine.refs.has(d) && !mine.defs.has(d))) { to.add(q); this.egoVarLinks++; }
+      }
+    }
+    this.egoRefs.set(path, { at: stamp, to: [...to] });
     return [...to];
   }
   /** The drawn ego pairs: both ends glowing (relegated to 3D), by url. */

@@ -16393,6 +16393,51 @@ export function makeChecks(env) {
       },
     },
     {
+      id: "G-463",
+      asks: "the ego's cell graph links by the pivot's two edge kinds in 3D AND on the 2D editor alike (G-438 aligned to Items 200-201: 'show the code dependency graph and variable links between cells as the same pure-graph form'; Item 212): a notebook that READS a top-level name another notebook DEFINES is linked to it, and a [title](encodeURI(path)) link is an edge too; the 2D plane draws the same variable pair, and the three cards open where none covers another (a link stays visible); planted plantNoEgoVarLinks: the 3D variable edge is gone while the markdown-link edge stays; planted __domvecPlantCascade: the cards cover each other",
+      async run() {
+        const arm = (planted) => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const g = app.workspace.getLeavesOfType("domvec-graph-view")[0]?.view, d = window.__domvecPlane;
+          if (!g || !g.graph) return { error: "no graph" };
+          const NL = String.fromCharCode(10), F = String.fromCharCode(96).repeat(3);
+          const tok = (${planted} ? "p" : "c") + Date.now().toString(36), v = "x463" + tok;
+          const a = "domvec/graph/g463 a " + tok + ".md", b = "domvec/graph/g463 b " + tok + ".md", c = "domvec/graph/g463 c " + tok + ".md";
+          const out = { planted: ${planted} };
+          g.plantNoEgoVarLinks = ${planted}; window.__domvecPlantCascade = ${planted};
+          try {
+            await app.vault.create(a, "# defines" + NL + NL + F + "python" + NL + v + " = 5" + NL + F + NL);
+            await app.vault.create(b, "# reads" + NL + NL + F + "python" + NL + "print(" + v + " + 1)" + NL + F + NL);
+            await app.vault.create(c, "# links" + NL + NL + "see [defines](" + encodeURI(a) + ")" + NL);
+            // On the 2D editor, all three: the plane is where they live (Item 212).
+            for (const p of [a, b, c]) { await d.open(app.vault.getAbstractFileByPath(p)); await sleep(300); }
+            const has = (p) => g.egoUrls.has("vault://" + app.vault.getName() + "/" + p);
+            for (let k = 0; k < 40 && !(has(a) && has(b) && has(c)); k++) await sleep(250);
+            out.in_ego = has(a) && has(b) && has(c);
+            g.egoRefs.clear();
+            out.links_b = await g.egoLinksOf(b);
+            out.links_c = await g.egoLinksOf(c);
+            out.var_3d = out.links_b.includes(a);
+            out.md_3d = out.links_c.includes(a);
+            d.drawLinks(); await sleep(300);
+            const pairs = d.linkStats.pairs || [];
+            const R = [a, b, c].map((p) => d.panelOf(p)?.card?.getBoundingClientRect());
+            out.overlap = R.some((r, i) => r && R.some((q, k) => k > i && q && r.left < q.right && q.left < r.right && r.top < q.bottom && q.top < r.bottom));
+            out.var_2d = pairs.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
+            return out;
+          } finally {
+            g.plantNoEgoVarLinks = false; window.__domvecPlantCascade = false;
+            for (const p of [a, b, c]) { try { d.closePath(p); } catch {} }
+            await sleep(500);
+            for (const p of [a, b, c]) { const f = app.vault.getAbstractFileByPath(p); if (f) await app.vault.delete(f).catch(() => 0); }
+          }
+        })()`, { timeout: 60000 });
+        const clean = await arm(false), planted = await arm(true);
+        const ok = !!clean && !clean.error && clean.in_ego && clean.var_3d && clean.md_3d && clean.var_2d && !clean.overlap;
+        return { pass: ok && !!planted && !planted.error && !planted.var_3d && planted.md_3d && planted.overlap, evidence: { clean, planted } };
+      },
+    },
+    {
       id: "G-431",
       asks: "everything is a plugin (G-240, Addendum XI 169): the block features are extensions in named slots -- the running plugin has agent, chat and tool loaded in codeblock slots; its own Slots, given an extension claiming the core's python slot, one that throws, and one switched off, refuses the first (it never runs), records and skips the second, leaves the third unloaded, and loads the rest; the core runs on (the cockpit opens); planted (__domvecPlantNoSlotGuard) the core slot is taken",
       async run() {
@@ -24703,7 +24748,531 @@ export function makeChecks(env) {
         };
       },
     },
+    {
+      id: "G-456",
+      asks: "cell-wise cursor-gated ```chunk web-chunk & editor unification on BOTH the 2D plane card and a tab (PLUGIN_GOAL 207 a, 212): cursor outside renders the distilled page/HTML view (.domvec-chunk-cell-page shadow DOM, redundant .domvec-switch hidden) and auto-hydrates markdown + {\"chunk\": ...} affordances; cursor inside unfolds raw markdown + inline .domvec-chunk-inline-tool widgets; planted (__domvecPlantNoChunkCell) renders neither",
+      async run() {
+        const arm = (planted, surface = "plane") => evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+          const pl = app.plugins.getPlugin("domvec-bridge"), desk = window.__domvecPlane;
+          window.__domvecPlantNoChunkCell = ${planted};
+          await window.__domvec.act("open", "graph"); await sleep(600);
+          // Pick a stored web chunk (preferring one with interactive controls).
+          let cid = "", pay = null;
+          for (const q of ["search", "input", "trie", "the"]) {
+            const sr = await pl.sidecar.search(q, { k: 20 });
+            for (const h of (sr?.hits || [])) {
+              if (!h.cid || String(h.url || "").startsWith("vault://") || String(h.url || "").startsWith("code://")) continue;
+              const p = await pl.sidecar.chunk(h.cid);
+              if (p && Array.isArray(p.lines) && p.lines.length) {
+                if (!cid) { cid = h.cid; pay = p; }
+                if (Array.isArray(p.controls) && p.controls.length) { cid = h.cid; pay = p; break; }
+              }
+            }
+            if (pay && Array.isArray(pay.controls) && pay.controls.length) break;
+          }
+          if (!cid) return { error: "no stored web chunk found" };
+          const hasNativeControls = Array.isArray(pay.controls) && pay.controls.length > 0;
+          const fallbackTool = JSON.stringify({ chunk: { cid, click: "open topic", address: (pay.url || "https://example.org") + " :: /html/body/a[1]", chunks: false } });
+          const initFence = hasNativeControls
+            ? F + "chunk" + NL + "cid: " + cid + NL + F
+            : F + "chunk" + NL + "cid: " + cid + NL + "---" + NL + (pay.lines[0]?.text || "distilled line") + NL + NL + fallbackTool + NL + F;
+          const path = "domvec-checks/g456-" + "${surface}" + "-" + (${planted} ? "p-" : "c-") + Date.now().toString(36) + ".md";
+          if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+          const f = await app.vault.create(path, "# Chunk cell check" + NL + NL + "Lead paragraph outside fence." + NL + NL + initFence + NL + NL + "Trailing paragraph." + NL);
+          let leaf = null, view = null, root = null;
+          try {
+            if ("${surface}" === "plane") {
+              await desk.open(f); await sleep(800);
+              view = desk.viewOf(path);
+              root = desk.panelOf(path)?.card || view?.containerEl;
+            } else {
+              leaf = app.workspace.getLeaf("tab");
+              await leaf.openFile(f, { state: { mode: "source", source: false } }); await sleep(800);
+              view = leaf.view;
+              root = view?.containerEl;
+            }
+            if (!view?.editor || !root) return { error: "no editor on " + "${surface}" };
+            const ed = view.editor;
+            ed.focus();
+            ed.setCursor({ line: 0, ch: 0 });
+            let chunkEl = null, shadowN = 0;
+            for (let k = 0; k < 25; k++) {
+              await sleep(200);
+              chunkEl = root.querySelector(".domvec-chunk-cell");
+              const host = chunkEl?.querySelector(".domvec-html-host");
+              shadowN = host?.shadowRoot ? host.shadowRoot.querySelectorAll("*").length : 0;
+              if (chunkEl && shadowN > 0) break;
+            }
+            const sw = chunkEl?.querySelector(".domvec-switch");
+            const switchHidden = !sw || getComputedStyle(sw).display === "none" || sw.offsetHeight === 0;
+            await sleep(300);
+            const hydratedText = await app.vault.read(f);
+            const hasSep = hydratedText.includes("---");
+            const hasToolDict = hydratedText.includes('{"chunk":');
+            // Move cursor INSIDE the chunk fence -> raw markdown + inline tool widgets!
+            const lines = ed.getValue().split(NL);
+            const openIdx = lines.findIndex((l) => l.trim().startsWith(F + "chunk"));
+            if (openIdx >= 0) {
+              ed.focus();
+              ed.setCursor({ line: openIdx + 1, ch: 0 });
+            }
+            let inlineWidgets = 0;
+            for (let k = 0; k < 20; k++) {
+              await sleep(150);
+              inlineWidgets = root.querySelectorAll(".domvec-chunk-inline-tool").length;
+              if (inlineWidgets > 0) break;
+            }
+            const rawVisibleInside = root.textContent.includes('{"chunk":') || inlineWidgets > 0;
+            // Move cursor back OUTSIDE -> page view returns!
+            ed.setCursor({ line: 0, ch: 0 });
+            let pageReturned = false;
+            for (let k = 0; k < 20; k++) {
+              await sleep(150);
+              if (root.querySelector(".domvec-chunk-cell")) { pageReturned = true; break; }
+            }
+            return {
+              planted: ${planted},
+              surface: "${surface}",
+              cid,
+              outside_page_rendered: !!chunkEl && shadowN > 0,
+              shadow_elements: shadowN,
+              switch_hidden: switchHidden,
+              hydrated_separator: hasSep,
+              hydrated_tool_dict: hasToolDict,
+              inside_inline_tools: inlineWidgets,
+              inside_raw_visible: rawVisibleInside,
+              outside_returned: pageReturned,
+              planted_pre: !!root.querySelector(".domvec-chunk-planted"),
+            };
+          } finally {
+            window.__domvecPlantNoChunkCell = false;
+            try { desk.closePath(path); } catch (e) {}
+            if (leaf) { try { leaf.detach(); } catch (e) {} }
+            await sleep(250);
+            const x = app.vault.getAbstractFileByPath(path); if (x) await app.vault.delete(x).catch(() => 0);
+          }
+        })()`, { timeout: 60000 });
+        const plane = await arm(false, "plane");
+        const tab = await arm(false, "tab");
+        const planted = await arm(true, "plane");
+        const good = (c) => !!c && !c.error && c.outside_page_rendered && c.switch_hidden && c.hydrated_separator && c.hydrated_tool_dict && c.inside_inline_tools >= 1 && c.outside_returned;
+        const caught = !!planted && !planted.error && !planted.outside_page_rendered && planted.inside_inline_tools === 0 && planted.planted_pre;
+        return { pass: good(plane) && good(tab) && caught, evidence: { plane, tab, planted } };
+      },
+    },
+    {
+      id: "G-457",
+      asks: "minimal Python gym API mirroring every ```tool cell on BOTH the 2D plane card and a tab (PLUGIN_GOAL 207 b, 212): Browser.chunks (BeautifulSoup-style find/select/.text/.links/.controls + .to_cell()), Browser.chain()...to_tool_calls()/.perform(), Tools.schemas()/Tools.cell(), and Search.query() run in the note kernel; planted (no-gym-api) omits Browser/Tools and is caught",
+      async run() {
+        const setPlant = async (on) => {
+          const sbase = await evaluate(`(() => app.plugins.getPlugin("domvec-bridge").settings.sidecar.replace(/\\/+$/, ""))()`);
+          const res = await fetch(sbase + "/plant", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Domvec-Client": "obsidian-plugin" },
+            body: JSON.stringify({ name: "no-gym-api", on }),
+          });
+          if (!res.ok) throw new Error("/plant -> " + res.status);
+        };
+        const runArm = async (planted, surface = "plane") => {
+          await setPlant(planted);
+          try {
+            return await evaluate(`(async () => {
+              const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+              const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10);
+              const pl = app.plugins.getPlugin("domvec-bridge"), desk = window.__domvecPlane;
+              await window.__domvec.act("open", "graph"); await sleep(500);
+              const path = "domvec-checks/g457-" + "${surface}" + "-" + (${planted} ? "p-" : "c-") + Date.now().toString(36) + ".md";
+              if (!app.vault.getAbstractFileByPath("domvec-checks")) await app.vault.createFolder("domvec-checks").catch(() => 0);
+              const code = [
+                "import json",
+                "hits = Search.query('trie', k=3)",
+                "chain_calls = Browser.chain().search('patricia trie').next_chunk().to_tool_calls()",
+                "schemas = Tools.schemas()",
+                "cell_md = Tools.cell({'search': {'query': 'trie', 'k': 3}})",
+                "chunk_cell = Browser.chunks[0].to_cell() if len(Browser.chunks) else (Browser.chunk(hits[0]['cid']).to_cell() if hits else '')",
+                "print(json.dumps({'hits': len(hits), 'chain': chain_calls, 'has_browser': 'browser' in schemas, 'has_code': 'code' in schemas, 'tool_fence': cell_md.startswith(chr(96)*3 + 'tool'), 'chunk_fence': chunk_cell.startswith(chr(96)*3 + 'chunk')}))"
+              ].join(NL);
+              const f = await app.vault.create(path, "# Gym API check" + NL + NL + F + "python" + NL + code + NL + F + NL);
+              let leaf = null, view = null;
+              try {
+                if ("${surface}" === "plane") {
+                  await desk.open(f); await sleep(600);
+                  view = desk.viewOf(path);
+                } else {
+                  leaf = app.workspace.getLeaf("tab");
+                  await leaf.openFile(f, { state: { mode: "source", source: false } }); await sleep(600);
+                  view = leaf.view;
+                }
+                const rep = await pl.onRunFence({ path, line: 2, lang: "python", code, quiet: true });
+                const noteBody = view?.editor ? view.editor.getValue() : await app.vault.read(f);
+                let parsed = null;
+                try { parsed = JSON.parse(String(rep?.stdout || "").trim()); } catch (e) {}
+                return {
+                  planted: ${planted},
+                  surface: "${surface}",
+                  ok: !!rep?.ok,
+                  error: rep?.error || "",
+                  parsed,
+                  in_editor: noteBody.includes("nb-output"),
+                };
+              } finally {
+                try { await pl.sidecar.restartKernel(path); } catch (e) {}
+                try { desk.closePath(path); } catch (e) {}
+                if (leaf) { try { leaf.detach(); } catch (e) {} }
+                await sleep(200);
+                const x = app.vault.getAbstractFileByPath(path); if (x) await app.vault.delete(x).catch(() => 0);
+              }
+            })()`, { timeout: 60000 });
+          } finally {
+            await setPlant(false);
+          }
+        };
+        const plane = await runArm(false, "plane");
+        const tab = await runArm(false, "tab");
+        const planted = await runArm(true, "plane");
+        const good = (c) => !!c && c.ok && c.in_editor && c.parsed
+          && c.parsed.hits >= 1
+          && Array.isArray(c.parsed.chain) && c.parsed.chain.length === 2
+          && c.parsed.chain[0]?.browser?.search === "patricia trie"
+          && c.parsed.chain[1]?.browser?.next_chunk === true
+          && c.parsed.has_browser && c.parsed.has_code
+          && c.parsed.tool_fence && c.parsed.chunk_fence;
+        const caught = !!planted && !planted.ok && /NameError.*Browser/.test(planted.error || "");
+        return { pass: good(plane) && good(tab) && caught, evidence: { plane, tab, planted } };
+      },
+    },
+    {
+      id: "G-458",
+      asks: "domvec/ego.md as a plain reference notebook example of the full toolspace APIs & docs on BOTH the 2D plane card and a tab (PLUGIN_GOAL 207 c, 212; supersedes G-418): retires fancy per-view cockpit settings (no domvec: slate, no throttle = / view = \"ego\"), preserves ## System prompt + ## <Type> cells, and opens cleanly >= 300px tall; planted (__domvecPlantLegacyEgoCockpit) restores legacy throttle cockpit",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => new Promise((res) => setTimeout(res, ms)).then(r));
+          const pl = app.plugins.getPlugin("domvec-bridge"), desk = window.__domvecPlane;
+          await window.__domvec.act("open", "graph"); await sleep(600);
+          const egoFile = app.vault.getAbstractFileByPath("domvec/ego.md");
+          const savedText = egoFile ? await app.vault.read(egoFile) : null;
+          let tabLeaf = null;
+          try {
+            // Seed legacy text first to prove cockpit.open() upgrades it cleanly to the reference notebook!
+            const F = String.fromCharCode(96).repeat(3);
+            if (egoFile) {
+              await app.vault.modify(egoFile, '# ego\\n\\nThe cockpit: what the craft flies.\\n\\n' + F + 'python\\nview = "ego"\\nthrottle = 20\\n' + F + '\\n\\n## System prompt\\n\\nKeep replies concise.\\n');
+            }
+            window.__domvecPlantLegacyEgoCockpit = false;
+            const v = await pl.cockpit.open(); await sleep(700);
+            const cleanText = v?.editor ? v.editor.getValue() : (egoFile ? await app.vault.read(egoFile) : "");
+            const cardRect = pl.cockpit.card?.getBoundingClientRect();
+            const slateLayers = v?.containerEl ? v.containerEl.querySelectorAll(".domvec-var, .domvec-slate-reveal-line, .domvec-slate-graph").length : -1;
+            // Also verify in a standard Obsidian tab (Item 212 parity).
+            tabLeaf = app.workspace.getLeaf("tab");
+            const efNow = app.vault.getAbstractFileByPath("domvec/ego.md");
+            await tabLeaf.openFile(efNow, { state: { mode: "source", source: false } }); await sleep(600);
+            const tabText = tabLeaf.view?.editor?.getValue() || "";
+            tabLeaf.detach(); tabLeaf = null; await sleep(200);
+
+            // Planted arm: legacy per-view cockpit restored behind __domvecPlantLegacyEgoCockpit.
+            window.__domvecPlantLegacyEgoCockpit = true;
+            if (efNow) await app.vault.modify(efNow, '# ego\\n\\n' + F + 'python\\nview = "ego"\\nthrottle = 20\\n' + F + '\\n');
+            const vp = await pl.cockpit.open(); await sleep(500);
+            const plantedText = efNow ? await app.vault.read(efNow) : (vp?.editor ? vp.editor.getValue() : "");
+
+            // Restore clean reference notebook!
+            window.__domvecPlantLegacyEgoCockpit = false;
+            if (efNow) {
+              await app.vault.modify(efNow, cleanText);
+              await pl.cockpit.open(); await sleep(400);
+            }
+            return {
+              clean: {
+                has_heading: /^# ego/m.test(cleanText),
+                has_gym_browser: cleanText.includes("Browser.chunks") && cleanText.includes("Browser.chain()"),
+                has_search_tools: cleanText.includes("Search.query") && cleanText.includes("Tools.schemas()"),
+                has_tool_fence: cleanText.includes(String.fromCharCode(96).repeat(3) + "tool"),
+                has_sys_prompt: cleanText.includes("## System prompt") && cleanText.includes("Keep replies concise."),
+                no_legacy_view: !/^\s*view\s*=\s*"ego"/m.test(cleanText) && !/^\s*throttle\s*=/m.test(cleanText) && !cleanText.includes("domvec: slate"),
+                slate_layers: slateLayers,
+                card_height: Math.round(cardRect?.height || 0),
+                tab_matches_plane: tabText === cleanText,
+              },
+              planted: {
+                has_legacy_throttle: /^\s*throttle\s*=/m.test(plantedText),
+              },
+            };
+          } finally {
+            window.__domvecPlantLegacyEgoCockpit = false;
+            if (tabLeaf) { try { tabLeaf.detach(); } catch (e) {} }
+            if (savedText !== null && !/^\s*throttle\s*=/m.test(savedText) && !savedText.includes("The cockpit: what the craft flies")) {
+              const ef = app.vault.getAbstractFileByPath("domvec/ego.md");
+              if (ef) await app.vault.modify(ef, savedText);
+            }
+          }
+        })()`, { timeout: 60000 });
+        const c = got?.clean || {}, p = got?.planted || {};
+        const ok = !!c.has_heading && c.has_gym_browser && c.has_search_tools && c.has_tool_fence
+          && c.has_sys_prompt && c.no_legacy_view && c.slate_layers === 0 && c.card_height >= 300 && c.tab_matches_plane;
+        return { pass: ok && !!p.has_legacy_throttle, evidence: got };
+      },
+    },
+    {
+      id: "G-459",
+      asks: "workspace notebooks & modules as dual Python API + ```tool surfaces with strictly ephemeral library UI on BOTH the 2D plane and tabs (PLUGIN_GOAL 207 d, 212): documented notebook functions cross notebooks as Python callables AND register as notebook.<stem> ```tool schemas while stdlib/third-party imports stay ephemeral (ephemeral: true, excluded from tool schemas); planted (lib-tools) leaks stdlib into tool schemas",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10), Q = String.fromCharCode(34).repeat(3);
+          const pl = app.plugins.getPlugin("domvec-bridge"), desk = window.__domvecPlane;
+          await window.__domvec.act("open", "graph"); await sleep(500);
+          const tag = Date.now().toString(36);
+          const stem = "g459_weights_" + tag;
+          const libPath = "domvec/graph/" + stem + ".md";
+          const callPath = "domvec/graph/g459_caller_" + tag + ".md";
+          const libCode = [
+            "import math",
+            "",
+            "def scale_chunk(score: float, boost: int = 2) -> float:",
+            "    " + Q + "Scale a chunk score by boost." + Q,
+            "    return round(score * boost, 3)",
+          ].join(NL);
+          const callCode = "print(scale_chunk(3.5, 4))";
+          let tabLeaf = null;
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec/graph")) await app.vault.createFolder("domvec/graph").catch(() => 0);
+            const fLib = await app.vault.create(libPath, "# " + stem + NL + NL + "Weighting helpers for patricia-trie chunks." + NL + NL + F + "python" + NL + libCode + NL + F + NL);
+            const fCall = await app.vault.create(callPath, "# caller" + NL + NL + "Uses [" + stem + "](" + encodeURI(libPath) + ")." + NL + NL + F + "python" + NL + callCode + NL + F + NL);
+            await desk.open(fLib); await desk.open(fCall); await sleep(700);
+            await pl.crossRun.build();
+            // 1. Cross-notebook Python callable execution on 2D plane AND tab (Item 212).
+            const repPlane = await pl.onRunFence({ path: callPath, line: 4, lang: "python", code: callCode, quiet: true });
+            tabLeaf = app.workspace.getLeaf("tab");
+            await tabLeaf.openFile(fCall, { state: { mode: "source", source: false } }); await sleep(500);
+            const tabHasOut = (tabLeaf.view?.editor?.getValue() || "").includes("14.0");
+
+            // 2. Dual tool-cell surface: notebook.<stem> exposed with docstring & prose context; math excluded!
+            const notes = await pl.collectWorkspaceNotes(callPath);
+            const cleanTools = await pl.sidecar.codeIntel({ op: "notebook_tools", notes, plant_lib_tools: false });
+            const nsKey = "notebook." + stem;
+            const toolCallRes = await fetch(pl.settings.sidecar.replace(/\\/+$/, "") + "/tool_cell", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ note: callPath, spec: { [nsKey]: { call: "scale_chunk", args: { score: 3.5, boost: 4 } } } }),
+            }).then((r) => r.json());
+
+            // 3. Library UI completions carry ephemeral: true.
+            const comp = await pl.sidecar.codeIntel({
+              op: "complete",
+              cells: ["import math\\nmath.sq"],
+              cell_index: 0,
+              line: 2,
+              col: 7,
+            });
+            const sqrtItem = (comp?.items || comp?.completions || []).find((c) => c.label === "sqrt");
+
+            // 4. Planted arm: plant_lib_tools leaks external library math into procedural tool schemas.
+            const plantedTools = await pl.sidecar.codeIntel({ op: "notebook_tools", notes, plant_lib_tools: true });
+
+            const cleanSchemas = cleanTools?.schemas || {};
+            const plantedSchemas = plantedTools?.schemas || {};
+            const leakedOf = (sc) => (sc[nsKey]?.functions || []).filter((f) => f.is_external_library || f.name === "math").map((f) => f.name);
+            return {
+              clean: {
+                callable_stdout: String(repPlane?.stdout || "").trim(),
+                tab_has_output: tabHasOut,
+                has_notebook_tool: !!cleanSchemas[nsKey],
+                fn_names: (cleanSchemas[nsKey]?.functions || []).map((f) => f.name),
+                fn_doc: cleanSchemas[nsKey]?.functions?.[0]?.docstring || "",
+                leaked_lib_keys: leakedOf(cleanSchemas),
+                tool_cell_result: toolCallRes?.result?.value ?? null,
+                math_sqrt_ephemeral: !!sqrtItem?.ephemeral,
+              },
+              planted: {
+                leaked_lib_keys: leakedOf(plantedSchemas),
+              },
+            };
+          } finally {
+            try { await pl.sidecar.restartKernel(libPath); await pl.sidecar.restartKernel(callPath); } catch (e) {}
+            try { desk.closePath(libPath); desk.closePath(callPath); } catch (e) {}
+            if (tabLeaf) { try { tabLeaf.detach(); } catch (e) {} }
+            await sleep(250);
+            for (const p of [libPath, callPath]) {
+              const x = app.vault.getAbstractFileByPath(p); if (x) await app.vault.delete(x).catch(() => 0);
+            }
+          }
+        })()`, { timeout: 60000 });
+        const c = got?.clean || {}, p = got?.planted || {};
+        const ok = c.callable_stdout === "14.0" && c.tab_has_output && c.has_notebook_tool
+          && Array.isArray(c.fn_names) && c.fn_names.includes("scale_chunk")
+          && c.fn_doc.includes("Scale a chunk score")
+          && Array.isArray(c.leaked_lib_keys) && c.leaked_lib_keys.length === 0
+          && c.tool_cell_result === 14
+          && c.math_sqrt_ephemeral === true;
+        const caught = Array.isArray(p.leaked_lib_keys) && p.leaked_lib_keys.length > 0;
+        return { pass: ok && caught, evidence: got };
+      },
+    },
+    {
+      id: "G-460",
+      asks: "embedding-model-scoped docstring + artifact-link multi-graph RAG & cross-notebook F2 code-editing tools on BOTH the 2D plane and tabs (PLUGIN_GOAL 207 e, 212; closes G-238): graph_rag and /search enforce embedding_model scope, traverse code_graph + [title](encodeURI(path)) artifact_links + web_kg, and token-safe F2 rename updates across notebooks without touching comments or .attr; planted (unscoped) accepts mismatched embedding models",
+      async run() {
+        const got = await evaluate(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const F = String.fromCharCode(96).repeat(3), NL = String.fromCharCode(10), Q = String.fromCharCode(34).repeat(3);
+          const pl = app.plugins.getPlugin("domvec-bridge"), desk = window.__domvecPlane;
+          await window.__domvec.act("open", "graph"); await sleep(500);
+          const tag = Date.now().toString(36);
+          const defPath = "domvec/graph/g460_defs_" + tag + ".md";
+          const usePath = "domvec/graph/g460_user_" + tag + ".md";
+          const defCode = [
+            "# rank_metric comment stays untouched",
+            "def rank_metric(x: int) -> int:",
+            "    " + Q + "Compute patricia trie rank metric for x." + Q,
+            "    return x + 10",
+          ].join(NL);
+          const useCode = [
+            "class Holder:",
+            "    rank_metric = 99",
+            "h = Holder()",
+            "val = rank_metric(5) + h.rank_metric",
+          ].join(NL);
+          let tabLeaf = null;
+          try {
+            if (!app.vault.getAbstractFileByPath("domvec/graph")) await app.vault.createFolder("domvec/graph").catch(() => 0);
+            const fDef = await app.vault.create(defPath, "# defs" + NL + NL + "Core ranking module." + NL + NL + F + "python" + NL + defCode + NL + F + NL);
+            const fUse = await app.vault.create(usePath, "# user" + NL + NL + "See [defs](" + encodeURI(defPath) + ") for rank_metric." + NL + NL + F + "python" + NL + useCode + NL + F + NL);
+            await desk.open(fDef); await desk.open(fUse); await sleep(700);
+
+            const notes = await pl.collectWorkspaceNotes(usePath);
+            // 1. Multi-graph RAG (code_graph + artifact_links + web_kg + embedding_model scope).
+            const ragClean = await pl.sidecar.codeIntel({
+              op: "graph_rag",
+              query: "patricia trie rank metric",
+              note: usePath,
+              cells: [useCode],
+              notes,
+            });
+            const activeModel = ragClean?.embedding_model || "";
+            const ragMismatchClean = await pl.sidecar.codeIntel({
+              op: "graph_rag",
+              query: "patricia trie rank metric",
+              note: usePath,
+              cells: [useCode],
+              notes,
+              embedding_model: "wrong-embedding-model-v0",
+            });
+            const ragMismatchPlanted = await pl.sidecar.codeIntel({
+              op: "graph_rag",
+              query: "patricia trie rank metric",
+              note: usePath,
+              cells: [useCode],
+              notes,
+              embedding_model: "wrong-embedding-model-v0",
+              plant_unscoped: true,
+            });
+            const base = pl.settings.sidecar.replace(/\\/+$/, "");
+            const searchMismatch = await fetch(base + "/search?q=trie&k=3&embedding_model=wrong-embedding-model-v0").then((r) => r.json());
+            const searchMatch = activeModel
+              ? await fetch(base + "/search?q=trie&k=3&embedding_model=" + encodeURIComponent(activeModel)).then((r) => r.json())
+              : null;
+
+            // 2. Cross-notebook references + token-safe F2 rename on the 2D plane card AND reflected in tab (Item 212).
+            const vDef = desk.viewOf(defPath);
+            const cmDef = vDef?.editor?.cm;
+            const docStr = cmDef.state.doc.toString();
+            const defPos = docStr.indexOf("def rank_metric") + 5;
+            const refsBefore = await window.__domvecCodeCell.referencesInFence(cmDef, defPos);
+            const renamed = await window.__domvecCodeCell.renameInFence(cmDef, defPos, "boost_metric");
+            await sleep(500);
+            const defAfterPlane = vDef.editor.getValue();
+            const useAfterPlane = desk.viewOf(usePath)?.editor?.getValue() || await app.vault.read(fUse);
+
+            tabLeaf = app.workspace.getLeaf("tab");
+            await tabLeaf.openFile(fUse, { state: { mode: "source", source: false } }); await sleep(500);
+            const useAfterTab = tabLeaf.view?.editor?.getValue() || "";
+
+            // 3. §5.3 "code" toolspace seam via /tool_cell.
+            const codeTool = await fetch(base + "/tool_cell", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ note: usePath, spec: { code: { search: "boost_metric", notes: await pl.collectWorkspaceNotes(usePath) } } }),
+            }).then((r) => r.json());
+
+            return {
+              clean: {
+                rag_ok: !!ragClean?.ok,
+                embedding_model: activeModel,
+                code_graph_n: (ragClean?.code_graph || []).length,
+                artifact_links_notes: (ragClean?.artifact_links || []).map((x) => x.note),
+                has_web_kg_field: Array.isArray(ragClean?.web_kg),
+                mismatch_refused: ragMismatchClean?.ok === false && !!ragMismatchClean?.scoped_refused,
+                search_mismatch_refused: !!searchMismatch?.error && (searchMismatch?.hits || []).length === 0,
+                search_match_hits: (searchMatch?.hits || []).length,
+                refs_notes: [...new Set((refsBefore || []).map((r) => r.note))],
+                renamed,
+                def_renamed: defAfterPlane.includes("def boost_metric("),
+                comment_preserved: defAfterPlane.includes("# rank_metric comment stays untouched"),
+                caller_renamed: useAfterPlane.includes("boost_metric(5)"),
+                attr_preserved: useAfterPlane.includes("h.rank_metric"),
+                tab_synced: useAfterTab.includes("boost_metric(5)") && useAfterTab.includes("h.rank_metric"),
+                code_tool_ok: !!codeTool?.ok && !!codeTool?.result?.embedding_model,
+              },
+              planted: {
+                mismatch_accepted: ragMismatchPlanted?.ok === true && ragMismatchPlanted?.embedding_model === "unscoped",
+              },
+            };
+          } finally {
+            try { desk.closePath(defPath); desk.closePath(usePath); } catch (e) {}
+            if (tabLeaf) { try { tabLeaf.detach(); } catch (e) {} }
+            await sleep(250);
+            for (const p of [defPath, usePath]) {
+              const x = app.vault.getAbstractFileByPath(p); if (x) await app.vault.delete(x).catch(() => 0);
+            }
+          }
+        })()`, { timeout: 60000 });
+        const c = got?.clean || {}, p = got?.planted || {};
+        const ok = c.rag_ok && !!c.embedding_model && c.embedding_model !== "unscoped"
+          && c.code_graph_n >= 1 && Array.isArray(c.artifact_links_notes) && c.artifact_links_notes.some((n) => n.includes("g460_defs_"))
+          && c.has_web_kg_field && c.mismatch_refused && c.search_mismatch_refused && c.search_match_hits >= 1
+          && c.refs_notes.length >= 2 && c.renamed && c.def_renamed && c.comment_preserved
+          && c.caller_renamed && c.attr_preserved && c.tab_synced && c.code_tool_ok;
+        return { pass: ok && !!p.mismatch_accepted, evidence: got };
+      },
+    },
   ];
+
+  // SUPERSEDED by PLUGIN_GOAL 207 c (G-458: ego.md as plain reference notebook example,
+  // retiring per-view throttle/query cockpit settings). G-418 runs against its retained
+  // legacy path (__domvecPlantLegacyEgoCockpit) and restores clean ego.md afterwards.
+  const SUPERSEDED_BY_207 = new Set(["G-418"]);
+  for (const c of CHECKS) {
+    if (!SUPERSEDED_BY_207.has(c.id)) continue;
+    const orig = c.run.bind(c);
+    c.asks = "[superseded by PLUGIN_GOAL 207 c (G-458); run on retained legacy cockpit] " + c.asks;
+    c.run = async () => {
+      const saved = await env.evaluate(`(async () => {
+        window.__domvecPlantLegacyEgoCockpit = true;
+        const F = String.fromCharCode(96).repeat(3);
+        const f = app.vault.getAbstractFileByPath("domvec/ego.md");
+        const prev = f ? await app.vault.read(f) : null;
+        if (f) await app.vault.modify(f, '# ego\\n\\nThe cockpit.\\n\\n' + F + 'python\\nview = "ego"\\nthrottle = 20\\nquery = ""\\n' + F + '\\n');
+        return prev;
+      })()`, { timeout: 10000 });
+      try {
+        const r = await orig();
+        return { ...r, evidence: { superseded: "PLUGIN_GOAL 207 c (G-458)", ...(r.evidence || {}) } };
+      } finally {
+        await env.evaluate(`(async () => {
+          window.__domvecPlantLegacyEgoCockpit = false;
+          const f = app.vault.getAbstractFileByPath("domvec/ego.md");
+          const prev = ${JSON.stringify(saved)};
+          if (f && prev) await app.vault.modify(f, prev);
+          const pl = app.plugins.getPlugin("domvec-bridge");
+          if (pl?.cockpit) await pl.cockpit.open();
+          return true;
+        })()`, { timeout: 10000 });
+      }
+    };
+  }
 
   // SUPERSEDED by PLUGIN_GOAL 183 (G-399: no graph form in 2D). These checks
   // asked for the slate's graph form or the ground flip; both are retired, and

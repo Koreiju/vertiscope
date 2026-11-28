@@ -35,7 +35,7 @@ export function watchTabDrags(app: App): () => void {
 }
 
 /** Make `plane` accept notes dragged from tabs or the file list. */
-export function acceptTabDrops(app: App, plane: HTMLElement, open: (f: TFile, at: { x: number; y: number }) => Promise<any>): void {
+export function acceptTabDrops(app: App, plane: HTMLElement, open: (f: TFile, at: { x: number; y: number }) => Promise<any>, isCurrent: () => boolean = () => true): void {
   // The plane element can outlive a plugin reload. A callback bound once would
   // keep calling the UNLOADED instance's `open` (tab drops did nothing after a
   // reload, 2026-11-28). So one trampoline is registered per plane and always
@@ -57,12 +57,14 @@ export function acceptTabDrops(app: App, plane: HTMLElement, open: (f: TFile, at
       tabDragStats.in++; tabDragStats.last = "in " + f.path;
     });
   };
-  host.__domvecTabDropImpl = cb;
-  if (!host.__domvecTabDropTramp) {
-    host.__domvecTabDropTramp = (evt: DragEvent, draggable: any, isOver: boolean) => host.__domvecTabDropImpl?.(evt, draggable, isOver);
-    dm?.handleDrop?.(plane, host.__domvecTabDropTramp);
+  // Only the CURRENT desk installs its handler (a dead one's timer must not).
+  if (!isCurrent()) return;
+  host.__domvecTabDropImpl2 = cb;
+  if (!host.__domvecTabDropTramp2) {
+    host.__domvecTabDropTramp2 = (evt: DragEvent, draggable: any, isOver: boolean) => host.__domvecTabDropImpl2?.(evt, draggable, isOver);
+    dm?.handleDrop?.(plane, host.__domvecTabDropTramp2);
   }
-  host.__domvecTabDropCb = host.__domvecTabDropTramp;
+  host.__domvecTabDropCb = host.__domvecTabDropTramp2;
 }
 
 /** A card dropped at (x, y): over a tab bar, it opens there as a tab; true when taken. */
